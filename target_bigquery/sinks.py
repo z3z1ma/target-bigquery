@@ -214,6 +214,12 @@ class BigQueryStreamingSink(BaseBigQuerySink):
             return
         self.start_drain()
 
+        keys = self.key_properties
+        insert_ids = []
+        if keys:
+            for row in self.records_to_drain:
+                insert_ids.append("--".join(str(row[k]) for k in keys))
+
         # Monkey patching this at call-time is ugly but gcloud hasn't updated their interfaces
         # For custom JSON serializers which is a pain
         cached_ref = _http.json
@@ -222,6 +228,7 @@ class BigQueryStreamingSink(BaseBigQuerySink):
             table=self._table,
             json_rows=self.records_to_drain,
             timeout=self.config["timeout"],
+            row_ids=insert_ids if insert_ids else None
         )
         _http.json = cached_ref
 
