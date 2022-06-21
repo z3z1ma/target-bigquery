@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, cast
 
 import orjson
 import smart_open
-from google.cloud import bigquery, storage
+from google.cloud import _http, bigquery, storage
 from memoization import cached
 from singer_sdk import PluginBase
 from singer_sdk.sinks import BatchSink
@@ -214,14 +214,16 @@ class BigQueryStreamingSink(BaseBigQuerySink):
             return
         self.start_drain()
 
-        cached_fn = json.dumps
-        json.dumps = orjson.dumps
+        # Monkey patching this at call-time is ugly but gcloud hasn't updated their interfaces
+        # For custom JSON serializers which is a pain
+        cached_ref = _http.json
+        _http.json = orjson
         errors = self._client.insert_rows_json(
             table=self._table,
             json_rows=self.records_to_drain,
             timeout=self.config["timeout"],
         )
-        json.dumps = cached_fn
+        _http.json = cached_ref
 
         if errors == []:
             self.logger.info("New rows have been added to %s.", self.stream_name)

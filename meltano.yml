@@ -48,7 +48,7 @@ plugins:
         - name: bucket
           description: The GCS bucket to use for staging data. Only used if method is gcs.
       config:
-        method: gcs
+        method: stream
         credentials_path: ${HOME}/.gcp/dwh-credentials.json
         dataset: raw_testing
         add_record_metadata: true
