@@ -75,7 +75,7 @@ class BigQuerySink(BatchSink):
 
     @property
     def max_size(self) -> int:
-        return 1_000
+        return 500
 
     def jsonschema_prop_to_bq_column(
         self, name: str, schema_property: dict
