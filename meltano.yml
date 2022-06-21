@@ -31,6 +31,9 @@ plugins:
         - name: timeout
           kind: integer
           value: 120
+        - name: max_size
+          kind: integer
+          value: 100
       config:
         credentials_path: ${HOME}/.gcp/dwh-credentials.json
         dataset: raw_testing
