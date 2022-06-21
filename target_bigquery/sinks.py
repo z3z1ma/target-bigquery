@@ -214,7 +214,7 @@ class BigQuerySink(BatchSink):
             self._table,
             rewind=True,
             num_retries=3,
-            timeout=30,
+            timeout=self.config["timeout"],
             job_config=bigquery.LoadJobConfig(
                 source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
                 schema_update_options=[
