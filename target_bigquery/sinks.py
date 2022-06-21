@@ -1,5 +1,6 @@
 """BigQuery target sink class, which handles writing streams."""
 import datetime
+import json
 import re
 from io import BytesIO
 from typing import Dict, List, Optional
@@ -74,7 +75,7 @@ class BigQuerySink(BatchSink):
 
     @property
     def max_size(self) -> int:
-        return 20_000
+        return 1_000
 
     def jsonschema_prop_to_bq_column(
         self, name: str, schema_property: dict
@@ -186,6 +187,40 @@ class BigQuerySink(BatchSink):
         if self._contains_coerced_field:
             return self._parse_json_with_props(record)
         return record
+
+    def process_record(self, record: dict, context: dict) -> None:
+        """Write record to buffer"""
+        self.records_to_drain.append(record)
+
+    def process_batch(self, context: dict) -> None:
+        """Write out any prepped records and return once fully written."""
+
+        if self.current_size == 0:
+            return
+        self.start_drain()
+
+        cached_fn = json.dumps
+        json.dumps = orjson.dumps
+        errors = self._client.insert_rows_json(
+            table=self._table,
+            json_rows=self.records_to_drain,
+            timeout=self.config["timeout"],
+        )
+        json.dumps = cached_fn
+
+        if errors == []:
+            self.logger.info("New rows have been added.")
+        else:
+            self.logger.info(
+                "Encountered errors while inserting rows: {}".format(errors)
+            )
+
+        self.mark_drained()
+        self.records_to_drain = []
+
+
+class BigQueryBufferSink(BigQuerySink):
+    """BigQuery target sink class."""
 
     def process_record(self, record: dict, context: dict) -> None:
         """Write record to buffer"""
