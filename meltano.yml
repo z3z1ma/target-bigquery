@@ -22,19 +22,34 @@ plugins:
       settings:
         - name: credentials_path
           env: GOOGLE_APPLICATION_CREDENTIALS
+          description: The path to a gcp credentials json file.
         - name: project
+          description: The target GCP project to materialize data into.
         - name: dataset
           value: ${MELTANO_EXTRACT__LOAD_SCHEMA}
+          description: The target dataset to materialize data into.
         - name: add_record_metadata
           kind: boolean
           value: true
+          description: Inject record metadata into the schema.
         - name: timeout
           kind: integer
           value: 120
-        - name: max_size
+        - name: threads
           kind: integer
-          value: 100
+          value: 8
+          description: The number of threads to use for writing to BigQuery.
+        - name: batch_size_limit
+          kind: integer
+          value: 10000
+          description: The maximum number of rows to send in a single batch.
+        - name: method
+          description: "The method to use for writing to BigQuery. Accepted values are: batch, stream, gcs"
+        - name: bucket
+          description: The GCS bucket to use for staging data. Only used if method is gcs.
       config:
+        method: gcs
         credentials_path: ${HOME}/.gcp/dwh-credentials.json
         dataset: raw_testing
         add_record_metadata: true
+        bucket: harness_analytics_staging
