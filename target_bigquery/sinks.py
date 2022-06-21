@@ -1,10 +1,8 @@
 """BigQuery target sink class, which handles writing streams."""
-import datetime
-import json
 import re
 from concurrent.futures import ThreadPoolExecutor
 from io import BufferedWriter, BytesIO
-from typing import Any, Dict, List, Optional, cast
+from typing import Dict, List, Optional, cast
 
 import orjson
 import smart_open
@@ -24,7 +22,7 @@ def bigquery_type(property_type: List[str], property_format: str) -> str:
     elif property_format == "time":
         return "time"
     elif "number" in property_type:
-        return "numeric"
+        return "float64"
     elif "integer" in property_type and "string" in property_type:
         return "string"
     elif "integer" in property_type:
@@ -71,9 +69,7 @@ class BaseBigQuerySink(BatchSink):
     ) -> None:
         super().__init__(target, stream_name, schema, key_properties)
         self._client = get_bq_client(self.config["credentials_path"])
-        self._table = (
-            f"{self.config['project']}.{self.config['dataset']}.{self.stream_name}"
-        )
+        self._table = f"{self.config['project']}.{self.config['dataset']}.{self.stream_name.lower()}"
         self._contains_coerced_field = False
         # BQ Schema resolution sets the coerced_fields property to True if any of the fields are coerced
         self.bigquery_schema = [
@@ -82,7 +78,7 @@ class BaseBigQuerySink(BatchSink):
         ]
         # Track Jobs
         self.job_queue = []
-        self.executor = ThreadPoolExecutor(self.config["threads"])
+        self.executor = ThreadPoolExecutor()
 
     @property
     def max_size(self) -> int:
@@ -164,6 +160,9 @@ class BaseBigQuerySink(BatchSink):
 
     def start_batch(self, context: dict) -> None:
         """Start a batch of records by ensuring the target exists."""
+        self.logger.info(
+            "Preparing batch %s in stream: %s", context["batch_id"], self.stream_name
+        )
         self._client.create_dataset(self.config["dataset"], exists_ok=True)
         table = self._client.create_table(
             bigquery.Table(
@@ -172,29 +171,34 @@ class BaseBigQuerySink(BatchSink):
             ),
             exists_ok=True,
         )
-        # TODO: If needed, new_schema = original_schema[:]  --> Creates a copy of the schema.
-        fields_to_add = []
-        original_schema = table.schema
-        for field in self.bigquery_schema:
-            if not field in table.schema:
-                fields_to_add.append(field)
-        if fields_to_add:
-            self.logger.info("Adding fields to table in stream: %s", self.stream_name)
-            new_schema = original_schema[:]
-            new_schema.extend(fields_to_add)
-            table.schema = new_schema
-            self._client.update_table(table, ["schema"])
+
+        """Schema Evolution
+        detected_change = []
+        original_schema = table.schema[:]
+        mutable_schema = table.schema[:]
+        for proper_field in self.bigquery_schema:
+            if proper_field not in original_schema:
+                # Action
+                detected_change.append(proper_field.name)
+                for mut_field in mutable_schema:
+                    if mut_field.name == proper_field.name:
+                        mut_field = proper_field
+                        break
+                else:
+                    mutable_schema.append(proper_field)
+        if detected_change:
+            table.schema = mutable_schema
+            self._client.update_table(
+                table,
+                ["schema"],
+                retry=bigquery.DEFAULT_RETRY.with_delay(1.0, 10.0, 2.0).with_deadline(
+                    15.0
+                ),
+                timeout=15,
+            )"""
 
     def preprocess_record(self, record: Dict, context: dict) -> dict:
         """Inject metadata if not present and asked for, coerce json paths to strings if needed."""
-        if self.config["add_record_metadata"]:
-            if "_sdc_extracted_at" not in record:
-                record["_sdc_extracted_at"] = datetime.datetime.now().isoformat()
-            if "_sdc_received_at" not in record:
-                record["_sdc_received_at"] = datetime.datetime.now().isoformat()
-        record["_sdc_batched_at"] = (
-            context.get("batch_start_time", None) or datetime.datetime.now()
-        ).isoformat()
         if self._contains_coerced_field:
             return self._parse_json_with_props(record)
         return record
@@ -214,11 +218,12 @@ class BigQueryStreamingSink(BaseBigQuerySink):
             return
         self.start_drain()
 
-        keys = self.key_properties
         insert_ids = []
-        if keys:
-            for row in self.records_to_drain:
-                insert_ids.append("--".join(str(row[k]) for k in keys))
+        (
+            insert_ids.append("--".join(str(row[k]) for k in self.key_properties))
+            for row in self.records_to_drain
+            if self.key_properties
+        )
 
         # Monkey patching this at call-time is ugly but gcloud hasn't updated their interfaces
         # For custom JSON serializers which is a pain
@@ -227,9 +232,11 @@ class BigQueryStreamingSink(BaseBigQuerySink):
         errors = self._client.insert_rows_json(
             table=self._table,
             json_rows=self.records_to_drain,
-            timeout=self.config["timeout"],
-            row_ids=insert_ids if insert_ids else None
+            timeout=15,
+            row_ids=insert_ids if insert_ids else None,
+            retry=bigquery.DEFAULT_RETRY.with_delay(1.0, 10.0, 2.0).with_deadline(15.0),
         )
+
         _http.json = cached_ref
 
         if errors == []:
@@ -275,7 +282,6 @@ class BigQueryBatchSink(BaseBigQuerySink):
             job_config=bigquery.LoadJobConfig(
                 source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
                 schema_update_options=[
-                    # bigquery.SchemaUpdateOption.ALLOW_FIELD_RELAXATION,
                     bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION,
                 ],
                 ignore_unknown_values=True,
@@ -287,7 +293,26 @@ class BigQueryBatchSink(BaseBigQuerySink):
                 f"Batch load job {resp.job_id} for {self.stream_name} completed."
             )
         )
-        self.job_queue.append(self.executor.submit(job.result))
+        try:
+            job.result(
+                retry=bigquery.DEFAULT_RETRY.with_delay(1.0, 10.0, 2.0).with_deadline(
+                    30.0
+                ),
+                timeout=30,
+            )
+        except Exception as err:
+            self.logger.info(job.errors)
+            self.logger.info(job.error_result)
+            raise err
+
+        """Queue-Based
+        self.job_queue.append(
+            self.executor.submit(
+                job.result,
+                retry=bigquery.DEFAULT_RETRY.with_delay(1.0, 10.0, 2.0).with_deadline(30.0),
+                timeout=30,
+            )
+        )"""
 
         # Flush the buffer
         data.seek(0)
@@ -351,7 +376,6 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
             job_config=bigquery.LoadJobConfig(
                 source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
                 schema_update_options=[
-                    # bigquery.SchemaUpdateOption.ALLOW_FIELD_RELAXATION,
                     bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION,
                 ],
                 ignore_unknown_values=True,
@@ -363,7 +387,16 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
                 f"GCS batch to BigQuery job {resp.job_id} for {self.stream_name} completed."
             )
         )
-        self.job_queue.append(self.executor.submit(job.result))
+        job.result(retry=bigquery.DEFAULT_RETRY.with_delay(1.0, 10.0, 2.0), timeout=30)
+
+        """Queue-Based
+        self.job_queue.append(
+            self.executor.submit(
+                job.result,
+                retry=bigquery.DEFAULT_RETRY.with_delay(1.0, 10.0, 2.0).with_deadline(30.0),
+                timeout=30,
+            )
+        )"""
 
         # Flush the buffer
         data.seek(0)
