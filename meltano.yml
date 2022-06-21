@@ -1,0 +1,34 @@
+version: 1
+send_anonymous_usage_stats: true
+project_id: target-bigquery
+plugins:
+  extractors:
+    - name: tap-github
+      variant: singer-io
+      pip_url: tap-github
+      config:
+        repository: z3z1ma/dbt-osmosis
+        start_date: 2020-01-01 00:00:00+00:00
+      select:
+        - "*.*"
+  loaders:
+    - name: target-bigquery
+      namespace: target_bigquery
+      pip_url: -e .
+      capabilities:
+        - state
+        - catalog
+        - discover
+      settings:
+        - name: credentials_path
+          env: GOOGLE_APPLICATION_CREDENTIALS
+        - name: project
+        - name: dataset
+          value: ${MELTANO_EXTRACT__LOAD_SCHEMA}
+        - name: add_record_metadata
+          kind: boolean
+          value: true
+      config:
+        credentials_path: ${HOME}/.gcp/dwh-credentials.json
+        dataset: raw_testing
+        add_record_metadata: true
