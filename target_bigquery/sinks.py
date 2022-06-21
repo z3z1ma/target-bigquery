@@ -81,7 +81,7 @@ class BigQuerySink(BatchSink):
     ) -> bigquery.SchemaField:
         """Translates a json schema property to a BigQuery schema property."""
         safe_name = safe_column_name(name, quotes=False)
-        property_type = schema_property["type"]
+        property_type = schema_property.get("type", "string")
         property_format = schema_property.get("format", None)
 
         if "array" in property_type:
