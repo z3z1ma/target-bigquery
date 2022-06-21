@@ -135,29 +135,6 @@ class BaseBigQuerySink(BatchSink):
             self._contains_coerced_field = True
             return bigquery.SchemaField(safe_name, "string", mode)
 
-    def start_batch(self, context: dict) -> None:
-        """Start a batch of records by ensuring the target exists."""
-        self._client.create_dataset(self.config["dataset"], exists_ok=True)
-        table = self._client.create_table(
-            bigquery.Table(
-                self._table,
-                schema=self.bigquery_schema,
-            ),
-            exists_ok=True,
-        )
-        # TODO: If needed, new_schema = original_schema[:]  --> Creates a copy of the schema.
-        fields_to_add = []
-        original_schema = table.schema
-        for field in self.bigquery_schema:
-            if not field in table.schema:
-                fields_to_add.append(field)
-        if fields_to_add:
-            self.logger.info("Adding fields to table in stream: %s", self.stream_name)
-            new_schema = original_schema[:]
-            new_schema.extend(fields_to_add)
-            table.schema = new_schema
-            self._client.update_table(table, ["schema"])
-
     def _parse_json_with_props(self, record: dict, _prop_spec=None):
         """Recursively serialize a JSON object which has props that were forcibly coerced
         to string do to lack of prop definitons"""
@@ -184,6 +161,29 @@ class BaseBigQuerySink(BatchSink):
                     else:
                         record[name] = orjson.dumps(record[name]).decode("utf-8")
         return record
+
+    def start_batch(self, context: dict) -> None:
+        """Start a batch of records by ensuring the target exists."""
+        self._client.create_dataset(self.config["dataset"], exists_ok=True)
+        table = self._client.create_table(
+            bigquery.Table(
+                self._table,
+                schema=self.bigquery_schema,
+            ),
+            exists_ok=True,
+        )
+        # TODO: If needed, new_schema = original_schema[:]  --> Creates a copy of the schema.
+        fields_to_add = []
+        original_schema = table.schema
+        for field in self.bigquery_schema:
+            if not field in table.schema:
+                fields_to_add.append(field)
+        if fields_to_add:
+            self.logger.info("Adding fields to table in stream: %s", self.stream_name)
+            new_schema = original_schema[:]
+            new_schema.extend(fields_to_add)
+            table.schema = new_schema
+            self._client.update_table(table, ["schema"])
 
     def preprocess_record(self, record: Dict, context: dict) -> dict:
         """Inject metadata if not present and asked for, coerce json paths to strings if needed."""
