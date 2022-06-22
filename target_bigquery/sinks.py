@@ -1,5 +1,6 @@
 """BigQuery target sink class, which handles writing streams."""
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 from io import BufferedWriter, BytesIO
 from typing import Dict, List, Optional, cast
@@ -10,11 +11,15 @@ from google.cloud import _http, bigquery, storage
 from memoization import cached
 from singer_sdk import PluginBase
 from singer_sdk.sinks import BatchSink
+from tenacity import retry, retry_if_result
+from tenacity.retry import retry_if_exception_type
+from tenacity.stop import stop_after_attempt
 
 
 # pylint: disable=no-else-return,too-many-branches,too-many-return-statements
 def bigquery_type(property_type: List[str], property_format: str) -> str:
     """Translate jsonschema type to bigquery type."""
+
     if property_format == "date-time":
         return "timestamp"
     if property_format == "date":
@@ -37,6 +42,7 @@ def bigquery_type(property_type: List[str], property_format: str) -> str:
 
 def safe_column_name(name: str, quotes: bool = False) -> str:
     """Returns a safe column name for BigQuery."""
+
     name = name.replace("`", "")
     pattern = "[^a-zA-Z0-9_]"
     name = re.sub(pattern, "_", name)
@@ -48,12 +54,14 @@ def safe_column_name(name: str, quotes: bool = False) -> str:
 @cached
 def get_bq_client(credentials_path: str) -> bigquery.Client:
     """Returns a BigQuery client. Singleton."""
+
     return bigquery.Client.from_service_account_json(credentials_path)
 
 
 @cached
 def get_gcs_client(credentials_path: str) -> storage.Client:
     """Returns a BigQuery client. Singleton."""
+
     return storage.Client.from_service_account_json(credentials_path)
 
 
@@ -68,17 +76,48 @@ class BaseBigQuerySink(BatchSink):
         key_properties: Optional[List[str]],
     ) -> None:
         super().__init__(target, stream_name, schema, key_properties)
+
+        # Client and Table ID
         self._client = get_bq_client(self.config["credentials_path"])
         self._table = f"{self.config['project']}.{self.config['dataset']}.{self.stream_name.lower()}"
+
+        # Flag if field was coerced
         self._contains_coerced_field = False
-        # BQ Schema resolution sets the coerced_fields property to True if any of the fields are coerced
+
+        # BQ Schema resolution sets the _contains_coerced_field property to True if any of the fields are coerced
         self.bigquery_schema = [
             self.jsonschema_prop_to_bq_column(name, prop)
             for name, prop in self.schema["properties"].items()
         ]
+
         # Track Jobs
-        self.job_queue = []
+        self.job_queue = set()
         self.executor = ThreadPoolExecutor()
+
+        # Refs & Build Destination Assets (Lazy)
+        self._dataset_ref = None
+        self._table_ref = None
+
+    @retry(
+        retry=retry_if_exception_type(
+            (ConnectionResetError, ConnectionAbortedError, ConnectionError)
+        ),
+        reraise=True,
+        stop=stop_after_attempt(2),
+    )
+    def _make_target(self) -> None:
+        if self._dataset_ref is None:
+            self._dataset_ref = self._client.create_dataset(
+                self.config["dataset"], exists_ok=True
+            )
+        if self._table_ref is None:
+            self._table_ref = self._client.create_table(
+                bigquery.Table(
+                    self._table,
+                    schema=self.bigquery_schema,
+                ),
+                exists_ok=True,
+            )
 
     @property
     def max_size(self) -> int:
@@ -88,6 +127,7 @@ class BaseBigQuerySink(BatchSink):
         self, name: str, schema_property: dict
     ) -> bigquery.SchemaField:
         """Translates a json schema property to a BigQuery schema property."""
+
         safe_name = safe_column_name(name, quotes=False)
         property_type = schema_property.get("type", "string")
         property_format = schema_property.get("format", None)
@@ -120,6 +160,7 @@ class BaseBigQuerySink(BatchSink):
         self, safe_name, schema_property, mode="NULLABLE"
     ) -> bigquery.SchemaField:
         """Recursive descent in record objects."""
+
         fields = [
             self.jsonschema_prop_to_bq_column(col, t)
             for col, t in schema_property.get("properties", {}).items()
@@ -134,6 +175,7 @@ class BaseBigQuerySink(BatchSink):
     def _parse_json_with_props(self, record: dict, _prop_spec=None):
         """Recursively serialize a JSON object which has props that were forcibly coerced
         to string do to lack of prop definitons"""
+
         if _prop_spec is None:
             _prop_spec = self.schema["properties"]
         for name, contents in record.items():
@@ -158,123 +200,148 @@ class BaseBigQuerySink(BatchSink):
                         record[name] = orjson.dumps(record[name]).decode("utf-8")
         return record
 
-    def start_batch(self, context: dict) -> None:
-        """Start a batch of records by ensuring the target exists."""
-        self.logger.info(
-            "Preparing batch %s in stream: %s", context["batch_id"], self.stream_name
-        )
-        self._client.create_dataset(self.config["dataset"], exists_ok=True)
-        table = self._client.create_table(
-            bigquery.Table(
-                self._table,
-                schema=self.bigquery_schema,
-            ),
-            exists_ok=True,
-        )
+    def _evolve_schema(self):
+        """Schema Evolution (not ready for primetime)"""
 
-        """Schema Evolution
         detected_change = []
-        original_schema = table.schema[:]
-        mutable_schema = table.schema[:]
-        for proper_field in self.bigquery_schema:
-            if proper_field not in original_schema:
-                # Action
-                detected_change.append(proper_field.name)
+        original_schema = self._table_ref.schema[:]
+        mutable_schema = self._table_ref.schema[:]
+        for expected_field in self.bigquery_schema:
+            if expected_field not in original_schema:
+                detected_change.append(expected_field.name)
                 for mut_field in mutable_schema:
-                    if mut_field.name == proper_field.name:
-                        mut_field = proper_field
+                    # Action 1 (possibly unsupported by PATCH)
+                    if mut_field.name == expected_field.name:
+                        mut_field = expected_field
                         break
                 else:
-                    mutable_schema.append(proper_field)
+                    # Action 2 (supported)
+                    mutable_schema.append(expected_field)
         if detected_change:
-            table.schema = mutable_schema
+            self._table_ref.schema = mutable_schema
             self._client.update_table(
-                table,
+                self._table_ref,
                 ["schema"],
                 retry=bigquery.DEFAULT_RETRY.with_delay(1.0, 10.0, 2.0).with_deadline(
-                    15.0
+                    self.config["timeout"]
                 ),
-                timeout=15,
-            )"""
+                timeout=self.config["timeout"],
+            )
 
     def preprocess_record(self, record: Dict, context: dict) -> dict:
         """Inject metadata if not present and asked for, coerce json paths to strings if needed."""
+
         if self._contains_coerced_field:
             return self._parse_json_with_props(record)
         return record
 
 
 class BigQueryStreamingSink(BaseBigQuerySink):
-    """BigQuery Streaming target sink class."""
+    """BigQuery Streaming target sink class.
+
+    API -> IN MEM JSON STR -> BIGQUERY GCS STREAM JOB -> FLUSH"""
+
+    job_queue = []
+
+    def _generate_batch_row_ids(self):
+        """Generate row ids if key properties is supplied"""
+
+        return [
+            "--".join(str(row[k]) for k in self.key_properties)
+            for row in self.records_to_drain
+            if self.key_properties
+        ]
+
+    @retry(
+        retry=retry_if_exception_type(
+            (ConnectionResetError, ConnectionAbortedError, ConnectionError)
+        )
+        | retry_if_result(lambda r: bool(r)),
+        reraise=True,
+        stop=stop_after_attempt(5),
+    )
+    def _upload_records(self, records_to_drain, insert_ids):
+
+        # Monkey patching this at call-time is ugly but gcloud hasn't updated their interfaces
+        # to allow users to supply custom JSON serializers which is a pain
+        cached_ref = _http.json
+        _http.json = orjson
+
+        # Dispatch job
+        errors = self._client.insert_rows_json(
+            table=self._table,
+            json_rows=records_to_drain,
+            timeout=self.config["timeout"],
+            row_ids=insert_ids if insert_ids else None,
+            retry=bigquery.DEFAULT_RETRY.with_delay(1, 10, 1.5).with_deadline(
+                self.config["timeout"]
+            ),
+        )
+
+        # Restore ref (race condition? never seen it)
+        _http.json = cached_ref
+
+        # Return errors, tenacity will retry if truthy
+        return errors
 
     def process_record(self, record: dict, context: dict) -> None:
         """Write record to buffer"""
+
         self.records_to_drain.append(record)
+
+    def start_batch(self, context: dict) -> None:
+        """Throttle jobs"""
+
+        self._make_target()
+        while len(self.job_queue) >= self.config["threads"]:
+            self.logger.info("Throttling job queue...")
+            time.sleep(2)
 
     def process_batch(self, context: dict) -> None:
         """Write out any prepped records and return once fully written."""
 
+        # Account for off-chance we hit process batch with no records
         if self.current_size == 0:
             return
+
+        # Mark draining
         self.start_drain()
 
-        insert_ids = []
-        (
-            insert_ids.append("--".join(str(row[k]) for k in self.key_properties))
-            for row in self.records_to_drain
-            if self.key_properties
+        # Build ids for streaming insert
+        insert_ids = self._generate_batch_row_ids()
+
+        # Stream Records, Stable non blocking
+        fut = self.executor.submit(
+            self._upload_records,
+            records_to_drain=self.records_to_drain.copy(),
+            insert_ids=insert_ids,
         )
+        self.job_queue.append(b"X")
+        fut.add_done_callback(lambda _: self.job_queue.pop())
 
-        # Monkey patching this at call-time is ugly but gcloud hasn't updated their interfaces
-        # For custom JSON serializers which is a pain
-        cached_ref = _http.json
-        _http.json = orjson
-        errors = self._client.insert_rows_json(
-            table=self._table,
-            json_rows=self.records_to_drain,
-            timeout=15,
-            row_ids=insert_ids if insert_ids else None,
-            retry=bigquery.DEFAULT_RETRY.with_delay(1.0, 10.0, 2.0).with_deadline(15.0),
-        )
-
-        _http.json = cached_ref
-
-        if errors == []:
-            self.logger.info("New rows have been added to %s.", self.stream_name)
-        else:
-            self.logger.info("Encountered errors while inserting rows: %s", errors)
-
+        # Flush the buffer
         self.mark_drained()
         self.records_to_drain = []
 
 
 class BigQueryBatchSink(BaseBigQuerySink):
-    """BigQuery Batch target sink class."""
+    """BigQuery Batch target sink class.
 
-    def process_record(self, record: dict, context: dict) -> None:
-        """Write record to buffer"""
-        if not context.get("records"):
-            context["records"] = BytesIO()
-        context["records"].write(
-            orjson.dumps(
-                record,
-                option=orjson.OPT_APPEND_NEWLINE,
-            )
-        )
+    API -> IN MEM JSON BYTES -> BIGQUERY -> FLUSH
+    """
 
-    def process_batch(self, context: dict) -> None:
-        """Write out any prepped records and return once fully written."""
+    @retry(
+        retry=retry_if_exception_type(
+            (ConnectionResetError, ConnectionAbortedError, ConnectionError)
+        ),
+        reraise=True,
+        stop=stop_after_attempt(5),
+    )
+    def _upload_records(self, buf: BytesIO) -> bigquery.LoadJob:
 
-        if self.current_size == 0:
-            return
-        self.start_drain()
-
-        # Get the reference to the buffer
-        data: BytesIO = context["records"]
-
-        # Load the data into BigQuery
+        # Build job
         job: bigquery.LoadJob = self._client.load_table_from_file(
-            data,
+            buf,
             self._table,
             rewind=True,
             num_retries=3,
@@ -288,40 +355,69 @@ class BigQueryBatchSink(BaseBigQuerySink):
             ),
         )
 
+        # Add to queue
+        self.job_queue.add(job.job_id)
+
+        # Pop from queue when done
         job.add_done_callback(
-            lambda resp: self.logger.info(
-                f"Batch load job {resp.job_id} for {self.stream_name} completed."
-            )
+            lambda fut: self.job_queue.discard(cast(bigquery.LoadJob, fut).job_id)
         )
+
+        # Run with timeout
         try:
             job.result(
-                retry=bigquery.DEFAULT_RETRY.with_delay(1.0, 10.0, 2.0).with_deadline(
-                    30.0
+                retry=bigquery.DEFAULT_RETRY.with_delay(1, 10, 1.5).with_deadline(
+                    self.config["timeout"]
                 ),
-                timeout=30,
+                timeout=self.config["timeout"],
             )
-        except Exception as err:
-            self.logger.info(job.errors)
-            self.logger.info(job.error_result)
-            raise err
+        except Exception as exc:
+            self.logger.info("Error during upload: %s", job.errors)
+            raise exc  # Here, tenacity takes the wheel if needed
+        else:
+            return job
 
-        """Queue-Based
-        self.job_queue.append(
-            self.executor.submit(
-                job.result,
-                retry=bigquery.DEFAULT_RETRY.with_delay(1.0, 10.0, 2.0).with_deadline(30.0),
-                timeout=30,
-            )
-        )"""
+    def process_record(self, record: dict, context: dict) -> None:
+        """Write record to buffer"""
+
+        if not context.get("records"):
+            context["records"] = BytesIO()
+        context["records"].write(orjson.dumps(record, option=orjson.OPT_APPEND_NEWLINE))
+
+    def start_batch(self, context: dict) -> None:
+        """Throttle jobs"""
+
+        self._make_target()
+        while len(self.job_queue) >= self.config["threads"]:
+            self.logger.info("Throttling job queue...")
+            time.sleep(2)
+
+    def process_batch(self, context: dict) -> None:
+        """Write out any prepped records and return once fully written."""
+
+        # Account for off-chance we hit process batch with no records
+        if self.current_size == 0:
+            return
+
+        # Mark draining
+        self.start_drain()
+
+        # Get the reference to the buffer
+        buf: BytesIO = context["records"]
+
+        # Load the data into BigQuery
+        # TODO: Vet stability of non-blocking, mixed results: self.executor.submit(self._upload_records, buf=BytesIO(buf.getvalue()))
+        self._upload_records(buf)
 
         # Flush the buffer
-        data.seek(0)
-        data.flush()
-        self.mark_drained()
+        buf.seek(0), buf.flush(), self.mark_drained()
 
 
 class BigQueryGcsStagingSink(BaseBigQuerySink):
-    """BigQuery Batch target sink class."""
+    """BigQuery Batch target sink class.
+
+    API -> IN MEM JSON BYTES -> GCS JSONL -> FLUSH -> BIGQUERY GCS LOAD JOB
+    """
 
     def __init__(
         self,
@@ -339,36 +435,33 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
             self.stream_name,
         )
 
-    def process_record(self, record: dict, context: dict) -> None:
-        """Write record to buffer"""
-        if not context.get("records"):
-            context["records"] = BytesIO()
-        context["records"].write(
-            orjson.dumps(
-                record,
-                option=orjson.OPT_APPEND_NEWLINE,
-            )
-        )
+    @retry(
+        retry=retry_if_exception_type(
+            (ConnectionResetError, ConnectionAbortedError, ConnectionError)
+        ),
+        reraise=True,
+        stop=stop_after_attempt(5),
+    )
+    def _upload_to_blob(self, target_stage: str, buf: BytesIO):
+        """Load the data into GCS Stage"""
 
-    def process_batch(self, context: dict) -> None:
-        """Write out any prepped records and return once fully written."""
-
-        if self.current_size == 0:
-            return
-        self.start_drain()
-
-        # Get the reference to the buffer
-        data: BytesIO = context["records"]
-        target_stage = f"{self._base_blob_path}/{context['batch_id']}.jsonl"
-
-        # Load the data into GCS Stage
         with smart_open.open(
             target_stage, "wb", transport_params={"client": self._gcs_client}
         ) as fh:
-            data.seek(0)
-            cast(BufferedWriter, fh).write(data.getbuffer())
+            buf.seek(0)
+            cast(BufferedWriter, fh).write(buf.getbuffer())
+        return 1
 
-        # Load the data into BigQuery
+    @retry(
+        retry=retry_if_exception_type(
+            (ConnectionResetError, ConnectionAbortedError, ConnectionError)
+        ),
+        reraise=True,
+        stop=stop_after_attempt(5),
+    )
+    def _upload_records(self, target_stage: str) -> bigquery.LoadJob:
+
+        # Build job
         job: bigquery.LoadJob = self._client.load_table_from_uri(
             target_stage,
             self._table,
@@ -382,23 +475,55 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
             ),
         )
 
-        job.add_done_callback(
-            lambda resp: self.logger.info(
-                f"GCS batch to BigQuery job {resp.job_id} for {self.stream_name} completed."
-            )
-        )
-        job.result(retry=bigquery.DEFAULT_RETRY.with_delay(1.0, 10.0, 2.0), timeout=30)
+        # Add to queue
+        self.job_queue.add(job.job_id)
 
-        """Queue-Based
-        self.job_queue.append(
-            self.executor.submit(
-                job.result,
-                retry=bigquery.DEFAULT_RETRY.with_delay(1.0, 10.0, 2.0).with_deadline(30.0),
-                timeout=30,
+        # Pop from queue when done
+        job.add_done_callback(
+            lambda fut: self.job_queue.discard(cast(bigquery.LoadJob, fut).job_id)
+        )
+
+        # Run with timeout
+        try:
+            job.result(
+                retry=bigquery.DEFAULT_RETRY.with_delay(1, 10, 1.5).with_deadline(
+                    self.config["timeout"]
+                ),
+                timeout=self.config["timeout"],
             )
-        )"""
+        except Exception as exc:
+            self.logger.info("Error during upload: %s", job.errors)
+            raise exc  # Here, tenacity takes the wheel if needed
+        else:
+            return job
+
+    def process_record(self, record: dict, context: dict) -> None:
+        """Write record to buffer"""
+
+        if not context.get("records"):
+            context["records"] = BytesIO()
+        context["records"].write(orjson.dumps(record, option=orjson.OPT_APPEND_NEWLINE))
+
+    def start_batch(self, context: dict) -> None:
+        """Upload to stage"""
+        self._make_target()
+        buf: BytesIO = context["records"]
+        self._upload_to_blob(f"{self._base_blob_path}/{context['batch_id']}.jsonl", buf)
+        buf.seek(0), buf.flush()
+
+    def process_batch(self, context: dict) -> None:
+        """Write out any prepped records and return once fully written."""
+
+        # Account for off-chance we hit process batch with no records
+        if self.current_size == 0:
+            return
+
+        # Mark draining
+        self.start_drain()
+
+        # Load the data into GCS Stage -> BigQuery
+        # TODO: Vet stability of non-blocking, mixed results: self.executor.submit(self._upload_records, target_stage=...)
+        self._upload_records(f"{self._base_blob_path}/{context['batch_id']}.jsonl")
 
         # Flush the buffer
-        data.seek(0)
-        data.flush()
         self.mark_drained()

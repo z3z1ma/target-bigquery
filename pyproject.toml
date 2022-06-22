@@ -16,6 +16,7 @@ singer-sdk = "^0.5.0"
 google-cloud-bigquery = "^3.2.0"
 orjson = "^3.7.2"
 smart-open = {extras = ["gcs"], version = "^6.0.0"}
+tenacity = "^8.0.1"
 
 [tool.poetry.dev-dependencies]
 pytest = "^6.2.5"
