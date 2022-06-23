@@ -104,9 +104,7 @@ class BaseBigQuerySink(BatchSink):
         self.bq_jobs.discard(fut.job_id)
 
     @retry(
-        retry=retry_if_exception_type(
-            (ConnectionResetError, ConnectionAbortedError, ConnectionError)
-        ),
+        retry=retry_if_exception_type(ConnectionError),
         reraise=True,
         stop=stop_after_attempt(2),
     )
@@ -265,9 +263,7 @@ class BigQueryStreamingSink(BaseBigQuerySink):
         ]
 
     @retry(
-        retry=retry_if_exception_type(
-            (ConnectionResetError, ConnectionAbortedError, ConnectionError)
-        )
+        retry=retry_if_exception_type(ConnectionError)
         | retry_if_result(lambda r: bool(r)),
         reraise=True,
         stop=stop_after_attempt(5),
@@ -312,9 +308,7 @@ class BigQueryBatchSink(BaseBigQuerySink):
     """
 
     @retry(
-        retry=retry_if_exception_type(
-            (ConnectionResetError, ConnectionAbortedError, ConnectionError)
-        ),
+        retry=retry_if_exception_type(ConnectionError),
         reraise=True,
         stop=stop_after_attempt(5),
     )
@@ -387,9 +381,7 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
         )
 
     @retry(
-        retry=retry_if_exception_type(
-            (ConnectionResetError, ConnectionAbortedError, ConnectionError)
-        ),
+        retry=retry_if_exception_type(ConnectionError),
         reraise=True,
         stop=stop_after_attempt(5),
     )
@@ -403,9 +395,7 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
         return 1
 
     @retry(
-        retry=retry_if_exception_type(
-            (ConnectionResetError, ConnectionAbortedError, ConnectionError)
-        ),
+        retry=retry_if_exception_type(ConnectionError),
         reraise=True,
         stop=stop_after_attempt(5),
     )
