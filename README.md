@@ -14,16 +14,25 @@ pipx install target-bigquery
 
 ## Configuration
 
-### Accepted Config Options
+### Settings
 
-- [ ] `Developer TODO:` Provide a list of config options accepted by the target.
+| Setting             | Required | Default | Description |
+|:--------------------|:--------:|:-------:|:------------|
+| credentials_path    | True     | None    | The path to a gcp credentials json file. |
+| project             | True     | None    | The target GCP project to materialize data into. |
+| dataset             | True     | None    | The target dataset to materialize data into. |
+| add_record_metadata | False    |       1 | Inject record metadata into the schema. |
+| batch_size_limit    | False    |   10000 | The maximum number of rows to send in a single batch. |
+| threads             | False    |       8 | The number of threads to use for writing to BigQuery. |
+| method              | False    | batch   | The method to use for writing to BigQuery. Accepted values are: batch, stream, gcs |
+| bucket              | False    | None    | The GCS bucket to use for staging data. Only used if method is gcs. |
+| gcs_buffer_size     | False    |     2.5 | The size of the buffer for GCS before flushing. Value in Megabytes. |
+| stream_maps         | False    | None    | Config object for stream maps capability. |
+| stream_map_config   | False    | None    | User-defined config values to be used within map expressions. |
+| flattening_enabled  | False    | None    | 'True' to enable schema flattening and automatically expand nested properties. |
+| flattening_max_depth| False    | None    | The max depth to flatten schemas. |
 
-A full list of supported settings and capabilities for this
-target is available by running:
-
-```bash
-target-bigquery --about
-```
+A full list of supported settings and capabilities is available by running: `target-bigquery --about`
 
 ### Configure using environment variables
 
@@ -33,7 +42,13 @@ environment variable is set either in the terminal context or in the `.env` file
 
 ### Source Authentication and Authorization
 
-- [ ] `Developer TODO:` If your target requires special access on the source system, or any special authentication requirements, provide those here.
+https://cloud.google.com/bigquery/docs/authentication
+
+## Capabilities
+
+* `about`
+* `stream-maps`
+* `schema-flattening`
 
 ## Usage
 
