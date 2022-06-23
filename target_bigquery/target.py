@@ -1,8 +1,8 @@
 """BigQuery target class."""
-from typing import IO, Counter, Type
+from typing import Type
+import copy
 
 from singer_sdk import typing as th
-from singer_sdk.io_base import SingerMessageType
 from singer_sdk.target_base import Sink, Target
 
 from target_bigquery.sinks import (
@@ -82,3 +82,25 @@ class TargetBigQuery(Target):
             return BigQueryGcsStagingSink
         else:
             raise ValueError(f"Unknown method: {method}")
+
+    # Temporary method overrides until we merge the hook into the SDK
+
+    def _process_endofpipe(self) -> None:
+        """Called after all input lines have been read."""
+        self.drain_all(is_endofpipe=True)
+
+    def drain_all(self, is_endofpipe: bool = False) -> None:
+        """Drains all sinks, starting with those cleared due to changed schema.
+
+        This method is internal to the SDK and should not need to be overridden.
+        """
+        state = copy.deepcopy(self._latest_state)
+        self._drain_all(self._sinks_to_clear, 1)
+        if is_endofpipe:
+            (sink.clean_up() for sink in self._sinks_active.values())
+        self._sinks_to_clear = []
+        self._drain_all(list(self._sinks_active.values()), self.max_parallelism)
+        if is_endofpipe:
+            (sink.clean_up() for sink in self._sinks_to_clear)
+        self._write_state_message(state)
+        self._reset_max_record_age()
