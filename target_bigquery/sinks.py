@@ -1,7 +1,7 @@
 """BigQuery target sink class, which handles writing streams."""
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, Future, as_completed
 from io import BufferedWriter, BytesIO
 from typing import Dict, List, Optional, cast
 
@@ -19,7 +19,6 @@ from tenacity.stop import stop_after_attempt
 # pylint: disable=no-else-return,too-many-branches,too-many-return-statements
 def bigquery_type(property_type: List[str], property_format: str) -> str:
     """Translate jsonschema type to bigquery type."""
-
     if property_format == "date-time":
         return "timestamp"
     if property_format == "date":
@@ -42,7 +41,6 @@ def bigquery_type(property_type: List[str], property_format: str) -> str:
 
 def safe_column_name(name: str, quotes: bool = False) -> str:
     """Returns a safe column name for BigQuery."""
-
     name = name.replace("`", "")
     pattern = "[^a-zA-Z0-9_]"
     name = re.sub(pattern, "_", name)
@@ -54,14 +52,12 @@ def safe_column_name(name: str, quotes: bool = False) -> str:
 @cached
 def get_bq_client(credentials_path: str) -> bigquery.Client:
     """Returns a BigQuery client. Singleton."""
-
     return bigquery.Client.from_service_account_json(credentials_path)
 
 
 @cached
 def get_gcs_client(credentials_path: str) -> storage.Client:
     """Returns a BigQuery client. Singleton."""
-
     return storage.Client.from_service_account_json(credentials_path)
 
 
@@ -91,12 +87,21 @@ class BaseBigQuerySink(BatchSink):
         ]
 
         # Track Jobs
-        self.job_queue = set()
+        self.bq_jobs = set()
+        self.jobs_running = []
         self.executor = ThreadPoolExecutor()
 
         # Refs & Build Destination Assets (Lazy)
         self._dataset_ref = None
         self._table_ref = None
+
+    def _pop_job_from_stack(self, completed: Future):
+        for i, job in enumerate(self.jobs_running):
+            if id(job) == id(completed):
+                self.jobs_running.pop(i)
+
+    def _pop_bq_job_from_queue(self, fut: bigquery.LoadJob):
+        self.bq_jobs.discard(fut.job_id)
 
     @retry(
         retry=retry_if_exception_type(
@@ -118,6 +123,7 @@ class BaseBigQuerySink(BatchSink):
                 ),
                 exists_ok=True,
             )
+            self._evolve_schema()
 
     @property
     def max_size(self) -> int:
@@ -127,11 +133,9 @@ class BaseBigQuerySink(BatchSink):
         self, name: str, schema_property: dict
     ) -> bigquery.SchemaField:
         """Translates a json schema property to a BigQuery schema property."""
-
         safe_name = safe_column_name(name, quotes=False)
         property_type = schema_property.get("type", "string")
         property_format = schema_property.get("format", None)
-
         if "array" in property_type:
             try:
                 items_schema = schema_property["items"]
@@ -148,10 +152,8 @@ class BaseBigQuerySink(BatchSink):
                         safe_name, items_schema, "REPEATED"
                     )
                 return bigquery.SchemaField(safe_name, items_type, "REPEATED")
-
         elif "object" in property_type:
             return self._translate_record_to_bq_schema(safe_name, schema_property)
-
         else:
             result_type = bigquery_type(property_type, property_format)
             return bigquery.SchemaField(safe_name, result_type, "NULLABLE")
@@ -160,7 +162,6 @@ class BaseBigQuerySink(BatchSink):
         self, safe_name, schema_property, mode="NULLABLE"
     ) -> bigquery.SchemaField:
         """Recursive descent in record objects."""
-
         fields = [
             self.jsonschema_prop_to_bq_column(col, t)
             for col, t in schema_property.get("properties", {}).items()
@@ -175,7 +176,6 @@ class BaseBigQuerySink(BatchSink):
     def _parse_json_with_props(self, record: dict, _prop_spec=None):
         """Recursively serialize a JSON object which has props that were forcibly coerced
         to string do to lack of prop definitons"""
-
         if _prop_spec is None:
             _prop_spec = self.schema["properties"]
         for name, contents in record.items():
@@ -202,7 +202,6 @@ class BaseBigQuerySink(BatchSink):
 
     def _evolve_schema(self):
         """Schema Evolution (not ready for primetime)"""
-
         detected_change = []
         original_schema = self._table_ref.schema[:]
         mutable_schema = self._table_ref.schema[:]
@@ -212,7 +211,7 @@ class BaseBigQuerySink(BatchSink):
                 for mut_field in mutable_schema:
                     # Action 1 (possibly unsupported by PATCH)
                     if mut_field.name == expected_field.name:
-                        mut_field = expected_field
+                        # mut_field = expected_field
                         break
                 else:
                     # Action 2 (supported)
@@ -228,12 +227,28 @@ class BaseBigQuerySink(BatchSink):
                 timeout=self.config["timeout"],
             )
 
+    def start_batch(self, context: dict) -> None:
+        """Ensure target exists, noop once verified. Throttle jobs"""
+        self._make_target()
+        while len(self.jobs_running) >= self.config["threads"]:
+            self.logger.info("Throttling job queue...")
+            time.sleep(2)
+
     def preprocess_record(self, record: Dict, context: dict) -> dict:
         """Inject metadata if not present and asked for, coerce json paths to strings if needed."""
-
         if self._contains_coerced_field:
             return self._parse_json_with_props(record)
         return record
+
+    def clean_up(self):
+        """Ensure all jobs are completed"""
+        self.logger.info(f"Awaiting jobs: {len(self.jobs_running)}")
+        for _ in as_completed(self.jobs_running):
+            ...
+        if len(self.bq_jobs) > 0:
+            raise RuntimeError(
+                "BigQuery jobs not marked as completed after threaded execution end."
+            )
 
 
 class BigQueryStreamingSink(BaseBigQuerySink):
@@ -241,13 +256,10 @@ class BigQueryStreamingSink(BaseBigQuerySink):
 
     API -> IN MEM JSON STR -> BIGQUERY GCS STREAM JOB -> FLUSH"""
 
-    job_queue = []
-
     def _generate_batch_row_ids(self):
         """Generate row ids if key properties is supplied"""
-
         return [
-            "--".join(str(row[k]) for k in self.key_properties)
+            "-".join(str(row[k]) for k in self.key_properties)
             for row in self.records_to_drain
             if self.key_properties
         ]
@@ -261,13 +273,9 @@ class BigQueryStreamingSink(BaseBigQuerySink):
         stop=stop_after_attempt(5),
     )
     def _upload_records(self, records_to_drain, insert_ids):
-
-        # Monkey patching this at call-time is ugly but gcloud hasn't updated their interfaces
-        # to allow users to supply custom JSON serializers which is a pain
+        """Runs in thread blocking on job"""
         cached_ref = _http.json
         _http.json = orjson
-
-        # Dispatch job
         errors = self._client.insert_rows_json(
             table=self._table,
             json_rows=records_to_drain,
@@ -277,50 +285,23 @@ class BigQueryStreamingSink(BaseBigQuerySink):
                 self.config["timeout"]
             ),
         )
-
-        # Restore ref (race condition? never seen it)
         _http.json = cached_ref
-
-        # Return errors, tenacity will retry if truthy
         return errors
 
     def process_record(self, record: dict, context: dict) -> None:
         """Write record to buffer"""
-
         self.records_to_drain.append(record)
-
-    def start_batch(self, context: dict) -> None:
-        """Throttle jobs"""
-
-        self._make_target()
-        while len(self.job_queue) >= self.config["threads"]:
-            self.logger.info("Throttling job queue...")
-            time.sleep(2)
 
     def process_batch(self, context: dict) -> None:
         """Write out any prepped records and return once fully written."""
-
-        # Account for off-chance we hit process batch with no records
-        if self.current_size == 0:
-            return
-
-        # Mark draining
-        self.start_drain()
-
-        # Build ids for streaming insert
         insert_ids = self._generate_batch_row_ids()
-
-        # Stream Records, Stable non blocking
-        fut = self.executor.submit(
+        job = self.executor.submit(
             self._upload_records,
             records_to_drain=self.records_to_drain.copy(),
             insert_ids=insert_ids,
         )
-        self.job_queue.append(b"X")
-        fut.add_done_callback(lambda _: self.job_queue.pop())
-
-        # Flush the buffer
-        self.mark_drained()
+        self.jobs_running.append(job)
+        job.add_done_callback(self._pop_job_from_stack)
         self.records_to_drain = []
 
 
@@ -338,8 +319,7 @@ class BigQueryBatchSink(BaseBigQuerySink):
         stop=stop_after_attempt(5),
     )
     def _upload_records(self, buf: BytesIO) -> bigquery.LoadJob:
-
-        # Build job
+        """Runs in thread blocking on job"""
         job: bigquery.LoadJob = self._client.load_table_from_file(
             buf,
             self._table,
@@ -354,16 +334,8 @@ class BigQueryBatchSink(BaseBigQuerySink):
                 ignore_unknown_values=True,
             ),
         )
-
-        # Add to queue
-        self.job_queue.add(job.job_id)
-
-        # Pop from queue when done
-        job.add_done_callback(
-            lambda fut: self.job_queue.discard(cast(bigquery.LoadJob, fut).job_id)
-        )
-
-        # Run with timeout
+        self.bq_jobs.add(job.job_id)
+        job.add_done_callback(self._pop_bq_job_from_queue)
         try:
             job.result(
                 retry=bigquery.DEFAULT_RETRY.with_delay(1, 10, 1.5).with_deadline(
@@ -379,38 +351,17 @@ class BigQueryBatchSink(BaseBigQuerySink):
 
     def process_record(self, record: dict, context: dict) -> None:
         """Write record to buffer"""
-
         if not context.get("records"):
             context["records"] = BytesIO()
         context["records"].write(orjson.dumps(record, option=orjson.OPT_APPEND_NEWLINE))
 
-    def start_batch(self, context: dict) -> None:
-        """Throttle jobs"""
-
-        self._make_target()
-        while len(self.job_queue) >= self.config["threads"]:
-            self.logger.info("Throttling job queue...")
-            time.sleep(2)
-
     def process_batch(self, context: dict) -> None:
         """Write out any prepped records and return once fully written."""
-
-        # Account for off-chance we hit process batch with no records
-        if self.current_size == 0:
-            return
-
-        # Mark draining
-        self.start_drain()
-
-        # Get the reference to the buffer
         buf: BytesIO = context["records"]
-
-        # Load the data into BigQuery
-        # TODO: Vet stability of non-blocking, mixed results: self.executor.submit(self._upload_records, buf=BytesIO(buf.getvalue()))
-        self._upload_records(buf)
-
-        # Flush the buffer
-        buf.seek(0), buf.flush(), self.mark_drained()
+        job = self.executor.submit(self._upload_records, buf=BytesIO(buf.getvalue()))
+        self.jobs_running.append(job)
+        job.add_done_callback(self._pop_job_from_stack)
+        buf.seek(0), buf.flush()
 
 
 class BigQueryGcsStagingSink(BaseBigQuerySink):
@@ -444,7 +395,6 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
     )
     def _upload_to_blob(self, target_stage: str, buf: BytesIO):
         """Load the data into GCS Stage"""
-
         with smart_open.open(
             target_stage, "wb", transport_params={"client": self._gcs_client}
         ) as fh:
@@ -460,8 +410,7 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
         stop=stop_after_attempt(5),
     )
     def _upload_records(self, target_stage: str) -> bigquery.LoadJob:
-
-        # Build job
+        """Runs in thread blocking on job"""
         job: bigquery.LoadJob = self._client.load_table_from_uri(
             target_stage,
             self._table,
@@ -474,16 +423,8 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
                 ignore_unknown_values=True,
             ),
         )
-
-        # Add to queue
-        self.job_queue.add(job.job_id)
-
-        # Pop from queue when done
-        job.add_done_callback(
-            lambda fut: self.job_queue.discard(cast(bigquery.LoadJob, fut).job_id)
-        )
-
-        # Run with timeout
+        self.bq_jobs.add(job.job_id)
+        job.add_done_callback(self._pop_bq_job_from_queue)
         try:
             job.result(
                 retry=bigquery.DEFAULT_RETRY.with_delay(1, 10, 1.5).with_deadline(
@@ -499,31 +440,18 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
 
     def process_record(self, record: dict, context: dict) -> None:
         """Write record to buffer"""
-
         if not context.get("records"):
             context["records"] = BytesIO()
         context["records"].write(orjson.dumps(record, option=orjson.OPT_APPEND_NEWLINE))
 
-    def start_batch(self, context: dict) -> None:
-        """Upload to stage"""
-        self._make_target()
+    def process_batch(self, context: dict) -> None:
+        """Write out any prepped records and return once fully written."""
         buf: BytesIO = context["records"]
         self._upload_to_blob(f"{self._base_blob_path}/{context['batch_id']}.jsonl", buf)
         buf.seek(0), buf.flush()
-
-    def process_batch(self, context: dict) -> None:
-        """Write out any prepped records and return once fully written."""
-
-        # Account for off-chance we hit process batch with no records
-        if self.current_size == 0:
-            return
-
-        # Mark draining
-        self.start_drain()
-
-        # Load the data into GCS Stage -> BigQuery
-        # TODO: Vet stability of non-blocking, mixed results: self.executor.submit(self._upload_records, target_stage=...)
-        self._upload_records(f"{self._base_blob_path}/{context['batch_id']}.jsonl")
-
-        # Flush the buffer
-        self.mark_drained()
+        job = self.executor.submit(
+            self._upload_records,
+            target_stage=f"{self._base_blob_path}/{context['batch_id']}.jsonl",
+        )
+        self.jobs_running.append(job)
+        job.add_done_callback(self._pop_job_from_stack)
