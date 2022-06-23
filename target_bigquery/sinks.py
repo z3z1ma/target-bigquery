@@ -1,9 +1,9 @@
 """BigQuery target sink class, which handles writing streams."""
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor, Future, as_completed
-from io import BufferedWriter, BytesIO
-from typing import Dict, List, Optional, cast
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from io import BytesIO, FileIO
+from typing import Dict, List, Optional
 
 import orjson
 import smart_open
@@ -252,6 +252,8 @@ class BaseBigQuerySink(BatchSink):
 class BigQueryStreamingSink(BaseBigQuerySink):
     """BigQuery Streaming target sink class.
 
+    Traits: More expensive API, very fast for smaller syncs, recommend lower batch size (50-100)
+
     API -> IN MEM JSON STR -> BIGQUERY GCS STREAM JOB -> FLUSH"""
 
     def _generate_batch_row_ids(self):
@@ -303,6 +305,9 @@ class BigQueryStreamingSink(BaseBigQuerySink):
 
 class BigQueryBatchSink(BaseBigQuerySink):
     """BigQuery Batch target sink class.
+
+    Traits: High footprint in memory dependent on batch_size, very fast since we dispatch byte buffers
+    to bigquery in a separate thread
 
     API -> IN MEM JSON BYTES -> BIGQUERY -> FLUSH
     """
@@ -359,9 +364,12 @@ class BigQueryBatchSink(BaseBigQuerySink):
 
 
 class BigQueryGcsStagingSink(BaseBigQuerySink):
-    """BigQuery Batch target sink class.
+    """BigQuery GCS target sink class.
 
-    API -> IN MEM JSON BYTES -> GCS JSONL -> FLUSH -> BIGQUERY GCS LOAD JOB
+    Traits: Lowest footprint in memory, rivals Batch method in speed, persistent
+    intermediate storage in data lake
+
+    API -> GCS JSONL -> GC FLUSH -> BIGQUERY GCS LOAD JOB
     """
 
     def __init__(
@@ -373,26 +381,36 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
     ) -> None:
         super().__init__(target, stream_name, schema, key_properties)
         self._gcs_client = get_gcs_client(self.config["credentials_path"])
-        self._base_blob_path = "gs://{}/{}/{}/{}".format(
+        self._blob_path = "gs://{}/{}/{}/{}".format(
             self.config["bucket"],
             self.config.get("prefix_override", "target_bigquery"),
             self.config["dataset"],
             self.stream_name,
         )
 
-    @retry(
-        retry=retry_if_exception_type(ConnectionError),
-        reraise=True,
-        stop=stop_after_attempt(5),
-    )
-    def _upload_to_blob(self, target_stage: str, buf: BytesIO):
-        """Load the data into GCS Stage"""
-        with smart_open.open(
-            target_stage, "wb", transport_params={"client": self._gcs_client}
-        ) as fh:
-            buf.seek(0)
-            cast(BufferedWriter, fh).write(buf.getbuffer())
-        return 1
+    def _get_batch_id(self, context: dict):
+        return context["batch_id"]
+
+    @cached(custom_key_maker=_get_batch_id)
+    def _get_gcs_write_handle(self, context: dict) -> FileIO:
+        """Opens a stream for writing to the target cloud object,
+        Singleton handle per batch"""
+        _256kb = int(256 * 1024)
+        return smart_open.open(
+            f"{self._blob_path}/{context['batch_id']}.jsonl",
+            "wb",
+            transport_params=dict(
+                client=self._gcs_client,
+                buffer_size=int(
+                    _256kb * ((self.config.get("gcs_buffer_size", 0) * 1e6) // _256kb)
+                )
+                or _256kb,
+                min_part_size=int(
+                    _256kb * ((self.config.get("gcs_buffer_size", 0) * 1e6) // _256kb)
+                )
+                or _256kb,
+            ),
+        )
 
     @retry(
         retry=retry_if_exception_type(ConnectionError),
@@ -430,18 +448,16 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
 
     def process_record(self, record: dict, context: dict) -> None:
         """Write record to buffer"""
-        if not context.get("records"):
-            context["records"] = BytesIO()
-        context["records"].write(orjson.dumps(record, option=orjson.OPT_APPEND_NEWLINE))
+        self._get_gcs_write_handle(context).write(
+            orjson.dumps(record, option=orjson.OPT_APPEND_NEWLINE)
+        )
 
     def process_batch(self, context: dict) -> None:
         """Write out any prepped records and return once fully written."""
-        buf: BytesIO = context["records"]
-        self._upload_to_blob(f"{self._base_blob_path}/{context['batch_id']}.jsonl", buf)
-        buf.seek(0), buf.flush()
+        self._get_gcs_write_handle(context).close()
         job = self.executor.submit(
             self._upload_records,
-            target_stage=f"{self._base_blob_path}/{context['batch_id']}.jsonl",
+            target_stage=f"{self._blob_path}/{context['batch_id']}.jsonl",
         )
         self.jobs_running.append(job)
         job.add_done_callback(self._pop_job_from_stack)
