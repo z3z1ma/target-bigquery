@@ -1,6 +1,6 @@
 """BigQuery target class."""
-from typing import Type
 import copy
+from typing import Type
 
 from singer_sdk import typing as th
 from singer_sdk.target_base import Sink, Target
@@ -64,13 +64,27 @@ class TargetBigQuery(Target):
             th.StringType,
             description="The GCS bucket to use for staging data. Only used if method is gcs.",
         ),
+        th.Property(
+            "gcs_buffer_size",
+            th.NumberType,
+            description="The size of the buffer for GCS before flushing. Value in Megabytes.",
+            default=2.5,
+        ),
     ).to_dict()
 
     _MAX_RECORD_AGE_IN_MINUTES = 5.0
 
     @property
     def max_parallelism(self) -> int:
-        return 1
+        method = self.config.get("method", "batch")
+        if method == "batch":
+            return 4
+        elif method == "stream":
+            return 8
+        elif method == "gcs":
+            return 16
+        else:
+            raise ValueError(f"Unknown method: {method}")
 
     def get_sink_class(self, stream_name: str) -> Type[Sink]:
         method = self.config.get("method", "batch")
