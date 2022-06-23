@@ -199,22 +199,24 @@ class BaseBigQuerySink(BatchSink):
         return record
 
     def _evolve_schema(self):
-        """Schema Evolution (not ready for primetime)"""
-        detected_change = []
+        """Schema Evolution
+        TODO: feature flag on casting"""
         original_schema = self._table_ref.schema[:]
         mutable_schema = self._table_ref.schema[:]
         for expected_field in self.bigquery_schema:
             if expected_field not in original_schema:
-                detected_change.append(expected_field.name)
                 for mut_field in mutable_schema:
-                    # Action 1 (possibly unsupported by PATCH)
                     if mut_field.name == expected_field.name:
-                        # mut_field = expected_field
+                        # This can throw if uncastable change in schema
+                        # It works for basic mutations
+                        ddl = f"ALTER TABLE {self._table_ref.full_table_id} ALTER COLUMN {mut_field.name} SET DATA TYPE {expected_field.field_type}"
+                        self._client.query(ddl).result()
+                        mut_field.field_type = expected_field.field_type
                         break
                 else:
-                    # Action 2 (supported)
+                    # This is easy with PATCH
                     mutable_schema.append(expected_field)
-        if detected_change:
+        if mutable_schema != original_schema:
             self._table_ref.schema = mutable_schema
             self._client.update_table(
                 self._table_ref,
