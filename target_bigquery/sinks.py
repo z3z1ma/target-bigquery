@@ -16,6 +16,8 @@ from tenacity.retry import retry_if_exception_type
 from tenacity.stop import stop_after_attempt
 
 
+DELAY = 1, 10, 1.5
+
 # pylint: disable=no-else-return,too-many-branches,too-many-return-statements
 def bigquery_type(property_type: List[str], property_format: str) -> str:
     """Translate jsonschema type to bigquery type."""
@@ -209,7 +211,8 @@ class BaseBigQuerySink(BatchSink):
                     if mut_field.name == expected_field.name:
                         # This can throw if uncastable change in schema
                         # It works for basic mutations
-                        ddl = f"ALTER TABLE {self._table_ref.full_table_id} ALTER COLUMN {mut_field.name} SET DATA TYPE {expected_field.field_type}"
+                        ddl = f"ALTER TABLE `{self._table_ref.dataset_id}`.`{self._table_ref.table_id}` \
+                        ALTER COLUMN `{mut_field.name}` SET DATA TYPE {expected_field.field_type}"
                         self._client.query(ddl).result()
                         mut_field.field_type = expected_field.field_type
                         break
@@ -221,7 +224,7 @@ class BaseBigQuerySink(BatchSink):
             self._client.update_table(
                 self._table_ref,
                 ["schema"],
-                retry=bigquery.DEFAULT_RETRY.with_delay(1.0, 10.0, 2.0).with_deadline(
+                retry=bigquery.DEFAULT_RETRY.with_delay(*DELAY).with_deadline(
                     self.config["timeout"]
                 ),
                 timeout=self.config["timeout"],
@@ -281,7 +284,7 @@ class BigQueryStreamingSink(BaseBigQuerySink):
             json_rows=records_to_drain,
             timeout=self.config["timeout"],
             row_ids=insert_ids if insert_ids else None,
-            retry=bigquery.DEFAULT_RETRY.with_delay(1, 10, 1.5).with_deadline(
+            retry=bigquery.DEFAULT_RETRY.with_delay(*DELAY).with_deadline(
                 self.config["timeout"]
             ),
         )
@@ -339,7 +342,7 @@ class BigQueryBatchSink(BaseBigQuerySink):
         job.add_done_callback(self._pop_bq_job_from_queue)
         try:
             job.result(
-                retry=bigquery.DEFAULT_RETRY.with_delay(1, 10, 1.5).with_deadline(
+                retry=bigquery.DEFAULT_RETRY.with_delay(*DELAY).with_deadline(
                     self.config["timeout"]
                 ),
                 timeout=self.config["timeout"],
@@ -437,7 +440,7 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
         job.add_done_callback(self._pop_bq_job_from_queue)
         try:
             job.result(
-                retry=bigquery.DEFAULT_RETRY.with_delay(1, 10, 1.5).with_deadline(
+                retry=bigquery.DEFAULT_RETRY.with_delay(*DELAY).with_deadline(
                     self.config["timeout"]
                 ),
                 timeout=self.config["timeout"],
