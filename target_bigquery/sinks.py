@@ -1,7 +1,7 @@
 """BigQuery target sink class, which handles writing streams."""
 import re
 import time
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from io import BytesIO, FileIO
 from typing import Dict, List, Optional
 
@@ -28,7 +28,7 @@ def bigquery_type(property_type: List[str], property_format: str) -> str:
     elif property_format == "time":
         return "time"
     elif "number" in property_type:
-        return "float64"
+        return "float"
     elif "integer" in property_type and "string" in property_type:
         return "string"
     elif "integer" in property_type:
@@ -203,32 +203,47 @@ class BaseBigQuerySink(BatchSink):
     def _evolve_schema(self):
         """Schema Evolution
         TODO: feature flag on casting"""
+        if not self.config["append_columns"] or self.config["cast_columns"]:
+            return
         original_schema = self._table_ref.schema[:]
         mutable_schema = self._table_ref.schema[:]
         for expected_field in self.bigquery_schema:
             if expected_field not in original_schema:
                 for mut_field in mutable_schema:
-                    if mut_field.name == expected_field.name:
+                    if (
+                        mut_field.name == expected_field.field_type
+                        and mut_field.upper() != expected_field.field_type.upper()
+                    ):
                         # This can throw if uncastable change in schema
                         # It works for basic mutations
-                        ddl = f"ALTER TABLE `{self._table_ref.dataset_id}`.`{self._table_ref.table_id}` \
-                        ALTER COLUMN `{mut_field.name}` SET DATA TYPE {expected_field.field_type}"
-                        self.logger.info("Schema change detected, dispatching: %s", ddl)
-                        self._client.query(ddl).result()
+                        if self.config["cast_columns"]:
+                            self.logger.debug(
+                                f"Detected Diff {mut_field.name=} -> {expected_field.name=} \
+                                {mut_field.field_type=} -> {expected_field.field_type=}"
+                            )
+                            ddl = f"ALTER TABLE `{self._table_ref.dataset_id}`.`{self._table_ref.table_id}` \
+                            ALTER COLUMN `{mut_field.name}` SET DATA TYPE {expected_field.field_type};"
+                            self.logger.info(
+                                "Schema change detected, dispatching: %s", ddl
+                            )
+                            self._client.query(ddl).result()
+                            mut_field._properties["type"] = expected_field.field_type
                         break
                 else:
                     # This is easy with PATCH
                     mutable_schema.append(expected_field)
         if len(mutable_schema) > len(original_schema):
-            self._table_ref.schema = mutable_schema
-            self._client.update_table(
-                self._table_ref,
-                ["schema"],
-                retry=bigquery.DEFAULT_RETRY.with_delay(*DELAY).with_deadline(
-                    self.config["timeout"]
-                ),
-                timeout=self.config["timeout"],
-            )
+            # Append new columns to schema
+            if self.config["append_columns"]:
+                self._table_ref.schema = mutable_schema
+                self._client.update_table(
+                    self._table_ref,
+                    ["schema"],
+                    retry=bigquery.DEFAULT_RETRY.with_delay(*DELAY).with_deadline(
+                        self.config["timeout"]
+                    ),
+                    timeout=self.config["timeout"],
+                )
 
     def start_batch(self, context: dict) -> None:
         """Ensure target exists, noop once verified. Throttle jobs"""
@@ -246,8 +261,7 @@ class BaseBigQuerySink(BatchSink):
     def clean_up(self):
         """Ensure all jobs are completed"""
         self.logger.info(f"Awaiting jobs: {len(self.jobs_running)}")
-        for _ in as_completed(self.jobs_running):
-            ...
+        wait(self.jobs_running)
         if len(self.bq_jobs) > 0:
             raise RuntimeError(
                 "BigQuery jobs not marked as completed after threaded execution end."

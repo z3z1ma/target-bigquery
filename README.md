@@ -26,7 +26,9 @@ pipx install target-bigquery
 | threads             | False    |       8 | The number of threads to use for writing to BigQuery. |
 | method              | False    | batch   | The method to use for writing to BigQuery. Accepted values are: batch, stream, gcs |
 | bucket              | False    | None    | The GCS bucket to use for staging data. Only used if method is gcs. |
-| gcs_buffer_size     | False    |     2.5 | The size of the buffer for GCS before flushing. Value in Megabytes. |
+| gcs_buffer_size     | False    |     2.5 | The size of the buffer for GCS stream before flushing. Value in Megabytes. |
+| append_columns      | False    |       1 | Whether to append newly detected columns from a data source. This is enabled by default and                 recommended for most use cases. |
+| cast_columns        | False    |       0 | Whether to mutate columns with DDL statements when a column type change is detected in the schema.                 This is op mutates existing data and is disabled by default. When disabled, data will still be ingested but if                 BigQuery cannot coerce it, the pipeline will fail. When enabled, these rules apply                 https://cloud.google.com/bigquery/docs/reference/standard-sql/conversion_rules |
 | stream_maps         | False    | None    | Config object for stream maps capability. |
 | stream_map_config   | False    | None    | User-defined config values to be used within map expressions. |
 | flattening_enabled  | False    | None    | 'True' to enable schema flattening and automatically expand nested properties. |

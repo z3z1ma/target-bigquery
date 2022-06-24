@@ -67,8 +67,24 @@ class TargetBigQuery(Target):
         th.Property(
             "gcs_buffer_size",
             th.NumberType,
-            description="The size of the buffer for GCS before flushing. Value in Megabytes.",
+            description="The size of the buffer for GCS stream before flushing. Value in Megabytes.",
             default=2.5,
+        ),
+        th.Property(
+            "append_columns",
+            th.BooleanType,
+            description="Whether to append newly detected columns from a data source. This is enabled by default and \
+                recommended for most use cases.",
+            default=True,
+        ),
+        th.Property(
+            "cast_columns",
+            th.BooleanType,
+            description="Whether to mutate columns with DDL statements when a column type change is detected in the schema. \
+                This is op mutates existing data and is disabled by default. When disabled, data will still be ingested but if \
+                BigQuery cannot coerce it, the pipeline will fail. When enabled, these rules apply \
+                https://cloud.google.com/bigquery/docs/reference/standard-sql/conversion_rules",
+            default=False,
         ),
     ).to_dict()
 
