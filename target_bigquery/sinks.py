@@ -213,13 +213,13 @@ class BaseBigQuerySink(BatchSink):
                         # It works for basic mutations
                         ddl = f"ALTER TABLE `{self._table_ref.dataset_id}`.`{self._table_ref.table_id}` \
                         ALTER COLUMN `{mut_field.name}` SET DATA TYPE {expected_field.field_type}"
+                        self.logger.info("Schema change detected, dispatching: %s", ddl)
                         self._client.query(ddl).result()
-                        mut_field.field_type = expected_field.field_type
                         break
                 else:
                     # This is easy with PATCH
                     mutable_schema.append(expected_field)
-        if mutable_schema != original_schema:
+        if len(mutable_schema) > len(original_schema):
             self._table_ref.schema = mutable_schema
             self._client.update_table(
                 self._table_ref,
