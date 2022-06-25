@@ -15,7 +15,6 @@ from tenacity import retry, retry_if_result
 from tenacity.retry import retry_if_exception_type
 from tenacity.stop import stop_after_attempt
 
-
 DELAY = 1, 10, 1.5
 
 # pylint: disable=no-else-return,too-many-branches,too-many-return-statements
@@ -210,13 +209,13 @@ class BaseBigQuerySink(BatchSink):
         for expected_field in self.bigquery_schema:
             if expected_field not in original_schema:
                 for mut_field in mutable_schema:
-                    if (
-                        mut_field.name == expected_field.field_type
-                        and mut_field.upper() != expected_field.field_type.upper()
-                    ):
+                    if mut_field.name == expected_field.field_type:
                         # This can throw if uncastable change in schema
                         # It works for basic mutations
-                        if self.config["cast_columns"]:
+                        if (
+                            mut_field.upper() != expected_field.field_type.upper()
+                            and self.config["cast_columns"]
+                        ):
                             self.logger.debug(
                                 f"Detected Diff {mut_field.name=} -> {expected_field.name=} \
                                 {mut_field.field_type=} -> {expected_field.field_type=}"
