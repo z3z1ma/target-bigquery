@@ -209,11 +209,11 @@ class BaseBigQuerySink(BatchSink):
         for expected_field in self.bigquery_schema:
             if expected_field not in original_schema:
                 for mut_field in mutable_schema:
-                    if mut_field.name == expected_field.field_type:
+                    if mut_field.name == expected_field.name:
                         # This can throw if uncastable change in schema
                         # It works for basic mutations
                         if (
-                            mut_field.upper() != expected_field.field_type.upper()
+                            mut_field.field_type.upper() != expected_field.field_type.upper()
                             and self.config["cast_columns"]
                         ):
                             self.logger.debug(
