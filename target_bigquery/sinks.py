@@ -1,8 +1,9 @@
 """BigQuery target sink class, which handles writing streams."""
 import csv
+import codecs
 import time
 from concurrent.futures import Future, ThreadPoolExecutor, wait
-from io import BytesIO, FileIO
+from io import BytesIO
 from typing import Dict, List, Optional
 
 import orjson
@@ -28,6 +29,12 @@ def get_bq_client(credentials_path: str) -> bigquery.Client:
 def get_gcs_client(credentials_path: str) -> storage.Client:
     """Returns a BigQuery client. Singleton."""
     return storage.Client.from_service_account_json(credentials_path)
+
+
+class CsvDictWriterWrapper(csv.DictWriter):
+    def __init__(self, fh=None, *args, **kwargs) -> None:
+        self.fh = fh
+        super().__init__(self.fh, *args, **kwargs)
 
 
 class BaseBigQuerySink(BatchSink):
@@ -147,7 +154,7 @@ class BaseBigQuerySink(BatchSink):
                 "_sdc_table_version",
             )
         }
-        return {"data": record, **metadata}
+        return {"data": orjson.dumps(record).decode("utf-8"), **metadata}
 
     def clean_up(self):
         """Ensure all jobs are completed"""
@@ -169,7 +176,7 @@ class BigQueryStreamingSink(BaseBigQuerySink):
     def _generate_batch_row_ids(self):
         """Generate row ids if key properties is supplied"""
         return [
-            "-".join(str(row["data"][k]) for k in self.key_properties)
+            "-".join(str(orjson.loads(row["data"])[k]) for k in self.key_properties)
             for row in self.records_to_drain
             if self.key_properties
         ]
@@ -264,8 +271,9 @@ class BigQueryBatchSink(BaseBigQuerySink):
         """Write record to buffer"""
         if not context.get("records"):
             context["records"] = BytesIO()
+            wrapper = codecs.getwriter("utf-8")
             context["writer"] = csv.DictWriter(
-                context["records"],
+                wrapper(context["records"]),
                 fieldnames=(
                     "data",
                     "_sdc_extracted_at",
@@ -316,13 +324,13 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
         return context["batch_id"]
 
     @cached(custom_key_maker=_get_batch_id)
-    def _get_gcs_write_handle(self, context: dict) -> FileIO:
+    def _get_gcs_write_handle(self, context: dict) -> csv.DictWriter:
         """Opens a stream for writing to the target cloud object,
         Singleton handle per batch"""
         _256kb = int(256 * 1024)
-        return smart_open.open(
-            f"{self._blob_path}/{context['batch_id']}.jsonl",
-            "wb",
+        fh = smart_open.open(
+            f"{self._blob_path}/{context['batch_id']}.csv",
+            "w",
             transport_params=dict(
                 client=self._gcs_client,
                 buffer_size=int(
@@ -333,6 +341,18 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
                     _256kb * ((self.config.get("gcs_buffer_size", 0) * 1e6) // _256kb)
                 )
                 or _256kb,
+            ),
+        )
+        return CsvDictWriterWrapper(
+            fh=fh,
+            fieldnames=(
+                "data",
+                "_sdc_extracted_at",
+                "_sdc_received_at",
+                "_sdc_batched_at",
+                "_sdc_deleted_at",
+                "_sdc_sequence",
+                "_sdc_table_version",
             ),
         )
 
@@ -348,7 +368,7 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
             self._table,
             timeout=self.config["timeout"],
             job_config=bigquery.LoadJobConfig(
-                source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
+                source_format=bigquery.SourceFormat.CSV,
                 schema_update_options=[
                     bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION,
                 ],
@@ -373,16 +393,14 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
 
     def process_record(self, record: dict, context: dict) -> None:
         """Write record to buffer"""
-        self._get_gcs_write_handle(context).write(
-            orjson.dumps(record, option=orjson.OPT_APPEND_NEWLINE)
-        )
+        self._get_gcs_write_handle(context).writerow(record)
 
     def process_batch(self, context: dict) -> None:
         """Write out any prepped records and return once fully written."""
-        self._get_gcs_write_handle(context).close()
+        self._get_gcs_write_handle(context).fh.close()
         job = self.executor.submit(
             self._upload_records,
-            target_stage=f"{self._blob_path}/{context['batch_id']}.jsonl",
+            target_stage=f"{self._blob_path}/{context['batch_id']}.csv",
         )
         self.jobs_running.append(job)
         job.add_done_callback(self._pop_job_from_stack)
