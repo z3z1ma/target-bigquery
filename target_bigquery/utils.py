@@ -1,8 +1,9 @@
 import re
 from typing import List, Optional
 
-from google.cloud import bigquery
 import orjson
+from google.cloud import bigquery
+
 
 # pylint: disable=no-else-return,too-many-branches,too-many-return-statements
 def bigquery_type(property_type: List[str], property_format: str) -> str:
