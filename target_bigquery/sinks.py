@@ -1,5 +1,4 @@
 """BigQuery target sink class, which handles writing streams."""
-import re
 import time
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 from io import BytesIO, FileIO
@@ -16,38 +15,6 @@ from tenacity.retry import retry_if_exception_type
 from tenacity.stop import stop_after_attempt
 
 DELAY = 1, 10, 1.5
-
-# pylint: disable=no-else-return,too-many-branches,too-many-return-statements
-def bigquery_type(property_type: List[str], property_format: str) -> str:
-    """Translate jsonschema type to bigquery type."""
-    if property_format == "date-time":
-        return "timestamp"
-    if property_format == "date":
-        return "date"
-    elif property_format == "time":
-        return "time"
-    elif "number" in property_type:
-        return "float"
-    elif "integer" in property_type and "string" in property_type:
-        return "string"
-    elif "integer" in property_type:
-        return "integer"
-    elif "boolean" in property_type:
-        return "boolean"
-    elif "object" in property_type:
-        return "record"
-    else:
-        return "string"
-
-
-def safe_column_name(name: str, quotes: bool = False) -> str:
-    """Returns a safe column name for BigQuery."""
-    name = name.replace("`", "")
-    pattern = "[^a-zA-Z0-9_]"
-    name = re.sub(pattern, "_", name)
-    if quotes:
-        return "`{}`".format(name).lower()
-    return "{}".format(name).lower()
 
 
 @cached
@@ -77,14 +44,10 @@ class BaseBigQuerySink(BatchSink):
         # Client and Table ID
         self._client = get_bq_client(self.config["credentials_path"])
         self._table = f"{self.config['project']}.{self.config['dataset']}.{self.stream_name.lower()}"
-
-        # Flag if field was coerced
-        self._contains_coerced_field = False
-
-        # BQ Schema resolution sets the _contains_coerced_field property to True if any of the fields are coerced
         self.bigquery_schema = [
-            self.jsonschema_prop_to_bq_column(name, prop)
-            for name, prop in self.schema["properties"].items()
+            bigquery.SchemaField(
+                "data", "JSON", description="Data ingested from Singer Tap"
+            )
         ]
 
         # Track Jobs
@@ -122,127 +85,10 @@ class BaseBigQuerySink(BatchSink):
                 ),
                 exists_ok=True,
             )
-            self._evolve_schema()
 
     @property
     def max_size(self) -> int:
         return self.config.get("batch_size_limit", 15000)
-
-    def jsonschema_prop_to_bq_column(
-        self, name: str, schema_property: dict
-    ) -> bigquery.SchemaField:
-        """Translates a json schema property to a BigQuery schema property."""
-        safe_name = safe_column_name(name, quotes=False)
-        property_type = schema_property.get("type", "string")
-        property_format = schema_property.get("format", None)
-        if "array" in property_type:
-            try:
-                items_schema = schema_property["items"]
-                items_type = bigquery_type(
-                    items_schema["type"], items_schema.get("format", None)
-                )
-            except KeyError:
-                # Coerced to string because there was no `items` property, TODO: Add strict mode
-                self._contains_coerced_field = True
-                return bigquery.SchemaField(safe_name, "string", "NULLABLE")
-            else:
-                if items_type == "record":
-                    return self._translate_record_to_bq_schema(
-                        safe_name, items_schema, "REPEATED"
-                    )
-                return bigquery.SchemaField(safe_name, items_type, "REPEATED")
-        elif "object" in property_type:
-            return self._translate_record_to_bq_schema(safe_name, schema_property)
-        else:
-            result_type = bigquery_type(property_type, property_format)
-            return bigquery.SchemaField(safe_name, result_type, "NULLABLE")
-
-    def _translate_record_to_bq_schema(
-        self, safe_name, schema_property, mode="NULLABLE"
-    ) -> bigquery.SchemaField:
-        """Recursive descent in record objects."""
-        fields = [
-            self.jsonschema_prop_to_bq_column(col, t)
-            for col, t in schema_property.get("properties", {}).items()
-        ]
-        if fields:
-            return bigquery.SchemaField(safe_name, "RECORD", mode, fields=fields)
-        else:
-            # Coerced to string because there was no populated `properties` property, TODO: Add strict mode
-            self._contains_coerced_field = True
-            return bigquery.SchemaField(safe_name, "string", mode)
-
-    def _parse_json_with_props(self, record: dict, _prop_spec=None):
-        """Recursively serialize a JSON object which has props that were forcibly coerced
-        to string do to lack of prop definitons"""
-        if _prop_spec is None:
-            _prop_spec = self.schema["properties"]
-        for name, contents in record.items():
-            prop_spec = _prop_spec.get(name)
-            if prop_spec:
-                if (
-                    "object" in prop_spec["type"]
-                    and isinstance(contents, dict)
-                    and not prop_spec.get("properties")
-                ):
-                    # If the prop_spec has no properties, it means it was coerced to a string
-                    record[name] = orjson.dumps(record[name]).decode("utf-8")
-                elif "object" in prop_spec["type"] and isinstance(contents, dict):
-                    self._parse_json_with_props(contents, prop_spec["properties"])
-                elif "array" in prop_spec["type"] and isinstance(contents, list):
-                    if prop_spec.get("items"):
-                        [
-                            self._parse_json_with_props(item, prop_spec["items"])
-                            for item in contents
-                        ]
-                    else:
-                        record[name] = orjson.dumps(record[name]).decode("utf-8")
-        return record
-
-    def _evolve_schema(self):
-        """Schema Evolution
-        TODO: feature flag on casting"""
-        if not self.config["append_columns"] or self.config["cast_columns"]:
-            return
-        original_schema = self._table_ref.schema[:]
-        mutable_schema = self._table_ref.schema[:]
-        for expected_field in self.bigquery_schema:
-            if expected_field not in original_schema:
-                for mut_field in mutable_schema:
-                    if mut_field.name == expected_field.name:
-                        # This can throw if uncastable change in schema
-                        # It works for basic mutations
-                        if (
-                            mut_field.field_type.upper() != expected_field.field_type.upper()
-                            and self.config["cast_columns"]
-                        ):
-                            self.logger.debug(
-                                f"Detected Diff {mut_field.name=} -> {expected_field.name=} \
-                                {mut_field.field_type=} -> {expected_field.field_type=}"
-                            )
-                            ddl = f"ALTER TABLE `{self._table_ref.dataset_id}`.`{self._table_ref.table_id}` \
-                            ALTER COLUMN `{mut_field.name}` SET DATA TYPE {expected_field.field_type};"
-                            self.logger.info(
-                                "Schema change detected, dispatching: %s", ddl
-                            )
-                            self._client.query(ddl).result()
-                            mut_field._properties["type"] = expected_field.field_type
-                        break
-                else:
-                    # This is easy with PATCH
-                    mutable_schema.append(expected_field)
-        if len(mutable_schema) > len(original_schema):
-            # Append new columns to schema
-            if self.config["append_columns"]:
-                self._table_ref.schema = mutable_schema
-                self._client.update_table(
-                    self._table_ref,
-                    ["schema"],
-                    retry=bigquery.DEFAULT_RETRY.with_delay(*DELAY).with_deadline(
-                        self.config["timeout"]
-                    ),
-                    timeout=self.config["timeout"],
-                )
 
     def start_batch(self, context: dict) -> None:
         """Ensure target exists, noop once verified. Throttle jobs"""
@@ -252,10 +98,8 @@ class BaseBigQuerySink(BatchSink):
             time.sleep(2)
 
     def preprocess_record(self, record: Dict, context: dict) -> dict:
-        """Inject metadata if not present and asked for, coerce json paths to strings if needed."""
-        if self._contains_coerced_field:
-            return self._parse_json_with_props(record)
-        return record
+        """Wrap object in data key to standardize output."""
+        return {"data": record}
 
     def clean_up(self):
         """Ensure all jobs are completed"""
@@ -360,9 +204,9 @@ class BigQueryBatchSink(BaseBigQuerySink):
                 ),
                 timeout=self.config["timeout"],
             )
-        except Exception as exc:
+        except Exception as should_retry:
             self.logger.info("Error during upload: %s", job.errors)
-            raise exc  # Here, tenacity takes the wheel if needed
+            raise should_retry  # On raise, tenacity will retry as appropriate
         else:
             return job
 
