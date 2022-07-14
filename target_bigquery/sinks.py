@@ -1,4 +1,5 @@
 """BigQuery target sink class, which handles writing streams."""
+import csv
 import time
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 from io import BytesIO, FileIO
@@ -135,7 +136,18 @@ class BaseBigQuerySink(BatchSink):
 
     def preprocess_record(self, record: Dict, context: dict) -> dict:
         """Wrap object in data key to standardize output."""
-        return {"data": record}
+        metadata = {
+            k: record.pop(k, None)
+            for k in (
+                "_sdc_extracted_at",
+                "_sdc_received_at",
+                "_sdc_batched_at",
+                "_sdc_deleted_at",
+                "_sdc_sequence",
+                "_sdc_table_version",
+            )
+        }
+        return {"data": record, **metadata}
 
     def clean_up(self):
         """Ensure all jobs are completed"""
@@ -224,6 +236,7 @@ class BigQueryBatchSink(BaseBigQuerySink):
             num_retries=3,
             timeout=self.config["timeout"],
             job_config=bigquery.LoadJobConfig(
+                schema=self.bigquery_schema,
                 source_format=bigquery.SourceFormat.CSV,
                 schema_update_options=[
                     bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION,
@@ -251,8 +264,19 @@ class BigQueryBatchSink(BaseBigQuerySink):
         """Write record to buffer"""
         if not context.get("records"):
             context["records"] = BytesIO()
-            context["records"].write(b"data\n")
-        context["records"].write(orjson.dumps(record, option=orjson.OPT_APPEND_NEWLINE))
+            context["writer"] = csv.DictWriter(
+                context["records"],
+                fieldnames=(
+                    "data",
+                    "_sdc_extracted_at",
+                    "_sdc_received_at",
+                    "_sdc_batched_at",
+                    "_sdc_deleted_at",
+                    "_sdc_sequence",
+                    "_sdc_table_version",
+                ),
+            )
+        context["writer"].writerow(record)
 
     def process_batch(self, context: dict) -> None:
         """Write out any prepped records and return once fully written."""
