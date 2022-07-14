@@ -32,6 +32,8 @@ def get_gcs_client(credentials_path: str) -> storage.Client:
 class BaseBigQuerySink(BatchSink):
     """Base BigQuery target sink class."""
 
+    include_sdc_metadata_properties = True
+
     def __init__(
         self,
         target: PluginBase,
@@ -46,7 +48,6 @@ class BaseBigQuerySink(BatchSink):
         self._table = f"{self.config['project']}.{self.config['dataset']}.{self.stream_name.lower()}"
 
         # Because we set the schema upfront, lets be opinionated on Singer Data Capture fields being added by default
-        self.config["add_record_metadata"] = True
         self.bigquery_schema = [
             bigquery.SchemaField(
                 "data",
