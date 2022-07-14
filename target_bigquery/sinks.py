@@ -44,10 +44,45 @@ class BaseBigQuerySink(BatchSink):
         # Client and Table ID
         self._client = get_bq_client(self.config["credentials_path"])
         self._table = f"{self.config['project']}.{self.config['dataset']}.{self.stream_name.lower()}"
+
+        # Because we set the schema upfront, lets be opinionated on Singer Data Capture fields being added by default
+        self.config["add_record_metadata"] = True
         self.bigquery_schema = [
             bigquery.SchemaField(
-                "data", "JSON", description="Data ingested from Singer Tap"
-            )
+                "data",
+                "JSON",
+                description="Data ingested from Singer Tap",
+            ),
+            bigquery.SchemaField(
+                "_sdc_extracted_at",
+                "TIMESTAMP",
+                description="Timestamp indicating when the record was extracted the record from the source",
+            ),
+            bigquery.SchemaField(
+                "_sdc_received_at",
+                "TIMESTAMP",
+                description="Timestamp indicating when the record was received by the target for loading",
+            ),
+            bigquery.SchemaField(
+                "_sdc_batched_at",
+                "TIMESTAMP",
+                description="Timestamp indicating when the record's batch was initiated",
+            ),
+            bigquery.SchemaField(
+                "_sdc_deleted_at",
+                "TIMESTAMP",
+                description="Passed from a Singer tap if DELETE events are able to be tracked. In general, this is populated when the tap is synced LOG_BASED replication. If not sent from the tap, this field will be null.",
+            ),
+            bigquery.SchemaField(
+                "_sdc_sequence",
+                "BIGINT",
+                description="The epoch (milliseconds) that indicates the order in which the record was queued for loading",
+            ),
+            bigquery.SchemaField(
+                "_sdc_table_version",
+                "INT",
+                description="Indicates the version of the table. This column is used to determine when to issue TRUNCATE commands during loading, where applicable",
+            ),
         ]
 
         # Track Jobs
@@ -121,7 +156,7 @@ class BigQueryStreamingSink(BaseBigQuerySink):
     def _generate_batch_row_ids(self):
         """Generate row ids if key properties is supplied"""
         return [
-            "-".join(str(row[k]) for k in self.key_properties)
+            "-".join(str(row["data"][k]) for k in self.key_properties)
             for row in self.records_to_drain
             if self.key_properties
         ]
@@ -188,7 +223,7 @@ class BigQueryBatchSink(BaseBigQuerySink):
             num_retries=3,
             timeout=self.config["timeout"],
             job_config=bigquery.LoadJobConfig(
-                source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
+                source_format=bigquery.SourceFormat.CSV,
                 schema_update_options=[
                     bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION,
                 ],
@@ -206,7 +241,8 @@ class BigQueryBatchSink(BaseBigQuerySink):
             )
         except Exception as should_retry:
             self.logger.info("Error during upload: %s", job.errors)
-            raise should_retry  # On raise, tenacity will retry as appropriate
+            # On raise, tenacity will retry as defined in decorator
+            raise should_retry
         else:
             return job
 
@@ -214,6 +250,7 @@ class BigQueryBatchSink(BaseBigQuerySink):
         """Write record to buffer"""
         if not context.get("records"):
             context["records"] = BytesIO()
+            context["records"].write(b"data\n")
         context["records"].write(orjson.dumps(record, option=orjson.OPT_APPEND_NEWLINE))
 
     def process_batch(self, context: dict) -> None:
@@ -302,9 +339,10 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
                 ),
                 timeout=self.config["timeout"],
             )
-        except Exception as exc:
+        except Exception as should_retry:
             self.logger.info("Error during upload: %s", job.errors)
-            raise exc  # Here, tenacity takes the wheel if needed
+            # On raise, tenacity will retry as defined in decorator
+            raise should_retry
         else:
             return job
 
