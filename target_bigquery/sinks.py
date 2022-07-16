@@ -17,6 +17,43 @@ from tenacity.retry import retry_if_exception_type
 from tenacity.stop import stop_after_attempt
 
 DELAY = 1, 10, 1.5
+SCHEMA = [
+    bigquery.SchemaField(
+        "data",
+        "JSON",
+        description="Data ingested from Singer Tap",
+    ),
+    bigquery.SchemaField(
+        "_sdc_extracted_at",
+        bigquery.SqlTypeNames.TIMESTAMP,
+        description="Timestamp indicating when the record was extracted the record from the source",
+    ),
+    bigquery.SchemaField(
+        "_sdc_received_at",
+        bigquery.SqlTypeNames.TIMESTAMP,
+        description="Timestamp indicating when the record was received by the target for loading",
+    ),
+    bigquery.SchemaField(
+        "_sdc_batched_at",
+        bigquery.SqlTypeNames.TIMESTAMP,
+        description="Timestamp indicating when the record's batch was initiated",
+    ),
+    bigquery.SchemaField(
+        "_sdc_deleted_at",
+        bigquery.SqlTypeNames.TIMESTAMP,
+        description="Passed from a Singer tap if DELETE events are able to be tracked. In general, this is populated when the tap is synced LOG_BASED replication. If not sent from the tap, this field will be null.",
+    ),
+    bigquery.SchemaField(
+        "_sdc_sequence",
+        bigquery.SqlTypeNames.INT64,
+        description="The epoch (milliseconds) that indicates the order in which the record was queued for loading",
+    ),
+    bigquery.SchemaField(
+        "_sdc_table_version",
+        bigquery.SqlTypeNames.INTEGER,
+        description="Indicates the version of the table. This column is used to determine when to issue TRUNCATE commands during loading, where applicable",
+    ),
+]
 
 
 @cached
@@ -55,45 +92,6 @@ class BaseBigQuerySink(BatchSink):
         self._client = get_bq_client(self.config["credentials_path"])
         self._table = f"{self.config['project']}.{self.config['dataset']}.{self.stream_name.lower()}"
 
-        # Because we set the schema upfront, lets be opinionated on Singer Data Capture fields being added by default
-        self.bigquery_schema = [
-            bigquery.SchemaField(
-                "data",
-                "JSON",
-                description="Data ingested from Singer Tap",
-            ),
-            bigquery.SchemaField(
-                "_sdc_extracted_at",
-                bigquery.SqlTypeNames.TIMESTAMP,
-                description="Timestamp indicating when the record was extracted the record from the source",
-            ),
-            bigquery.SchemaField(
-                "_sdc_received_at",
-                bigquery.SqlTypeNames.TIMESTAMP,
-                description="Timestamp indicating when the record was received by the target for loading",
-            ),
-            bigquery.SchemaField(
-                "_sdc_batched_at",
-                bigquery.SqlTypeNames.TIMESTAMP,
-                description="Timestamp indicating when the record's batch was initiated",
-            ),
-            bigquery.SchemaField(
-                "_sdc_deleted_at",
-                bigquery.SqlTypeNames.TIMESTAMP,
-                description="Passed from a Singer tap if DELETE events are able to be tracked. In general, this is populated when the tap is synced LOG_BASED replication. If not sent from the tap, this field will be null.",
-            ),
-            bigquery.SchemaField(
-                "_sdc_sequence",
-                bigquery.SqlTypeNames.INT64,
-                description="The epoch (milliseconds) that indicates the order in which the record was queued for loading",
-            ),
-            bigquery.SchemaField(
-                "_sdc_table_version",
-                bigquery.SqlTypeNames.INTEGER,
-                description="Indicates the version of the table. This column is used to determine when to issue TRUNCATE commands during loading, where applicable",
-            ),
-        ]
-
         # Track Jobs
         self.bq_jobs = set()
         self.jobs_running = []
@@ -125,7 +123,7 @@ class BaseBigQuerySink(BatchSink):
             self._table_ref = self._client.create_table(
                 bigquery.Table(
                     self._table,
-                    schema=self.bigquery_schema,
+                    schema=SCHEMA,
                 ),
                 exists_ok=True,
             )
@@ -133,6 +131,10 @@ class BaseBigQuerySink(BatchSink):
     @property
     def max_size(self) -> int:
         return self.config.get("batch_size_limit", 15000)
+
+    def _parse_timestamps_in_record(self, *args, **kwargs) -> None:
+        """Override this as a noop"""
+        pass
 
     def start_batch(self, context: dict) -> None:
         """Ensure target exists, noop once verified. Throttle jobs"""
@@ -243,7 +245,7 @@ class BigQueryBatchSink(BaseBigQuerySink):
             num_retries=3,
             timeout=self.config["timeout"],
             job_config=bigquery.LoadJobConfig(
-                schema=self.bigquery_schema,
+                schema=SCHEMA,
                 source_format=bigquery.SourceFormat.CSV,
                 schema_update_options=[
                     bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION,
