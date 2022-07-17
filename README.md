@@ -2,7 +2,15 @@
 
 `target-bigquery` is a Singer target for BigQuery.
 
-Build with the [Meltano Target SDK](https://sdk.meltano.com).
+This is the first truly unstructured sink for BigQuery leveraging the recent GA feature 
+in BigQuery for JSON support. This allows this target to load from essentially any tap
+regardless of the quality or explicitness of its jsonschema. Observations in existing taps 
+note things such as `patternProperties` used in jsonschema objects which break down on 
+all existing BigQuery taps due to the previous need for strong typing. Also taps such as
+MongoDB which inherently deal with unstructured data are seamlessly enabled by this target. 
+
+
+Built with the [Meltano Target SDK](https://sdk.meltano.com).
 
 ## Installation
 
@@ -27,8 +35,6 @@ pipx install target-bigquery
 | method              | False    | batch   | The method to use for writing to BigQuery. Accepted values are: batch, stream, gcs |
 | bucket              | False    | None    | The GCS bucket to use for staging data. Only used if method is gcs. |
 | gcs_buffer_size     | False    |     2.5 | The size of the buffer for GCS stream before flushing. Value in Megabytes. |
-| append_columns      | False    |       1 | Whether to append newly detected columns from a data source. This is enabled by default and                 recommended for most use cases. |
-| cast_columns        | False    |       0 | Whether to mutate columns with DDL statements when a column type change is detected in the schema.                 This is op mutates existing data and is disabled by default. When disabled, data will still be ingested but if                 BigQuery cannot coerce it, the pipeline will fail. When enabled, these rules apply                 https://cloud.google.com/bigquery/docs/reference/standard-sql/conversion_rules |
 | stream_maps         | False    | None    | Config object for stream maps capability. |
 | stream_map_config   | False    | None    | User-defined config values to be used within map expressions. |
 | flattening_enabled  | False    | None    | 'True' to enable schema flattening and automatically expand nested properties. |
