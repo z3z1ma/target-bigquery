@@ -201,6 +201,7 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
         self.write_stream = self._write_client.create_write_stream(
             parent=self._parent, write_stream=self.write_stream
         )
+        self.logger.info("STREAM NAME: %s", self.write_stream.name)
         # Seed Schema
         self._request_template = types.AppendRowsRequest()
         self._request_template.write_stream = self.write_stream.name
