@@ -8,7 +8,7 @@ from typing import Dict, List, Optional
 import orjson
 import smart_open
 from google.cloud import _http, bigquery, bigquery_storage_v1, storage
-from google.cloud.bigquery_storage_v1 import types, writer
+from google.cloud.bigquery_storage_v1 import types, writer, exceptions
 from google.protobuf import descriptor_pb2
 from memoization import cached
 from singer_sdk import PluginBase
@@ -202,18 +202,18 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
         )
         # Seed Schema
         self.target_stream_name = self.write_stream.name
-        request_template = types.AppendRowsRequest()
-        request_template.write_stream = self.target_stream_name
+        self._request_template = types.AppendRowsRequest()
+        self._request_template.write_stream = self.target_stream_name
         proto_schema = types.ProtoSchema()
         proto_descriptor = descriptor_pb2.DescriptorProto()
         record_pb2.Record.DESCRIPTOR.CopyToProto(proto_descriptor)
         proto_schema.proto_descriptor = proto_descriptor
         proto_data = types.AppendRowsRequest.ProtoData()
         proto_data.writer_schema = proto_schema
-        request_template.proto_rows = proto_data
+        self._request_template.proto_rows = proto_data
         # Writer seeded and ready
         self.append_rows_stream = writer.AppendRowsStream(
-            self._write_client, request_template
+            self._write_client, self._request_template
         )
 
     def start_batch(self, context: dict) -> None:
@@ -228,7 +228,16 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
         proto_data = types.AppendRowsRequest.ProtoData()
         proto_data.rows = self.proto_rows
         request.proto_rows = proto_data
-        self.jobs_running.append(self.append_rows_stream.send(request))
+        try:
+            job = self.append_rows_stream.send(request)
+        except exceptions.StreamClosedError:
+            self.append_rows_stream.close()
+            self.append_rows_stream = writer.AppendRowsStream(
+                self._write_client, self._request_template
+            )
+            job = self.append_rows_stream.send(request)
+        finally:
+            self.jobs_running.append(job)
 
     def clean_up(self):
         self.jobs_running[-1].result()
