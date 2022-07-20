@@ -188,6 +188,8 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
     ) -> None:
         super().__init__(target, stream_name, schema, key_properties)
         self._make_target()
+        self._tracked_streams = []
+        self._offset = 0
         self._write_client = get_storage_client(self.config["credentials_path"])
         self._parent = self._write_client.table_path(
             self.config["project"],
@@ -201,9 +203,8 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
             parent=self._parent, write_stream=self.write_stream
         )
         # Seed Schema
-        self.target_stream_name = self.write_stream.name
         self._request_template = types.AppendRowsRequest()
-        self._request_template.write_stream = self.target_stream_name
+        self._request_template.write_stream = self.write_stream.name
         proto_schema = types.ProtoSchema()
         proto_descriptor = descriptor_pb2.DescriptorProto()
         record_pb2.Record.DESCRIPTOR.CopyToProto(proto_descriptor)
@@ -215,6 +216,7 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
         self.append_rows_stream = writer.AppendRowsStream(
             self._write_client, self._request_template
         )
+        self._tracked_streams.append(self.write_stream.name)
 
     def start_batch(self, context: dict) -> None:
         self.proto_rows = types.ProtoRows()
@@ -224,18 +226,31 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
 
     def process_batch(self, context: dict) -> None:
         request = types.AppendRowsRequest()
-        request.offset = self._total_records_written
+        request.offset = self._total_records_written - self._offset
         proto_data = types.AppendRowsRequest.ProtoData()
         proto_data.rows = self.proto_rows
         request.proto_rows = proto_data
         try:
             job = self.append_rows_stream.send(request)
         except exceptions.StreamClosedError:
+            # Close existing stream & finalize
             self.append_rows_stream.close()
+            self._write_client.finalize_write_stream(name=self.write_stream.name)
+            # Recreate stream
+            self.write_stream = types.WriteStream()
+            self.write_stream.type_ = types.WriteStream.Type.PENDING
+            self.write_stream = self._write_client.create_write_stream(
+                parent=self._parent, write_stream=self.write_stream
+            )
+            self._request_template.write_stream = self.write_stream.name
             self.append_rows_stream = writer.AppendRowsStream(
                 self._write_client, self._request_template
             )
+            # Retry
+            self._offset = self._total_records_written
+            request.offset = self._total_records_written - self._offset
             job = self.append_rows_stream.send(request)
+            self._tracked_streams.append(self.write_stream.name)
         self.jobs_running.append(job)
 
     def clean_up(self):
@@ -244,12 +259,12 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
         self._write_client.finalize_write_stream(name=self.write_stream.name)
         batch_commit_write_streams_request = types.BatchCommitWriteStreamsRequest()
         batch_commit_write_streams_request.parent = self._parent
-        batch_commit_write_streams_request.write_streams = [self.write_stream.name]
+        batch_commit_write_streams_request.write_streams = self._tracked_streams
         self._write_client.batch_commit_write_streams(
             batch_commit_write_streams_request
         )
         self.logger.info(
-            f"Writes to stream: '{self.write_stream.name}' have been committed."
+            f"Writes to streams: '{self._tracked_streams}' have been committed."
         )
 
 
