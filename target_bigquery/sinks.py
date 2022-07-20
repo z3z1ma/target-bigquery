@@ -93,9 +93,11 @@ def create_row_data(
     row._sdc_extracted_at = _sdc_extracted_at
     row._sdc_received_at = _sdc_received_at
     row._sdc_batched_at = _sdc_batched_at
-    row._sdc_deleted_at = _sdc_deleted_at
     row._sdc_sequence = _sdc_sequence
-    row._sdc_table_version = _sdc_table_version
+    if _sdc_deleted_at:
+        row._sdc_deleted_at = _sdc_deleted_at
+    if _sdc_table_version:
+        row._sdc_table_version = _sdc_table_version
     return row.SerializeToString()
 
 
