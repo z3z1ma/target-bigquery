@@ -1,8 +1,7 @@
 """BigQuery target sink class, which handles writing streams."""
 import codecs
 import csv
-import time
-from concurrent.futures import Future, ThreadPoolExecutor, wait, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from io import BytesIO
 from typing import Dict, List, Optional
 
