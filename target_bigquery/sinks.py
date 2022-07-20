@@ -236,8 +236,7 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
                 self._write_client, self._request_template
             )
             job = self.append_rows_stream.send(request)
-        finally:
-            self.jobs_running.append(job)
+        self.jobs_running.append(job)
 
     def clean_up(self):
         self.jobs_running[-1].result()
