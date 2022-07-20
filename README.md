@@ -14,8 +14,6 @@ Built with the [Meltano Target SDK](https://sdk.meltano.com).
 
 ## Installation
 
-- [ ] `Developer TODO:` Update the below as needed to correctly describe the install procedure. For instance, if you do not have a PyPi repo, or if you want users to directly install from your git repo, you can modify this step as appropriate.
-
 ```bash
 pipx install target-bigquery
 ```
@@ -32,7 +30,7 @@ pipx install target-bigquery
 | add_record_metadata | False    |       1 | Inject record metadata into the schema. |
 | batch_size_limit    | False    |   10000 | The maximum number of rows to send in a single batch. |
 | threads             | False    |       8 | The number of threads to use for writing to BigQuery. |
-| method              | False    | batch   | The method to use for writing to BigQuery. Accepted values are: batch, stream, gcs |
+| method              | False    | storage | The method to use for writing to BigQuery. Accepted values are: storage, batch, stream, gcs |
 | bucket              | False    | None    | The GCS bucket to use for staging data. Only used if method is gcs. |
 | gcs_buffer_size     | False    |     2.5 | The size of the buffer for GCS stream before flushing. Value in Megabytes. |
 | stream_maps         | False    | None    | Config object for stream maps capability. |
@@ -73,7 +71,6 @@ tap-carbon-intensity | target-bigquery --config /path/to/target-bigquery-config.
 
 ## Developer Resources
 
-- [ ] `Developer TODO:` As a first step, scan the entire project for the text "`TODO:`" and complete any recommended steps, deleting the "TODO" references once completed.
 
 ### Initialize your Development Environment
 
