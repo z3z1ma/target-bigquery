@@ -42,10 +42,10 @@ class TargetBigQuery(Target):
             default=True,
         ),
         th.Property(
-            "batch_size_limit",
+            "batch_size",
             th.IntegerType,
-            description="The maximum number of rows to send in a single batch.",
-            default=100,
+            description="The maximum number of rows to send in a single batch or commit.",
+            default=50,
         ),
         th.Property(
             "threads",

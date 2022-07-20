@@ -1,7 +1,6 @@
 """BigQuery target sink class, which handles writing streams."""
 import codecs
 import csv
-import logging
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 from io import BytesIO
 from typing import Dict, List, Optional
@@ -9,7 +8,7 @@ from typing import Dict, List, Optional
 import orjson
 import smart_open
 from google.cloud import _http, bigquery, bigquery_storage_v1, storage
-from google.cloud.bigquery_storage_v1 import exceptions, types, writer
+from google.cloud.bigquery_storage_v1 import types, writer
 from google.protobuf import descriptor_pb2
 from memoization import cached
 from singer_sdk import PluginBase
@@ -152,7 +151,7 @@ class BaseBigQuerySink(BatchSink):
 
     @property
     def max_size(self) -> int:
-        return self.config.get("batch_size_limit", 15000)
+        return self.config.get("batch_size", 10000)
 
     def _parse_timestamps_in_record(self, *args, **kwargs) -> None:
         pass
@@ -175,7 +174,6 @@ class BaseBigQuerySink(BatchSink):
         return {"data": orjson.dumps(record).decode("utf-8"), **metadata}
 
     def clean_up(self):
-        self.logger.info(f"Awaiting jobs: {len(self.jobs_running)}")
         wait(self.jobs_running)
 
 
@@ -187,9 +185,6 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
         schema: Dict,
         key_properties: Optional[List[str]],
     ) -> None:
-        logging.getLogger("google.cloud.bigquery_storage_v1.writer").setLevel(logging.DEBUG)
-        logging.getLogger("google.api_core.bidi").setLevel(logging.DEBUG)
-        logging.getLogger("google.api_core.bidi").addHandler(logging.FileHandler("/tmp/gapi.log"))
         super().__init__(target, stream_name, schema, key_properties)
         self._make_target()
         self._tracked_streams = []
@@ -200,6 +195,9 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
             self.config["dataset"],
             self.stream_name.lower(),
         )
+        self.seed_new_append_stream()
+
+    def seed_new_append_stream(self):
         # Create write stream
         self.write_stream = types.WriteStream()
         self.write_stream.type_ = types.WriteStream.Type.PENDING
@@ -224,6 +222,7 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
         self.append_rows_stream = writer.AppendRowsStream(
             self._write_client, self._request_template
         )
+        self._offset = self._total_records_written
 
     def start_batch(self, context: dict) -> None:
         self.proto_rows = types.ProtoRows()
@@ -237,55 +236,27 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
         proto_data = types.AppendRowsRequest.ProtoData()
         proto_data.rows = self.proto_rows
         request.proto_rows = proto_data
-        try:
-            job = self.append_rows_stream.send(request)
-        except exceptions.StreamClosedError:
-            # Close existing stream & finalize
+        self.jobs_running.append(self.append_rows_stream.send(request))
+
+    def commit_streams(self):
+        if self.jobs_running:
+            self.jobs_running[-1].result()
             self.append_rows_stream.close()
             self._write_client.finalize_write_stream(name=self.write_stream.name)
-            # Create write stream
-            self.write_stream = types.WriteStream()
-            self.write_stream.type_ = types.WriteStream.Type.PENDING
-            self.write_stream = self._write_client.create_write_stream(
-                parent=self._parent, write_stream=self.write_stream
+            batch_commit_write_streams_request = types.BatchCommitWriteStreamsRequest()
+            batch_commit_write_streams_request.parent = self._parent
+            batch_commit_write_streams_request.write_streams = self._tracked_streams
+            self._write_client.batch_commit_write_streams(
+                batch_commit_write_streams_request
             )
-            self.logger.info("Created write stream: %s", self.write_stream.name)
-            self._tracked_streams.append(self.write_stream.name)
-            # Create request template to seed writers
-            self._request_template = types.AppendRowsRequest()
-            self._request_template.write_stream = (
-                self.write_stream.name
-            )  # <- updated when streams are created
-            proto_schema = types.ProtoSchema()
-            proto_descriptor = descriptor_pb2.DescriptorProto()
-            record_pb2.Record.DESCRIPTOR.CopyToProto(proto_descriptor)
-            proto_schema.proto_descriptor = proto_descriptor
-            proto_data = types.AppendRowsRequest.ProtoData()
-            proto_data.writer_schema = proto_schema
-            self._request_template.proto_rows = proto_data
-            # Seed writer
-            self.append_rows_stream = writer.AppendRowsStream(
-                self._write_client, self._request_template
+            self.logger.info(
+                f"Writes to streams: '{self._tracked_streams}' have been committed."
             )
-            # Retry
-            self._offset = int(self._total_records_written)
-            request.offset = 0
-            job = self.append_rows_stream.send(request)
-        self.jobs_running.append(job)
+            self.jobs_running = []
+            self._tracked_streams = []
 
     def clean_up(self):
-        self.jobs_running[-1].result()
-        self.append_rows_stream.close()
-        self._write_client.finalize_write_stream(name=self.write_stream.name)
-        batch_commit_write_streams_request = types.BatchCommitWriteStreamsRequest()
-        batch_commit_write_streams_request.parent = self._parent
-        batch_commit_write_streams_request.write_streams = self._tracked_streams
-        self._write_client.batch_commit_write_streams(
-            batch_commit_write_streams_request
-        )
-        self.logger.info(
-            f"Writes to streams: '{self._tracked_streams}' have been committed."
-        )
+        self.commit_streams()
 
 
 class BigQueryGcsStagingSink(BaseBigQuerySink):
