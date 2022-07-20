@@ -243,23 +243,33 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
             # Close existing stream & finalize
             self.append_rows_stream.close()
             self._write_client.finalize_write_stream(name=self.write_stream.name)
-            # New stream
+            # Create write stream
             self.write_stream = types.WriteStream()
             self.write_stream.type_ = types.WriteStream.Type.PENDING
             self.write_stream = self._write_client.create_write_stream(
                 parent=self._parent, write_stream=self.write_stream
             )
-            self.logger.info("RE: Created write stream: %s", self.write_stream.name)
+            self.logger.info("Created write stream: %s", self.write_stream.name)
             self._tracked_streams.append(self.write_stream.name)
-            # Update offsets [force new int instead of pointer]
-            self._offset = int(self._total_records_written)
-            request.offset = 0
-            # Point request and template at new stream name and seed writer
-            self._request_template.write_stream = self.write_stream.name
+            # Create request template to seed writers
+            self._request_template = types.AppendRowsRequest()
+            self._request_template.write_stream = (
+                self.write_stream.name
+            )  # <- updated when streams are created
+            proto_schema = types.ProtoSchema()
+            proto_descriptor = descriptor_pb2.DescriptorProto()
+            record_pb2.Record.DESCRIPTOR.CopyToProto(proto_descriptor)
+            proto_schema.proto_descriptor = proto_descriptor
+            proto_data = types.AppendRowsRequest.ProtoData()
+            proto_data.writer_schema = proto_schema
+            self._request_template.proto_rows = proto_data
+            # Seed writer
             self.append_rows_stream = writer.AppendRowsStream(
                 self._write_client, self._request_template
             )
             # Retry
+            self._offset = int(self._total_records_written)
+            request.offset = 0
             job = self.append_rows_stream.send(request)
         self.jobs_running.append(job)
 
