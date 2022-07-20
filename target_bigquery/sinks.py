@@ -1,8 +1,6 @@
 """BigQuery target sink class, which handles writing streams."""
 import codecs
 import csv
-import logging
-import time
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 from io import BytesIO
 from typing import Dict, List, Optional
@@ -10,7 +8,7 @@ from typing import Dict, List, Optional
 import orjson
 import smart_open
 from google.cloud import _http, bigquery, bigquery_storage_v1, storage
-from google.cloud.bigquery_storage_v1 import types, writer, exceptions
+from google.cloud.bigquery_storage_v1 import exceptions, types, writer
 from google.protobuf import descriptor_pb2
 from memoization import cached
 from singer_sdk import PluginBase
@@ -208,7 +206,9 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
         self._tracked_streams.append(self.write_stream.name)
         # Create request template to seed writers
         self._request_template = types.AppendRowsRequest()
-        self._request_template.write_stream = self.write_stream.name  # <- updated when streams are created
+        self._request_template.write_stream = (
+            self.write_stream.name
+        )  # <- updated when streams are created
         proto_schema = types.ProtoSchema()
         proto_descriptor = descriptor_pb2.DescriptorProto()
         record_pb2.Record.DESCRIPTOR.CopyToProto(proto_descriptor)
