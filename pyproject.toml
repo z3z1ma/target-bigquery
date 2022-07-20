@@ -14,7 +14,7 @@ python = "<3.11,>=3.8"
 requests = "^2.25.1"
 singer-sdk = "^0.6.0"
 google-cloud-bigquery = "^3.2.0"
-orjson = "^3.7.2"
+orjson = "3.7.2"
 smart-open = {extras = ["gcs"], version = "^6.0.0"}
 tenacity = "^8.0.1"
 
