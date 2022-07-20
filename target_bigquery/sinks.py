@@ -224,7 +224,7 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
 
     def process_batch(self, context: dict) -> None:
         request = types.AppendRowsRequest()
-        request.offset = self._total_records_written - self._offset
+        request.offset = self._total_records_written
         proto_data = types.AppendRowsRequest.ProtoData()
         proto_data.rows = self.proto_rows
         request.proto_rows = proto_data
