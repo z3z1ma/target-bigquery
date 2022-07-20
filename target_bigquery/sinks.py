@@ -1,6 +1,7 @@
 """BigQuery target sink class, which handles writing streams."""
 import codecs
 import csv
+import logging
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 from io import BytesIO
 from typing import Dict, List, Optional
@@ -186,6 +187,9 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
         schema: Dict,
         key_properties: Optional[List[str]],
     ) -> None:
+        logging.getLogger("google.cloud.bigquery_storage_v1.writer").setLevel(logging.DEBUG)
+        logging.getLogger("google.api_core.bidi").setLevel(logging.DEBUG)
+        logging.getLogger("google.api_core.bidi").addHandler(logging.FileHandler("/tmp/gapi.log"))
         super().__init__(target, stream_name, schema, key_properties)
         self._make_target()
         self._tracked_streams = []
