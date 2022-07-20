@@ -159,9 +159,6 @@ class BaseBigQuerySink(BatchSink):
 
     def start_batch(self, context: dict) -> None:
         self._make_target()
-        while len(self.jobs_running) >= self.config["threads"]:
-            self.logger.info("Throttling job queue...")
-            time.sleep(2)
 
     def preprocess_record(self, record: Dict, context: dict) -> dict:
         metadata = {
