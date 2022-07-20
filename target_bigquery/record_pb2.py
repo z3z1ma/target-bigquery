@@ -7,32 +7,28 @@ from google.protobuf import descriptor_pool as _descriptor_pool
 from google.protobuf import message as _message
 from google.protobuf import reflection as _reflection
 from google.protobuf import symbol_database as _symbol_database
-
 # @@protoc_insertion_point(imports)
 
 _sym_db = _symbol_database.Default()
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(
-    b'\n\x0crecord.proto"\xb0\x01\n\x06Record\x12\x0c\n\x04\x64\x61ta\x18\x01 \x02(\t\x12\x19\n\x11_sdc_extracted_at\x18\x02 \x01(\t\x12\x18\n\x10_sdc_received_at\x18\x03 \x01(\t\x12\x17\n\x0f_sdc_batched_at\x18\x04 \x01(\t\x12\x17\n\x0f_sdc_deleted_at\x18\x05 \x01(\t\x12\x15\n\r_sdc_sequence\x18\x06 \x01(\x03\x12\x1a\n\x12_sdc_table_version\x18\x07 \x01(\x05'
-)
 
 
-_RECORD = DESCRIPTOR.message_types_by_name["Record"]
-Record = _reflection.GeneratedProtocolMessageType(
-    "Record",
-    (_message.Message,),
-    {
-        "DESCRIPTOR": _RECORD,
-        "__module__": "record_pb2"
-        # @@protoc_insertion_point(class_scope:Record)
-    },
-)
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0crecord.proto\"\xb0\x01\n\x06Record\x12\x0c\n\x04\x64\x61ta\x18\x01 \x02(\t\x12\x19\n\x11_sdc_extracted_at\x18\x02 \x01(\t\x12\x18\n\x10_sdc_received_at\x18\x03 \x01(\t\x12\x17\n\x0f_sdc_batched_at\x18\x04 \x01(\t\x12\x17\n\x0f_sdc_deleted_at\x18\x05 \x01(\t\x12\x15\n\r_sdc_sequence\x18\x06 \x01(\x03\x12\x1a\n\x12_sdc_table_version\x18\x07 \x01(\x03')
+
+
+
+_RECORD = DESCRIPTOR.message_types_by_name['Record']
+Record = _reflection.GeneratedProtocolMessageType('Record', (_message.Message,), {
+  'DESCRIPTOR' : _RECORD,
+  '__module__' : 'record_pb2'
+  # @@protoc_insertion_point(class_scope:Record)
+  })
 _sym_db.RegisterMessage(Record)
 
 if _descriptor._USE_C_DESCRIPTORS == False:
 
-    DESCRIPTOR._options = None
-    _RECORD._serialized_start = 17
-    _RECORD._serialized_end = 193
+  DESCRIPTOR._options = None
+  _RECORD._serialized_start=17
+  _RECORD._serialized_end=193
 # @@protoc_insertion_point(module_scope)
