@@ -255,7 +255,6 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
             self._offset = int(self._total_records_written)
             request.offset = 0
             # Point request and template at new stream name and seed writer
-            request.write_stream = self.write_stream.name
             self._request_template.write_stream = self.write_stream.name
             self.append_rows_stream = writer.AppendRowsStream(
                 self._write_client, self._request_template
