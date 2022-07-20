@@ -2,7 +2,7 @@
 import codecs
 import csv
 import time
-from concurrent.futures import Future, ThreadPoolExecutor, wait
+from concurrent.futures import Future, ThreadPoolExecutor, wait, as_completed
 from io import BytesIO
 from typing import Dict, List, Optional
 
@@ -235,7 +235,7 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
         self.jobs_running.append(self.append_rows_stream.send(request))
 
     def clean_up(self):
-        wait(self.jobs_running)
+        self.jobs_running[-1].result()
         self.append_rows_stream.close()
         self._write_client.finalize_write_stream(name=self.write_stream.name)
         batch_commit_write_streams_request = types.BatchCommitWriteStreamsRequest()
