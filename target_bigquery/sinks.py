@@ -1,6 +1,7 @@
 """BigQuery target sink class, which handles writing streams."""
 import codecs
 import csv
+import logging
 import time
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 from io import BytesIO
@@ -189,6 +190,7 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
     ) -> None:
         super().__init__(target, stream_name, schema, key_properties)
         self._make_target()
+        self._offset = 0
         self._write_client = get_storage_client(self.config["credentials_path"])
         self._parent = self._write_client.table_path(
             self.config["project"],
@@ -216,6 +218,7 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
         self.append_rows_stream = writer.AppendRowsStream(
             self._write_client, self._request_template
         )
+        logging.getLogger("google.cloud.bigquery_storage_v1").setLevel(logging.DEBUG)
 
     def start_batch(self, context: dict) -> None:
         self.proto_rows = types.ProtoRows()
@@ -225,7 +228,7 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
 
     def process_batch(self, context: dict) -> None:
         request = types.AppendRowsRequest()
-        request.offset = self._total_records_written
+        request.offset = self._total_records_written - self._offset
         proto_data = types.AppendRowsRequest.ProtoData()
         proto_data.rows = self.proto_rows
         request.proto_rows = proto_data
@@ -233,9 +236,10 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
             job = self.append_rows_stream.send(request)
         except exceptions.StreamClosedError:
             self.append_rows_stream.close()
-            self._request_template.offset = request.offset
+            self._offset = self._total_records_written
+            request.offset = 0
             self.append_rows_stream = writer.AppendRowsStream(
-                self._write_client, self._request_template
+                self._write_client, request
             )
             time.sleep(1.0)
             job = self.append_rows_stream.send(request)
