@@ -119,4 +119,10 @@ class TargetBigQuery(Target):
         schema: Optional[dict] = None,
         key_properties: Optional[List[str]] = None,
     ) -> Sink:
-        return self._sinks_active.get(stream_name, None)
+        if schema is None:
+            self._assert_sink_exists(stream_name)
+            return self._sinks_active[stream_name]
+        existing_sink = self._sinks_active.get(stream_name, None)
+        if not existing_sink:
+            return self.add_sink(stream_name, schema, key_properties)
+        return existing_sink
