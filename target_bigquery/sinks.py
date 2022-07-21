@@ -239,6 +239,7 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
         try:
             self.jobs_running.append(self.append_rows_stream.send(request))
         except:
+            self._write_client.finalize_write_stream(name=self.write_stream.name)
             self.seed_new_append_stream()
             request.offset = self._total_records_written - self._offset
             self.jobs_running.append(self.append_rows_stream.send(request))
