@@ -1,8 +1,8 @@
 """BigQuery target class."""
-from typing import Type
+from typing import Type, Optional
 
 from singer_sdk import typing as th
-from singer_sdk.target_base import Sink, Target
+from singer_sdk.target_base import Sink, Target, List
 
 from target_bigquery.sinks import (
     BigQueryBatchSink,
@@ -109,5 +109,14 @@ class TargetBigQuery(Target):
             schema,
             key_properties,
         )
-        # Do not update sinks
         return
+
+    def get_sink(
+        self,
+        stream_name: str,
+        *,
+        record: Optional[dict] = None,
+        schema: Optional[dict] = None,
+        key_properties: Optional[List[str]] = None,
+    ) -> Sink:
+        return self._sinks_active.get(stream_name, None)
