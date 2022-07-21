@@ -236,7 +236,11 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
         proto_data = types.AppendRowsRequest.ProtoData()
         proto_data.rows = self.proto_rows
         request.proto_rows = proto_data
-        self.jobs_running.append(self.append_rows_stream.send(request))
+        try:
+            self.jobs_running.append(self.append_rows_stream.send(request))
+        except:
+            self.seed_new_append_stream()
+            self.jobs_running.append(self.append_rows_stream.send(request))
 
     def commit_streams(self):
         if self.jobs_running:
