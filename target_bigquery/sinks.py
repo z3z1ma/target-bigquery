@@ -91,10 +91,12 @@ def create_row_data(
 ):
     row = record_pb2.Record()
     row.data = data
-    row._sdc_extracted_at = _sdc_extracted_at
     row._sdc_received_at = _sdc_received_at
     row._sdc_batched_at = _sdc_batched_at
     row._sdc_sequence = _sdc_sequence
+    # These are not guaranteed in sdc
+    if _sdc_extracted_at:
+        row._sdc_extracted_at = _sdc_extracted_at
     if _sdc_deleted_at:
         row._sdc_deleted_at = _sdc_deleted_at
     if _sdc_table_version:
