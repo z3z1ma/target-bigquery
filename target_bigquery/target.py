@@ -98,3 +98,6 @@ class TargetBigQuery(Target):
             return BigQueryStorageWriteSink
         else:
             raise ValueError(f"Unknown method: {method}")
+
+    def _process_schema_message(self, message_dict: dict) -> None:
+        pass
