@@ -8,6 +8,7 @@ from typing import Dict, List, Optional
 import orjson
 import smart_open
 from google.cloud import _http, bigquery, bigquery_storage_v1, storage
+from google.cloud.bigquery.table import TimePartitioning, TimePartitioningType
 from google.cloud.bigquery_storage_v1 import types, writer
 from google.protobuf import descriptor_pb2
 from memoization import cached
@@ -141,13 +142,23 @@ class BaseBigQuerySink(BatchSink):
                 self.config["dataset"], exists_ok=True
             )
         if self._table_ref is None:
-            self._table_ref = self._client.create_table(
-                bigquery.Table(
-                    self._table,
-                    schema=SCHEMA,
-                ),
-                exists_ok=True,
+            table = bigquery.Table(
+                self._table,
+                schema=SCHEMA,
             )
+            table.clustering_fields = [
+                "_sdc_extracted_at",
+                "_sdc_received_at",
+                "_sdc_batched_at",
+            ]
+            table.description = f"This table is loaded via \
+                target-bigquery which is a Singer target that uses an \
+                unstructured load approach. The originating stream name \
+                is `{self.stream_name}`."
+            table.time_partitioning = TimePartitioning(
+                type_=TimePartitioningType.DAY, field="_sdc_batched_at"
+            )
+            self._table_ref = self._client.create_table(table, exists_ok=True)
 
     @property
     def max_size(self) -> int:
