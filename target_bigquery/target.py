@@ -100,4 +100,18 @@ class TargetBigQuery(Target):
             raise ValueError(f"Unknown method: {method}")
 
     def _process_schema_message(self, message_dict: dict) -> None:
-        pass
+        stream_name = message_dict["stream"]
+        schema = message_dict["schema"]
+        key_properties = message_dict.get("key_properties", None)
+        self.mapper.register_raw_stream_schema(
+            stream_name,
+            schema,
+            key_properties,
+        )
+        for stream_map in self.mapper.stream_maps[stream_name]:
+            # new_schema = helpers._float_to_decimal(new_schema)
+            _ = self.get_sink(
+                stream_map.stream_alias,
+                schema=stream_map.transformed_schema,
+                key_properties=stream_map.transformed_key_properties,
+            )
