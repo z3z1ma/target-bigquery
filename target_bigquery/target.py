@@ -99,18 +99,6 @@ class TargetBigQuery(Target):
         else:
             raise ValueError(f"Unknown method: {method}")
 
-    def _process_schema_message(self, message_dict: dict) -> None:
-        self._assert_line_requires(message_dict, requires={"stream", "schema"})
-        stream_name = message_dict["stream"]
-        schema = message_dict["schema"]
-        key_properties = message_dict.get("key_properties", None)
-        self.mapper.register_raw_stream_schema(
-            stream_name,
-            schema,
-            key_properties,
-        )
-        return
-
     def get_sink(
         self,
         stream_name: str,
