@@ -154,7 +154,8 @@ class BaseBigQuerySink(BatchSink):
             table.description = f"This table is loaded via \
                 target-bigquery which is a Singer target that uses an \
                 unstructured load approach. The originating stream name \
-                is `{self.stream_name}`."
+                is `{self.stream_name}`. This table is partitioned by \
+                _sdc_batched_at and clustered by related timestamp fields."
             table.time_partitioning = TimePartitioning(
                 type_=TimePartitioningType.DAY, field="_sdc_batched_at"
             )
