@@ -3,6 +3,7 @@ import codecs
 import csv
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 from io import BytesIO
+from textwrap import dedent
 from typing import Dict, List, Optional
 
 import orjson
@@ -151,11 +152,13 @@ class BaseBigQuerySink(BatchSink):
                 "_sdc_received_at",
                 "_sdc_batched_at",
             ]
-            table.description = f"This table is loaded via \
-                target-bigquery which is a Singer target that uses an \
-                unstructured load approach. The originating stream name \
-                is `{self.stream_name}`. This table is partitioned by \
-                _sdc_batched_at and clustered by related timestamp fields."
+            table.description = dedent(f"""
+                This table is loaded via target-bigquery which is a 
+                Singer target that uses an unstructured load approach. 
+                The originating stream name is `{self.stream_name}`. 
+                This table is partitioned by _sdc_batched_at and 
+                clustered by related _sdc timestamp fields.
+            """)
             table.time_partitioning = TimePartitioning(
                 type_=TimePartitioningType.DAY, field="_sdc_batched_at"
             )
