@@ -22,17 +22,19 @@ pipx install target-bigquery
 
 ### Settings
 
+Note: Either credentials_path or credentials_json (str) must be provided.
+
 | Setting             | Required | Default | Description |
 |:--------------------|:--------:|:-------:|:------------|
-| credentials_path    | True     | None    | The path to a gcp credentials json file. |
+| credentials_path    | False    | None    | The path to a gcp credentials json file. |
+| credentials_json    | False    | None    | The str representation of gcp service account credentials. |
 | project             | True     | None    | The target GCP project to materialize data into. |
 | dataset             | True     | None    | The target dataset to materialize data into. |
-| add_record_metadata | False    |       1 | Inject record metadata into the schema. |
-| batch_size_limit    | False    |   10000 | The maximum number of rows to send in a single batch. |
+| batch_size          | False    |      50 | The maximum number of rows to send in a single batch. |
 | threads             | False    |       8 | The number of threads to use for writing to BigQuery. |
 | method              | False    | storage | The method to use for writing to BigQuery. Accepted values are: storage, batch, stream, gcs |
 | bucket              | False    | None    | The GCS bucket to use for staging data. Only used if method is gcs. |
-| gcs_buffer_size     | False    |     2.5 | The size of the buffer for GCS stream before flushing. Value in Megabytes. |
+| gcs_buffer_size     | False    |     2.5 | The size of the buffer for GCS stream before flushing. Value in megabytes. Only used if method is gcs. |
 | stream_maps         | False    | None    | Config object for stream maps capability. |
 | stream_map_config   | False    | None    | User-defined config values to be used within map expressions. |
 | flattening_enabled  | False    | None    | 'True' to enable schema flattening and automatically expand nested properties. |

@@ -62,22 +62,42 @@ SCHEMA = [
 
 
 @cached
-def get_bq_client(credentials_path: str) -> bigquery.Client:
-    return bigquery.Client.from_service_account_json(credentials_path)
+def get_bq_client(
+    credentials_path: Optional[str] = None,
+    credentials_json: Optional[str] = None,
+) -> bigquery.Client:
+    if not credentials_path or not credentials_json:
+        raise KeyError("Credentials not supplied. Required config of either credentials_path or credentials_json")
+    if credentials_path:
+        return bigquery.Client.from_service_account_json(credentials_path)
+    elif credentials_json:
+        return bigquery.Client.from_service_account_info(orjson.loads(credentials_json))
 
 
 @cached
-def get_gcs_client(credentials_path: str) -> storage.Client:
-    return storage.Client.from_service_account_json(credentials_path)
+def get_gcs_client(
+    credentials_path: Optional[str] = None,
+    credentials_json: Optional[str] = None,
+) -> storage.Client:
+    if not credentials_path or not credentials_json:
+        raise KeyError("Credentials not supplied. Required config of either credentials_path or credentials_json")
+    if credentials_path:
+        return storage.Client.from_service_account_json(credentials_path)
+    elif credentials_json:
+        return storage.Client.from_service_account_info(orjson.loads(credentials_json))
 
 
 @cached
 def get_storage_client(
-    credentials_path: str,
+    credentials_path: Optional[str] = None,
+    credentials_json: Optional[str] = None,
 ) -> bigquery_storage_v1.BigQueryWriteClient:
-    return bigquery_storage_v1.BigQueryWriteClient.from_service_account_file(
-        credentials_path
-    )
+    if not credentials_path or not credentials_json:
+        raise KeyError("Credentials not supplied. Required config of either credentials_path or credentials_json")
+    if credentials_path:
+        return bigquery_storage_v1.BigQueryWriteClient.from_service_account_file(credentials_path)
+    elif credentials_json:
+        return bigquery_storage_v1.BigQueryWriteClient.from_service_account_info(orjson.loads(credentials_json))
 
 
 def create_row_data(
@@ -113,6 +133,7 @@ class CsvDictWriterWrapper(csv.DictWriter):
 class BaseBigQuerySink(BatchSink):
 
     include_sdc_metadata_properties = True
+    clean_up_on_each_drain = False
 
     def __init__(
         self,
@@ -122,7 +143,7 @@ class BaseBigQuerySink(BatchSink):
         key_properties: Optional[List[str]],
     ) -> None:
         super().__init__(target, stream_name, schema, key_properties)
-        self._client = get_bq_client(self.config["credentials_path"])
+        self._client = get_bq_client(self.config["credentials_path"], self.config["credentials_json"])
         self._table = f"{self.config['project']}.{self.config['dataset']}.{self.stream_name.lower()}"
         self.jobs_running = []
         self.executor = ThreadPoolExecutor()
@@ -195,6 +216,7 @@ class BaseBigQuerySink(BatchSink):
 
 
 class BigQueryStorageWriteSink(BaseBigQuerySink):
+    clean_up_on_each_drain = True
     def __init__(
         self,
         target: PluginBase,
@@ -206,7 +228,7 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
         self._make_target()
         self._tracked_streams = []
         self._offset = 0
-        self._write_client = get_storage_client(self.config["credentials_path"])
+        self._write_client = get_storage_client(self.config["credentials_path"], self.config["credentials_json"])
         self._parent = self._write_client.table_path(
             self.config["project"],
             self.config["dataset"],
@@ -253,9 +275,12 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
         proto_data = types.AppendRowsRequest.ProtoData()
         proto_data.rows = self.proto_rows
         request.proto_rows = proto_data
+        if not self._tracked_streams:
+            self.seed_new_append_stream()
         try:
             self.jobs_running.append(self.append_rows_stream.send(request))
         except:
+            # Simplified self-healing
             self._write_client.finalize_write_stream(name=self.write_stream.name)
             self.seed_new_append_stream()
             request.offset = self._total_records_written - self._offset
@@ -291,7 +316,7 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
         key_properties: Optional[List[str]],
     ) -> None:
         super().__init__(target, stream_name, schema, key_properties)
-        self._gcs_client = get_gcs_client(self.config["credentials_path"])
+        self._gcs_client = get_gcs_client(self.config["credentials_path"], self.config["credentials_json"])
         self._blob_path = "gs://{}/{}/{}/{}".format(
             self.config["bucket"],
             self.config.get("prefix_override", "target_bigquery"),
