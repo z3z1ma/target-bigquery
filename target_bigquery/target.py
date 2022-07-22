@@ -1,4 +1,5 @@
 """BigQuery target class."""
+import copy
 from typing import Type, Optional
 
 from singer_sdk import typing as th
@@ -21,7 +22,11 @@ class TargetBigQuery(Target):
             "credentials_path",
             th.StringType,
             description="The path to a gcp credentials json file.",
-            required=True,
+        ),
+        th.Property(
+            "credentials_json",
+            th.StringType,
+            description="A JSON string of your service account JSON file.",
         ),
         th.Property(
             "project",
@@ -36,12 +41,6 @@ class TargetBigQuery(Target):
             required=True,
         ),
         th.Property(
-            "add_record_metadata",
-            th.BooleanType,
-            description="Inject record metadata into the schema.",
-            default=True,
-        ),
-        th.Property(
             "batch_size",
             th.IntegerType,
             description="The maximum number of rows to send in a single batch or commit.",
@@ -50,13 +49,15 @@ class TargetBigQuery(Target):
         th.Property(
             "threads",
             th.IntegerType,
-            description="The number of threads to use for writing to BigQuery.",
+            description="The number of threads per sink to use for writing to BigQuery. Not used with \
+                `storage` sink. Threads are lightwieght and typically just dispatch requests and poll \
+                for completion retrying as needed.",
             default=8,
         ),
         th.Property(
             "method",
             th.StringType,
-            description="The method to use for writing to BigQuery. Accepted values are: batch, stream, gcs",
+            description="The method to use for writing to BigQuery. Accepted values are: storage, batch, stream, gcs",
             default="storage",
         ),
         th.Property(
@@ -67,7 +68,7 @@ class TargetBigQuery(Target):
         th.Property(
             "gcs_buffer_size",
             th.NumberType,
-            description="The size of the buffer for GCS stream before flushing. Value in Megabytes.",
+            description="The size of the buffer for GCS stream before flushing. Value in megabytes. Only used if method is gcs.",
             default=2.5,
         ),
     ).to_dict()
@@ -114,3 +115,17 @@ class TargetBigQuery(Target):
         if not existing_sink:
             return self.add_sink(stream_name, schema, key_properties)
         return existing_sink
+
+    def drain_all(self, is_endofpipe: bool = False) -> None:  # type: ignore
+        state = copy.deepcopy(self._latest_state)
+        self._drain_all(self._sinks_to_clear, 1)
+        for sink in self._sinks_to_clear:
+            if is_endofpipe or sink.clean_up_on_each_drain:
+                sink.clean_up()
+        self._sinks_to_clear = []
+        self._drain_all(list(self._sinks_active.values()), self.max_parallelism)
+        for sink in self._sinks_active.values():
+            if is_endofpipe or sink.clean_up_on_each_drain:
+                sink.clean_up()
+        self._write_state_message(state)
+        self._reset_max_record_age()
