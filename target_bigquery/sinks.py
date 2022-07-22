@@ -294,6 +294,7 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
         request.proto_rows = proto_data
         if not self._tracked_streams:
             self.seed_new_append_stream()
+            request.offset = self._total_records_written - self._offset
         try:
             self.jobs_running.append(self.append_rows_stream.send(request))
         except:
