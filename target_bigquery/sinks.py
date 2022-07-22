@@ -66,7 +66,7 @@ def get_bq_client(
     credentials_path: Optional[str] = None,
     credentials_json: Optional[str] = None,
 ) -> bigquery.Client:
-    if not credentials_path or not credentials_json:
+    if not credentials_path and not credentials_json:
         raise KeyError("Credentials not supplied. Required config of either credentials_path or credentials_json")
     if credentials_path:
         return bigquery.Client.from_service_account_json(credentials_path)
@@ -79,7 +79,7 @@ def get_gcs_client(
     credentials_path: Optional[str] = None,
     credentials_json: Optional[str] = None,
 ) -> storage.Client:
-    if not credentials_path or not credentials_json:
+    if not credentials_path and not credentials_json:
         raise KeyError("Credentials not supplied. Required config of either credentials_path or credentials_json")
     if credentials_path:
         return storage.Client.from_service_account_json(credentials_path)
@@ -92,7 +92,7 @@ def get_storage_client(
     credentials_path: Optional[str] = None,
     credentials_json: Optional[str] = None,
 ) -> bigquery_storage_v1.BigQueryWriteClient:
-    if not credentials_path or not credentials_json:
+    if not credentials_path and not credentials_json:
         raise KeyError("Credentials not supplied. Required config of either credentials_path or credentials_json")
     if credentials_path:
         return bigquery_storage_v1.BigQueryWriteClient.from_service_account_file(credentials_path)
