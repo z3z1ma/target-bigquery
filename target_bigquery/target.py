@@ -73,8 +73,6 @@ class TargetBigQuery(Target):
         ),
     ).to_dict()
 
-    _MAX_RECORD_AGE_IN_MINUTES = 5.0
-
     @property
     def max_parallelism(self) -> int:
         method = self.config.get("method", "batch")
