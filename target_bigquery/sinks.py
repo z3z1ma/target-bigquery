@@ -143,7 +143,7 @@ class BaseBigQuerySink(BatchSink):
         key_properties: Optional[List[str]],
     ) -> None:
         super().__init__(target, stream_name, schema, key_properties)
-        self._client = get_bq_client(self.config["credentials_path"], self.config["credentials_json"])
+        self._client = get_bq_client(self.config.get("credentials_path"), self.config.get("credentials_json"))
         self._table = f"{self.config['project']}.{self.config['dataset']}.{self.stream_name.lower()}"
         self.jobs_running = []
         self.executor = ThreadPoolExecutor()
@@ -228,7 +228,7 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
         self._make_target()
         self._tracked_streams = []
         self._offset = 0
-        self._write_client = get_storage_client(self.config["credentials_path"], self.config["credentials_json"])
+        self._write_client = get_storage_client(self.config.get("credentials_path"), self.config.get("credentials_json"))
         self._parent = self._write_client.table_path(
             self.config["project"],
             self.config["dataset"],
@@ -316,7 +316,7 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
         key_properties: Optional[List[str]],
     ) -> None:
         super().__init__(target, stream_name, schema, key_properties)
-        self._gcs_client = get_gcs_client(self.config["credentials_path"], self.config["credentials_json"])
+        self._gcs_client = get_gcs_client(self.config.get("credentials_path"), self.config.get("credentials_json"))
         self._blob_path = "gs://{}/{}/{}/{}".format(
             self.config["bucket"],
             self.config.get("prefix_override", "target_bigquery"),
