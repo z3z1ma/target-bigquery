@@ -143,7 +143,6 @@ class CsvDictWriterWrapper(csv.DictWriter):
 class BaseBigQuerySink(BatchSink):
 
     include_sdc_metadata_properties = True
-    clean_up_on_each_drain = False
 
     def __init__(
         self,
@@ -228,10 +227,11 @@ class BaseBigQuerySink(BatchSink):
     def clean_up(self):
         wait(self.jobs_running)
 
+    def pre_state_hook(self) -> None:
+        pass
+
 
 class BigQueryStorageWriteSink(BaseBigQuerySink):
-    clean_up_on_each_drain = True
-
     def __init__(
         self,
         target: PluginBase,
@@ -322,6 +322,9 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
             self._tracked_streams = []
 
     def clean_up(self):
+        self.commit_streams()
+
+    def pre_state_hook(self):
         self.commit_streams()
 
 

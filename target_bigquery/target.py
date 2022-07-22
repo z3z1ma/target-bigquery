@@ -118,12 +118,16 @@ class TargetBigQuery(Target):
         state = copy.deepcopy(self._latest_state)
         self._drain_all(self._sinks_to_clear, 1)
         for sink in self._sinks_to_clear:
-            if is_endofpipe or sink.clean_up_on_each_drain:
+            if is_endofpipe:
                 sink.clean_up()
+            else:
+                sink.pre_state_hook()
         self._sinks_to_clear = []
         self._drain_all(list(self._sinks_active.values()), self.max_parallelism)
         for sink in self._sinks_active.values():
-            if is_endofpipe or sink.clean_up_on_each_drain:
+            if is_endofpipe:
                 sink.clean_up()
+            else:
+                sink.pre_state_hook()
         self._write_state_message(state)
         self._reset_max_record_age()
