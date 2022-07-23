@@ -78,14 +78,11 @@ language
 """;
 with
 source__sampled as (
-
-    select data
-    from {{ relation }}
-    order by {{ order_by }}
-    limit {{ size }}
-
+    select    data
+    from      {{ relation }}
+    order by  {{ order_by }}
+    limit     {{ size }}
 )
-
 select distinct
     keys
 from
@@ -98,17 +95,13 @@ from
 ```sql
 {% macro json_star(relation, prefix='', suffix='', alias_funcs=[], space=2) -%}
     -- 1. Verify Execute Mode
-    {%- if not execute -%}
-        {{ return('*') }}
-    {% endif %}
-    -- 2. Get Keys
-    {% set keys = dbt.run_query(
-        get_keys_sql(relation)
-    ).columns[0] | list %}
-    -- 3. Extract All Keys
+    {%- if not execute -%}{{ return('*') }}{% endif %}
+    -- 2. Get Keys (notice our custom from above)
+    {% set keys = dbt.run_query(get_keys_sql(relation)).columns[0] | list %}
+    -- 3. Flatten `data`
     {%- for key in keys %}
         json_value(data.{{ key | trim }}) as
-            {{ adapter.quote(prefix ~ apply_list_transforms(key, alias_funcs) ~ suffix) | trim | lower }}
+            {{- ' ' ~ adapter.quote(prefix ~ key ~ suffix) | trim | lower }}
         {%- if not loop.last %},{{ '\n' + (' ' * space) }}{% endif %}
     {%- endfor -%}
 {%- endmacro %}
