@@ -62,6 +62,63 @@ https://cloud.google.com/bigquery/docs/authentication
 
 You can easily run `target-bigquery` by itself or in a pipeline using [Meltano](https://meltano.com/).
 
+If you want to "flatten" the data without actually putting the time into staging models, which is reasonable in some but not all cases -- here are dbt macros to help!
+
+> This extracts keys from our ingest target. This is executed by `dbt.run_query` as seen in the next example.
+```sql
+{% macro get_keys_sql(relation, size=100, order_by="_sdc_batched_at desc") %}
+create temp function
+    json_keys(input STRING)
+returns
+    array<string>
+language
+    js as
+"""
+    return Object.keys(JSON.parse(input));
+""";
+with
+source__sampled as (
+
+    select data
+    from {{ relation }}
+    order by {{ order_by }}
+    limit {{ size }}
+
+)
+
+select distinct
+    keys
+from
+    source__sampled,
+    unnest(json_keys(to_json_string(data))) keys
+{% endmacro %}
+```
+
+> This is equivalent to dbt_utils.star for our `data` JSON column
+```sql
+{% macro json_star(relation, prefix='', suffix='', alias_funcs=[], space=2) -%}
+    -- 1. Verify Execute Mode
+    {%- if not execute -%}
+        {{ return('*') }}
+    {% endif %}
+    -- 2. Get Keys
+    {% set keys = dbt.run_query(
+        get_keys_sql(relation)
+    ).columns[0] | list %}
+    -- 3. Extract All Keys
+    {%- for key in keys %}
+        json_value(data.{{ key | trim }}) as
+            {{ adapter.quote(prefix ~ apply_list_transforms(key, alias_funcs) ~ suffix) | trim | lower }}
+        {%- if not loop.last %},{{ '\n' + (' ' * space) }}{% endif %}
+    {%- endfor -%}
+{%- endmacro %}
+```
+
+Usage (in a base model for example):
+
+`select {{ json_star( source("schema", "table") ) }} from {{ source("schema", "table") }}`
+
+
 ### Executing the Target Directly
 
 ```bash
