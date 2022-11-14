@@ -6,6 +6,7 @@ from io import BytesIO
 from textwrap import dedent
 from typing import Dict, List, Optional
 
+
 import orjson
 import smart_open
 from google.cloud import _http, bigquery, bigquery_storage_v1, storage
@@ -20,6 +21,7 @@ from tenacity.retry import retry_if_exception_type
 from tenacity.stop import stop_after_attempt
 
 from target_bigquery import record_pb2
+from target_bigquery import utils
 
 DELAY = 1, 10, 1.5
 SCHEMA = [
@@ -160,6 +162,7 @@ class BaseBigQuerySink(BatchSink):
         self.executor = ThreadPoolExecutor()
         self._dataset_ref = None
         self._table_ref = None
+        self._schema_translator = utils.SchemaTranslator
 
     def _pop_job_from_stack(self, completed: Future):
         for i, job in enumerate(self.jobs_running):
@@ -177,6 +180,11 @@ class BaseBigQuerySink(BatchSink):
                 self.config["dataset"], exists_ok=True
             )
         if self._table_ref is None:
+            # TODO: Rename schema here to take legacy
+            # schema = [
+            #     self._schema_translator.jsonschema_prop_to_bq_column()
+            #     for (name, schema) in self.schema_properties.items()
+            # ]
             table = bigquery.Table(
                 self._table,
                 schema=SCHEMA,
@@ -188,10 +196,10 @@ class BaseBigQuerySink(BatchSink):
             ]
             table.description = dedent(
                 f"""
-                This table is loaded via target-bigquery which is a 
-                Singer target that uses an unstructured load approach. 
-                The originating stream name is `{self.stream_name}`. 
-                This table is partitioned by _sdc_batched_at and 
+                This table is loaded via target-bigquery which is a
+                Singer target that uses an unstructured load approach.
+                The originating stream name is `{self.stream_name}`.
+                This table is partitioned by _sdc_batched_at and
                 clustered by related _sdc timestamp fields.
             """
             )
@@ -208,9 +216,11 @@ class BaseBigQuerySink(BatchSink):
         pass
 
     def start_batch(self, context: dict) -> None:
+        # TODO: Refactor to introduce context
         self._make_target()
 
     def preprocess_record(self, record: Dict, context: dict) -> dict:
+        # TODO: Change this to return sql package
         metadata = {
             k: record.pop(k, None)
             for k in (
@@ -483,6 +493,7 @@ class BigQueryBatchSink(BaseBigQuerySink):
             num_retries=3,
             timeout=self.config["timeout"],
             job_config=bigquery.LoadJobConfig(
+                # TODO: Refactor this to introduce new schema
                 schema=SCHEMA,
                 source_format=bigquery.SourceFormat.CSV,
                 schema_update_options=[
