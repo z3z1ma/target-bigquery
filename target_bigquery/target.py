@@ -71,6 +71,12 @@ class TargetBigQuery(Target):
             description="The size of the buffer for GCS stream before flushing. Value in megabytes. Only used if method is gcs.",
             default=2.5,
         ),
+        th.Property(
+            "use_json_schema",
+            th.BooleanType,
+            description="Whether to use JSON as a default schema for all objects (as opposed to tap schema)",
+            default=True,
+        )
     ).to_dict()
 
     @property
