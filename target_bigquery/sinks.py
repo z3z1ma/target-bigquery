@@ -179,6 +179,7 @@ class BaseBigQuerySink(BatchSink):
         schema = SCHEMA
         if not self._use_json_schema:
             schema_translator = utils.SchemaTranslator(schema = self.schema)
+            self.logger.info(self.schema)
             schema = [
                 schema_translator.jsonschema_prop_to_bq_column(name=name,schema_property = property)
                 for (name, property) in self.schema.items()
