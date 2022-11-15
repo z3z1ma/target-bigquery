@@ -162,7 +162,13 @@ class BaseBigQuerySink(BatchSink):
         self.executor = ThreadPoolExecutor()
         self._dataset_ref = None
         self._table_ref = None
-        self._schema_translator = utils.SchemaTranslator
+
+        self._use_json_schema = self.config.get("use_json_schema")
+
+        self.used_schema = SCHEMA
+        if self._use_json_schema:
+            self.used_schema = self.schema
+        self._schema_translator = utils.SchemaTranslator(schema = self.schema)
 
     def _pop_job_from_stack(self, completed: Future):
         for i, job in enumerate(self.jobs_running):
@@ -181,13 +187,9 @@ class BaseBigQuerySink(BatchSink):
             )
         if self._table_ref is None:
             # TODO: Rename schema here to take legacy
-            # schema = [
-            #     self._schema_translator.jsonschema_prop_to_bq_column()
-            #     for (name, schema) in self.schema_properties.items()
-            # ]
             table = bigquery.Table(
                 self._table,
-                schema=SCHEMA,
+                schema=self.used_schema,
             )
             table.clustering_fields = [
                 "_sdc_extracted_at",
