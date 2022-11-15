@@ -192,10 +192,11 @@ class BaseBigQuerySink(BatchSink):
             )
         if self._table_ref is None:
             # TODO: Rename schema here to take legacy
-            self.logger.info(self.used_schema)
+            schema = self._select_schema()
+            self.logger.info(schema)
             table = bigquery.Table(
                 self._table,
-                schema=self._select_schema(),
+                schema=self.schema,
             )
             table.clustering_fields = [
                 "_sdc_extracted_at",
