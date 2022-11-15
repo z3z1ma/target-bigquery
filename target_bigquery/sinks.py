@@ -166,7 +166,7 @@ class BaseBigQuerySink(BatchSink):
         self._use_json_schema = self.config.get("use_json_schema")
 
         self.used_schema = SCHEMA
-        if self._use_json_schema:
+        if not self._use_json_schema:
             self.used_schema = self.schema
         self._schema_translator = utils.SchemaTranslator(schema = self.schema)
 
