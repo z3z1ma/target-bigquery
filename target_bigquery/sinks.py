@@ -228,11 +228,11 @@ class BaseBigQuerySink(BatchSink):
         pass
 
     def start_batch(self, context: dict) -> None:
-        # TODO: Refactor to introduce context
         self._make_target()
 
     def preprocess_record(self, record: Dict, context: dict) -> dict:
         # TODO: Change this to return sql package
+        self.logger.info(record)
         metadata = {
             k: record.pop(k, None)
             for k in (
