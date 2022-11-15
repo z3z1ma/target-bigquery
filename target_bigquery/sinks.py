@@ -181,6 +181,7 @@ class BaseBigQuerySink(BatchSink):
             schema_translator = utils.SchemaTranslator(schema = self.schema)
             self.logger.info(self.schema)
             self.logger.info(type(self.schema))
+            self.logger.info(self.key_properties)
             tmp = []
             for (name, prop) in self.schema.items():
                 print(name, type(name), prop, type(prop))
