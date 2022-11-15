@@ -180,10 +180,12 @@ class BaseBigQuerySink(BatchSink):
         if not self._use_json_schema:
             schema_translator = utils.SchemaTranslator(schema = self.schema)
             self.logger.info(self.schema)
-            schema = [
-                schema_translator.jsonschema_prop_to_bq_column(name=name,schema_property = property)
-                for (name, property) in self.schema.items()
-            ]
+            self.logger.info(type(self.schema))
+            tmp = []
+            for (name, prop) in self.schema.items():
+                print(name, type(name), prop, type(prop))
+                tmp.append(schema_translator.jsonschema_prop_to_bq_column(name=name,schema_property = prop))
+            schema = tmp
         return schema
 
     def _make_target(self) -> None:
