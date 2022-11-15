@@ -162,13 +162,7 @@ class BaseBigQuerySink(BatchSink):
         self.executor = ThreadPoolExecutor()
         self._dataset_ref = None
         self._table_ref = None
-
         self._use_json_schema = self.config.get("use_json_schema")
-
-        self.used_schema = SCHEMA
-        if not self._use_json_schema:
-            self.used_schema = self.schema
-        self._schema_translator = utils.SchemaTranslator(schema = self.schema)
 
     def _pop_job_from_stack(self, completed: Future):
         for i, job in enumerate(self.jobs_running):
@@ -180,6 +174,17 @@ class BaseBigQuerySink(BatchSink):
         reraise=True,
         stop=stop_after_attempt(3),
     )
+
+    def _select_schema(self) -> List[bigquery.SchemaField]:
+        schema = SCHEMA
+        if not self._use_json_schema:
+            schema_translator = utils.SchemaTranslator(schema = self.schema)
+            schema = [
+                schema_translator.jsonschema_prop_to_bq_column(name=name,schema_property = property)
+                for (name, property) in self.schema.items()
+            ]
+        return schema
+
     def _make_target(self) -> None:
         if self._dataset_ref is None:
             self._dataset_ref = self._client.create_dataset(
@@ -190,7 +195,7 @@ class BaseBigQuerySink(BatchSink):
             self.logger.info(self.used_schema)
             table = bigquery.Table(
                 self._table,
-                schema=self.used_schema,
+                schema=self._select_schema(),
             )
             table.clustering_fields = [
                 "_sdc_extracted_at",
