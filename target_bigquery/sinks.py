@@ -184,7 +184,7 @@ class BaseBigQuerySink(BatchSink):
             self.logger.info(self.key_properties)
             tmp = []
             for (name, prop) in self.key_properties:
-                print(name, type(name), prop, type(prop))
+                self.logger.info(f"{name}: {type(name)}, {prop}: {type(prop)}")
                 tmp.append(schema_translator.jsonschema_prop_to_bq_column(name=name,schema_property = prop))
             schema = tmp
         return schema
