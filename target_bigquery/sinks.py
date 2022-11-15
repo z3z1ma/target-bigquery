@@ -187,6 +187,7 @@ class BaseBigQuerySink(BatchSink):
             )
         if self._table_ref is None:
             # TODO: Rename schema here to take legacy
+            self.logger.info(self.used_schema)
             table = bigquery.Table(
                 self._table,
                 schema=self.used_schema,
