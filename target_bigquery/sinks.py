@@ -175,7 +175,7 @@ class BaseBigQuerySink(BatchSink):
         stop=stop_after_attempt(3),
     )
 
-    def _select_schema(self) -> List[bigquery.SchemaField]:
+    def _select_schema(self):
         schema = SCHEMA
         if not self._use_json_schema:
             schema_translator = utils.SchemaTranslator(schema = self.schema)
@@ -200,7 +200,7 @@ class BaseBigQuerySink(BatchSink):
             self.logger.info(schema)
             table = bigquery.Table(
                 self._table,
-                schema=SCHEMA,
+                schema=schema,
             )
             table.clustering_fields = [
                 "_sdc_extracted_at",
