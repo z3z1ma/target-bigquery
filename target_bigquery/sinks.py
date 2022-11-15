@@ -179,12 +179,12 @@ class BaseBigQuerySink(BatchSink):
         schema = SCHEMA
         if not self._use_json_schema:
             schema_translator = utils.SchemaTranslator(schema = self.schema)
-            self.logger.info(self.schema)
-            self.logger.info(type(self.schema))
-            self.logger.info(self.key_properties)
+            # self.logger.info(self.schema)
+            # self.logger.info(type(self.schema))
+            # self.logger.info(self.key_properties)
             tmp = []
             for (name, prop) in self.schema["properties"].items():
-                self.logger.info(f"{name}: {type(name)}, {prop}: {type(prop)}")
+                # self.logger.info(f"{name}: {type(name)}, {prop}: {type(prop)}")
                 tmp.append(schema_translator.jsonschema_prop_to_bq_column(name=name,schema_property = prop))
             schema = tmp
         return schema
@@ -200,7 +200,7 @@ class BaseBigQuerySink(BatchSink):
             self.logger.info(schema)
             table = bigquery.Table(
                 self._table,
-                schema=self.schema,
+                schema=SCHEMA,
             )
             table.clustering_fields = [
                 "_sdc_extracted_at",
