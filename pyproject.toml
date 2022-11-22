@@ -1,22 +1,21 @@
 [tool.poetry]
 name = "target-bigquery"
-version = "0.2.1"
+version = "0.2.2"
 description = "`target-bigquery` is a Singer target for BigQuery, built with the Meltano SDK for Singer Targets."
-authors = ["Alex Butler"]
-keywords = [
-    "ELT",
-    "BigQuery",
-]
+authors = ["Alex Butler <butler.alex2010@gmail.com>"]
+keywords = ["ELT", "BigQuery"]
 license = "Apache 2.0"
 
 [tool.poetry.dependencies]
 python = "<3.11,>=3.8"
 requests = "^2.25.1"
-singer-sdk = "^0.6.0"
-google-cloud-bigquery = "^3.2.0"
+singer-sdk = "^0.14.0"
+google-cloud-bigquery = ">=3.0.0"
 orjson = "3.7.2"
-smart-open = {extras = ["gcs"], version = "^6.0.0"}
+smart-open = { extras = ["gcs"], version = "^6.0.0" }
 tenacity = "^8.0.1"
+fastavro = "^1.7.0"
+python-snappy = "^0.6.1"
 
 [tool.poetry.dev-dependencies]
 pytest = "^6.2.5"
@@ -30,7 +29,7 @@ isort = "^5.10.1"
 
 [tool.isort]
 profile = "black"
-multi_line_output = 3 # Vertical Hanging Indent
+multi_line_output = 3         # Vertical Hanging Indent
 src_paths = "target_bigquery"
 
 [build-system]
