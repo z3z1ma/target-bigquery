@@ -1,9 +1,9 @@
 """BigQuery target class."""
 import copy
-from typing import Optional, Type
+from typing import Optional, Type, List
 
 from singer_sdk import typing as th
-from singer_sdk.target_base import List, Sink, Target
+from singer_sdk.target_base import Sink, Target
 
 from target_bigquery.sinks import (
     BigQueryBatchSink,
