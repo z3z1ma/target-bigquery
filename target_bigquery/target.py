@@ -47,13 +47,14 @@ class TargetBigQuery(Target):
             "batch_size",
             th.IntegerType,
             description="The maximum number of rows to send in a single batch or commit.",
-            default=50,
+            default=250000,
         ),
         th.Property(
             "denormalized",
             th.BooleanType,
-            description="Determines whether to denormalize the data before writing to BigQuery."
-            "Denormalization is only supported for the batch_job, streaming_insert, and gcs_stage methods.",
+            description="Determines whether to denormalize the data before writing to BigQuery. A false value "
+            "will write data using a fixed JSON column based schema, while a true value will write data using a dynamic "
+            "schema derived from the tap. Denormalization is only supported for the batch_job, streaming_insert, and gcs_stage methods.",
             default=False,
         ),
         th.Property(
@@ -70,7 +71,15 @@ class TargetBigQuery(Target):
                 }
             ),
             description="The method to use for writing to BigQuery.",
-            default="storage",
+            default="batch_job",
+            required=True,
+        ),
+        th.Property(
+            "generate_view",
+            th.BooleanType,
+            description="Determines whether to generate a view based on the SCHEMA message parsed from the tap. "
+            "Only valid if denormalized=false meaning you are using the fixed JSON column based schema.",
+            default=False,
         ),
         th.Property(
             "gcs_bucket",
@@ -82,7 +91,7 @@ class TargetBigQuery(Target):
             th.NumberType,
             description="The size of the buffer for GCS stream before flushing a multipart upload chunk. Value in megabytes. "
             "Only used if method is gcs_stage. This eager flushing in conjunction with zlib results in very low memory usage.",
-            default=5,
+            default=15,
         ),
         th.Property(
             "gcs_max_file_size",
