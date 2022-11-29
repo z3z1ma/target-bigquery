@@ -476,15 +476,18 @@ class BigQueryLegacyStreamingImpl:
 # Possibly the most performant Sink implementation, compresses data in memory
 class BigQueryBatchImpl:
     executor = GLOBAL_EXECUTOR
-    buffer = gzip.GzipFile(fileobj=BytesIO(), mode="w")
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.buffer = gzip.GzipFile(fileobj=BytesIO(), mode="w")
 
     def process_record(self, record: dict, context: dict) -> None:
         self.buffer.write(orjson.dumps(record, option=orjson.OPT_APPEND_NEWLINE))
 
     def process_batch(self, context: dict) -> None:
-        self.buffer.flush()
         fobj_ptr = self.buffer.fileobj
         self.buffer.close()
+        fobj_ptr.flush()
         job = self.executor.submit(
             self._client.load_table_from_file,
             fobj_ptr,
