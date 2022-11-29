@@ -1,13 +1,16 @@
 """BigQuery target class."""
 import copy
-from typing import Optional, Type, List
+from typing import List, Optional, Type
 
 from singer_sdk import typing as th
 from singer_sdk.target_base import Sink, Target
 
 from target_bigquery.sinks import (
+    BigQueryBatchDenormalizedSink,
     BigQueryBatchSink,
+    BigQueryGcsStagingDenormalizedSink,
     BigQueryGcsStagingSink,
+    BigQueryLegacyStreamingDenormalizedSink,
     BigQueryLegacyStreamingSink,
     BigQueryStorageWriteSink,
 )
@@ -47,56 +50,82 @@ class TargetBigQuery(Target):
             default=50,
         ),
         th.Property(
-            "threads",
-            th.IntegerType,
-            description="The number of threads per sink to use for writing to BigQuery. Not used with \
-                `storage` sink. Threads are lightwieght and typically just dispatch requests and poll \
-                for completion retrying as needed.",
-            default=8,
+            "denormalized",
+            th.BooleanType,
+            description="Determines whether to denormalize the data before writing to BigQuery."
+            "Denormalization is only supported for the batch_job, streaming_insert, and gcs_stage methods.",
+            default=False,
         ),
         th.Property(
             "method",
-            th.StringType,
-            description="The method to use for writing to BigQuery. Accepted values are: storage, batch, stream, gcs",
+            th.CustomType(
+                {
+                    "type": "string",
+                    "enum": [
+                        "storage_write_api",
+                        "batch_job",
+                        "gcs_stage",
+                        "streaming_insert",
+                    ],
+                }
+            ),
+            description="The method to use for writing to BigQuery.",
             default="storage",
         ),
         th.Property(
-            "bucket",
+            "gcs_bucket",
             th.StringType,
-            description="The GCS bucket to use for staging data. Only used if method is gcs.",
+            description="The GCS bucket to use for staging data. Only used if method is gcs_stage.",
         ),
         th.Property(
             "gcs_buffer_size",
             th.NumberType,
-            description="The size of the buffer for GCS stream before flushing. Value in megabytes. Only used if method is gcs.",
-            default=2.5,
+            description="The size of the buffer for GCS stream before flushing a multipart upload chunk. Value in megabytes. "
+            "Only used if method is gcs_stage. This eager flushing in conjunction with zlib results in very low memory usage.",
+            default=5,
+        ),
+        th.Property(
+            "gcs_max_file_size",
+            th.NumberType,
+            description="The maximum file size in megabytes for a bucket file. This is used as the batch indicator "
+            "for GCS based ingestion. Only used if method is gcs_stage.",
+            default=250,
         ),
     ).to_dict()
 
     @property
     def max_parallelism(self) -> int:
         method = self.config.get("method", "batch")
-        if method == "batch":
+        if method in ("batch_job",):
             return 4
-        elif method == "stream":
+        elif method in ("streaming_insert",):
             return 8
-        elif method in ("gcs", "storage"):
-            return 16
-        else:
-            raise ValueError(f"Unknown method: {method}")
+        elif method in ("gcs_stage", "storage_write_api"):
+            return 12
+        raise ValueError(f"Unknown method: {method}")
 
     def get_sink_class(self, stream_name: str) -> Type[Sink]:
-        method = self.config.get("method", "batch")
-        if method == "batch":
+        method = self.config.get("method", "batch_job")
+        denormalized = self.config.get("denormalized", False)
+        if method == "storage_write_api" and denormalized:
+            raise RuntimeError(
+                f"Cannot use denormalized=true with method=storage_write_api"
+            )
+        if method == "batch_job":
+            if denormalized:
+                return BigQueryBatchDenormalizedSink
             return BigQueryBatchSink
-        elif method == "stream":
+        elif method == "streaming_insert":
+            if denormalized:
+                return BigQueryLegacyStreamingDenormalizedSink
             return BigQueryLegacyStreamingSink
-        elif method == "gcs":
+        elif method == "gcs_stage":
+            if denormalized:
+                return BigQueryGcsStagingDenormalizedSink
             return BigQueryGcsStagingSink
-        elif method == "storage":
+        elif method == "storage_write_api":
             return BigQueryStorageWriteSink
-        else:
-            raise ValueError(f"Unknown method: {method}")
+        raise ValueError(f"Unknown method: {method}")
 
     def get_sink(
         self,
