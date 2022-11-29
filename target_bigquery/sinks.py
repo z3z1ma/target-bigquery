@@ -192,7 +192,6 @@ class BaseBigQuerySink(BatchSink):
                 type_=TimePartitioningType.DAY, field="_sdc_batched_at"
             )
             self._table_ref = self._client.create_table(table, exists_ok=True)
-            self._client.query(f"truncate table {self._table};").result()
             if self.config.get("generate_view"):
                 ddl = SchemaTranslator(self.schema).make_view_sql(self._table)
                 self._client.query(ddl).result()
