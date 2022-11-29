@@ -139,7 +139,12 @@ class SchemaTranslator:
         )
 
     def _wrap_json_value(self, field: bigquery.SchemaField, base: str = "data") -> str:
-        return f"CAST(JSON_VALUE({base}, '$.{field.name}') as {field.field_type}) as {field.name}, \n"
+        typ = field.field_type.upper()
+        if typ == "FLOAT":
+            typ = "FLOAT64"
+        if typ in ("INT", "INTEGER"):
+            typ = "INT64"
+        return f"CAST(JSON_VALUE({base}, '$.{field.name}') as {typ}) as {field.name}, \n"
 
 
 def __mutate_column(self, mut_field, expected_field):  # type: ignore
