@@ -2,6 +2,40 @@
 
 `target-bigquery` is a Singer target for BigQuery.
 
+The most versatile target for BigQuery. Extremely performant, resource efficient, and
+fast in all configurations of which there are 7. Denormalized variants indicate data is 
+unpacked during load with a resultant schema in BigQuery based on the tap. Non-denormalized
+means we have a fixed schema which loads all data into an unstructured JSON column. 
+They are both useful patterns. The latter allowing bigquery to work with schemaless or rapidly
+changing sources such as MongoDB seamlessly, while the former is faster to query. 
+
+The gap between the methods is closed due in part to this target automatically generating
+a VIEW which will unpack a JSON based ingestion source for you. Unless operating at 
+tens of millions of rows with 3-4-500 key objects, its reasonably performant. It does however
+fall off given enough scale in the current state of the engineering at Google regarding BQ. Choose wisely.
+
+
+Sink names (you will most liekly be configuring this target via yaml or json so scroll on for the config table):
+
+```python
+# batch job based
+BigQueryBatchDenormalizedSink
+BigQueryBatchSink
+
+# gcs staging bucket -> load job
+BigQueryGcsStagingDenormalizedSink
+BigQueryGcsStagingSink
+
+# streaming api
+BigQueryLegacyStreamingDenormalizedSink
+BigQueryLegacyStreamingSink
+
+# storage write api
+BigQueryStorageWriteSink
+```
+
+**Old Header (still true)**
+
 This is the first truly unstructured sink for BigQuery leveraging the recent GA feature 
 in BigQuery for JSON support. This allows this target to load from essentially any tap
 regardless of the quality or explicitness of its jsonschema. Observations in existing taps 
