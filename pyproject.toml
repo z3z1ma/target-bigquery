@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "target-bigquery"
-version = "0.3.2"
+version = "0.3.3"
 description = "`target-bigquery` is a Singer target for BigQuery, built with the Meltano SDK for Singer Targets."
 authors = ["Alex Butler <butler.alex2010@gmail.com>"]
 keywords = ["ELT", "BigQuery"]

@@ -93,6 +93,7 @@ class SchemaTranslator:
     ) -> str:
         if field.name.startswith("_sdc"):
             return f"{field.name}, \n"
+        
         if field.field_type.upper() == "RECORD":
             return "STRUCT(\n  {}\n) as {}, \n".format(
                 "  ".join(
@@ -105,6 +106,13 @@ class SchemaTranslator:
                 ).rstrip(", \n"),
                 field.name,
             )
+        # Nullable fields require a JSON_VALUE call which creates a 2-stage cast
+        elif field.is_nullable:
+            if field.field_type.upper() == "STRING":
+                # No cast required for strings
+                return f"JSON_VALUE({path}, '$.{field.name}') as {field.name}, \n"
+            return self._wrap_json_value(field, path)
+        # These are not nullable so if the type is known, we can do a 1-stage extract & cast
         elif field.field_type.upper() == "STRING":
             return f"STRING({path}.{field.name}) as {field.name}, \n"
         elif field.field_type.upper() == "INTEGER":
@@ -113,8 +121,9 @@ class SchemaTranslator:
             return f"FLOAT64({path}.{field.name}) as {field.name}, \n"
         elif field.field_type.upper() == "BOOLEAN":
             return f"BOOL({path}.{field.name}) as {field.name}, \n"
+        # Fallback to a 2-stage extract & cast
         else:
-            return self._wrap_json_extract(field, path)
+            return self._wrap_json_value(field, path)
 
     def _wrap_repeat_json_extract(self, field: bigquery.SchemaField) -> str:
         v = self._field_to_sql(field).rstrip(", \n")
@@ -129,10 +138,8 @@ class SchemaTranslator:
         """
         )
 
-    def _wrap_json_extract(
-        self, field: bigquery.SchemaField, base: str = "data"
-    ) -> str:
-        return f"CAST(JSON_EXTRACT_SCALAR({base}, '$.{field.name}') as {field.field_type}) as {field.name}, \n"
+    def _wrap_json_value(self, field: bigquery.SchemaField, base: str = "data") -> str:
+        return f"CAST(JSON_VALUE({base}, '$.{field.name}') as {field.field_type}) as {field.name}, \n"
 
 
 def __mutate_column(self, mut_field, expected_field):  # type: ignore
