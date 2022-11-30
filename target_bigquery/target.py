@@ -76,7 +76,7 @@ class TargetBigQuery(Target):
         ),
         th.Property(
             "append_columns",
-            th.BooleanType
+            th.BooleanType,
             description="In the case of a denormalize sync, whether to append new columns to existing schema",
             default=True,
             required=False,
