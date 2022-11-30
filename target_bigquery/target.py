@@ -75,6 +75,13 @@ class TargetBigQuery(Target):
             required=True,
         ),
         th.Property(
+            "append_columns",
+            th.BooleanType,
+            description="In the case of a denormalize sync, whether to append new columns to existing schema",
+            default=True,
+            required=False,
+        ),
+        th.Property(
             "generate_view",
             th.BooleanType,
             description="Determines whether to generate a view based on the SCHEMA message parsed from the tap. "
