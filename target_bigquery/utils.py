@@ -52,8 +52,16 @@ class SchemaTranslator:
 
         safe_name = name
 
-        property_type = schema_property.get("type", "string")
-        property_format = schema_property.get("format", None)
+        if "anyOf" in schema_property and len(schema_property["anyOf"]) > 0:
+            # I have only seen this used in the wild with tap-salesforce, which
+            # is incidentally an important one so lets handle the anyOf case
+            # by giving the 0th index priority.
+            property_type = schema_property["anyOf"][0].get("type", "string")
+            property_format = schema_property["anyOf"][0].get("format", None)
+        else:
+            property_type = schema_property.get("type", "string")
+            property_format = schema_property.get("format", None)
+
         if "array" in property_type:
             items_schema: dict = schema_property["items"]
             items_type = bigquery_type(
@@ -93,7 +101,7 @@ class SchemaTranslator:
     ) -> str:
         if field.name.startswith("_sdc"):
             return f"{field.name}, \n"
-        
+
         if field.field_type.upper() == "RECORD":
             return "STRUCT(\n  {}\n) as {}, \n".format(
                 "  ".join(
@@ -144,7 +152,9 @@ class SchemaTranslator:
             typ = "FLOAT64"
         if typ in ("INT", "INTEGER"):
             typ = "INT64"
-        return f"CAST(JSON_VALUE({base}, '$.{field.name}') as {typ}) as {field.name}, \n"
+        return (
+            f"CAST(JSON_VALUE({base}, '$.{field.name}') as {typ}) as {field.name}, \n"
+        )
 
 
 def __mutate_column(self, mut_field, expected_field):  # type: ignore

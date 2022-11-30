@@ -174,20 +174,14 @@ class BaseBigQuerySink(BatchSink):
                 self._table,
                 schema=DEFAULT_SCHEMA,
             )
-            table.clustering_fields = [
-                "_sdc_extracted_at",
-                "_sdc_received_at",
-                "_sdc_batched_at",
-            ]
+            table.clustering_fields = ["_sdc_batched_at"]
             table.description = dedent(
                 f"""
-                This table is loaded via target-bigquery which is a
-                Singer target that uses an unstructured load approach.
-                The originating stream name is `{self.stream_name}`.
-                This table is partitioned by _sdc_batched_at and
-                clustered by related _sdc timestamp fields.
+                Singer based ingestion pattern.
+                Target: target-bigquery (JSON)
+                Stream: {self.stream_name}
             """
-            )
+            ).lstrip()
             table.time_partitioning = TimePartitioning(
                 type_=TimePartitioningType.DAY, field="_sdc_batched_at"
             )
@@ -286,14 +280,14 @@ class BaseBigQuerySinkDenormalized(BaseBigQuerySink):
                 self._table,
                 schema=self._bq_schema,
             )
+            table.clustering_fields = ["_sdc_batched_at"]
             table.description = dedent(
                 f"""
-                This table is loaded via target-bigquery which is a
-                Singer target that uses a structured load approach
-                based on inbound SCHEMA messages. The originating stream 
-                name is `{self.stream_name}`.
+                Singer based ingestion pattern.
+                Target: target-bigquery (denormalized)
+                Stream: {self.stream_name}
             """
-            )
+            ).lstrip()
             table.time_partitioning = TimePartitioning(
                 type_=TimePartitioningType.DAY, field="_sdc_batched_at"
             )
@@ -374,7 +368,9 @@ class BigQueryGcsStagingImpl:
             timeout=self.config["timeout"],
             job_config=bigquery.LoadJobConfig(
                 source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
-                ignore_unknown_values=True,
+                schema_update_options=[
+                    bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION
+                ],
             ),
         )
         bq_job._job_statistics
@@ -498,6 +494,9 @@ class BigQueryBatchImpl:
             job_config=bigquery.LoadJobConfig(
                 schema=getattr(self, "_bq_schema", DEFAULT_SCHEMA),
                 source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
+                schema_update_options=[
+                    bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION
+                ],
             ),
         )
         self.jobs_running.add(id(job))
