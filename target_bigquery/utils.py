@@ -37,10 +37,10 @@ def safe_column_name(name: str, quotes: bool = False) -> str:
     name = re.sub(pattern, "_", name)
     if quotes:
         return "`{}`".format(name).lower()
-    # return "{}".format(name).lower()
-    if name[0].isdigit():
-        name = f"tmp_{name}"
-    return "`{}`".format(name)
+    return "{}".format(name).lower()
+    # if name[0].isdigit():
+    #     name = f"tmp_{name}"
+    # return "`{}`".format(name)
 
 
 # This class translates a JSON schema into a BigQuery schema.
