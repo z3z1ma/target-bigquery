@@ -39,7 +39,7 @@ def safe_column_name(name: str, quotes: bool = False) -> str:
         return "`{}`".format(name).lower()
     # return "{}".format(name).lower()
     if name[0].isdigit():
-        name = f"_{name}"
+        name = f"tmp_{name}"
     return "`{}`".format(name)
 
 
