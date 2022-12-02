@@ -187,7 +187,7 @@ class BaseBigQuerySink(BatchSink):
             )
             self._table_ref = self._client.create_table(table, exists_ok=True)
             if self.config.get("generate_view"):
-                ddl = SchemaTranslator(self.schema).make_view_sql(self._table)
+                ddl = SchemaTranslator(self.schema).make_view_stmt(self._table)
                 self._client.query(ddl).result()
 
     @property
