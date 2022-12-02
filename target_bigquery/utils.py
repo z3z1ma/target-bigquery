@@ -54,8 +54,9 @@ class SchemaTranslator:
         self, name: str, schema_property: dict
     ) -> SchemaField:
         # Don't munge names, much more portable the less business logic we apply
-        # safe_name = safe_column_name(name, quotes=False) <- this mutates the name
-        safe_name = name
+        # safe_name = safe_column_name(name, quotes=False)  <- this mutates the name
+        safe_name = safe_column_name(name, quotes=False)
+        # safe_name = name
 
         if "anyOf" in schema_property and len(schema_property["anyOf"]) > 0:
             # I have only seen this used in the wild with tap-salesforce, which
@@ -452,8 +453,8 @@ def test_convoluted_schema():
 
     TARGET = dedent(
         """
-    CREATE OR REPLACE VIEW my.neighbor.totoro_view AS 
-    SELECT 
+    CREATE OR REPLACE VIEW my.neighbor.totoro_view AS
+    SELECT
         JSON_VALUE(data, '$.id') as id,
         CAST(JSON_VALUE(data, '$.companyId') as INT64) as companyId,
         JSON_VALUE(data, '$.email') as email,
