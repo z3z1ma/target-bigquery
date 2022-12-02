@@ -416,6 +416,10 @@ class BigQueryLegacyStreamingImpl:
         super().__init__(target, stream_name, schema, key_properties)
         _http.json = orjson  # patch bigquery json
 
+    @property
+    def max_size(self) -> int:
+        return max(super().max_size, 500)
+
     @retry(
         retry=retry_if_exception_type(ConnectionError)
         | retry_if_result(lambda resp: bool(resp)),

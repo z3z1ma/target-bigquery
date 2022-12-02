@@ -56,8 +56,6 @@ pipx install target-bigquery
 
 ### Settings
 
-Note: Either credentials_path or credentials_json (str) must be provided.
-
 | Setting             | Required | Default | Description |
 |:--------------------|:--------:|:-------:|:------------|
 | credentials_path    | False    | None    | The path to a gcp credentials json file. |
@@ -65,8 +63,10 @@ Note: Either credentials_path or credentials_json (str) must be provided.
 | project             | True     | None    | The target GCP project to materialize data into. |
 | dataset             | True     | None    | The target dataset to materialize data into. |
 | batch_size          | False    |  250000 | The maximum number of rows to send in a single batch or commit. |
+| timeout             | False    |     600 | Default timeout for batch_job and gcs_stage derived LoadJobs. |
 | denormalized        | False    |       0 | Determines whether to denormalize the data before writing to BigQuery. A false value will write data using a fixed JSON column based schema, while a true value will write data using a dynamic schema derived from the tap. Denormalization is only supported for the batch_job, streaming_insert, and gcs_stage methods. |
 | method              | True     | batch_job | The method to use for writing to BigQuery. |
+| append_columns      | False    |       1 | In the case of a denormalize sync, whether to append new columns to existing schema |
 | generate_view       | False    |       0 | Determines whether to generate a view based on the SCHEMA message parsed from the tap. Only valid if denormalized=false meaning you are using the fixed JSON column based schema. |
 | gcs_bucket          | False    | None    | The GCS bucket to use for staging data. Only used if method is gcs_stage. |
 | gcs_buffer_size     | False    |      15 | The size of the buffer for GCS stream before flushing a multipart upload chunk. Value in megabytes. Only used if method is gcs_stage. This eager flushing in conjunction with zlib results in very low memory usage. |
@@ -75,8 +75,6 @@ Note: Either credentials_path or credentials_json (str) must be provided.
 | stream_map_config   | False    | None    | User-defined config values to be used within map expressions. |
 | flattening_enabled  | False    | None    | 'True' to enable schema flattening and automatically expand nested properties. |
 | flattening_max_depth| False    | None    | The max depth to flatten schemas. |
-
-A full list of supported settings and capabilities is available by running: `target-bigquery --about`
 
 A full list of supported settings and capabilities is available by running: `target-bigquery --about`
 

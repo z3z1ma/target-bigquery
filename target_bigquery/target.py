@@ -50,6 +50,12 @@ class TargetBigQuery(Target):
             default=250000,
         ),
         th.Property(
+            "timeout",
+            th.IntegerType,
+            description="Default timeout for batch_job and gcs_stage derived LoadJobs.",
+            default=600,
+        ),
+        th.Property(
             "denormalized",
             th.BooleanType,
             description="Determines whether to denormalize the data before writing to BigQuery. A false value "
