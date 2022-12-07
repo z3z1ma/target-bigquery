@@ -31,34 +31,41 @@ def bigquery_type(property_type: List[str], property_format: str) -> str:
 # business logic employed outside user control which makes them reliant
 # on other load methods performing the same transformation. With that said,
 # it may be necessary when columns would otherwise break a load job.
-def safe_column_name(name: str, quotes: bool = False) -> str:
+def safe_column_name(name: str, fix_columns: dict) -> str:
+    quotes = fix_columns["quotes"]
+    lower = fix_columns["lower"]
+    add_underscore_when_invalid = fix_columns["add_underscore_when_invalid"]
+
     name = name.replace("`", "")
     pattern = "[^a-zA-Z0-9_]"
     name = re.sub(pattern, "_", name)
+
     if quotes:
-        return "`{}`".format(name).lower()
-    # return "{}".format(name).lower()
-    if name[0].isdigit():
-        return "_{}".format(name)
-    return "{}".format(name)
+        name = "`{}`".format(name)
+    if lower:
+        name = "{}".format(name).lower()
+    if add_underscore_when_invalid:
+        if name[0].isdigit():
+            name = "_{}".format(name)
+    return name
 
 
 # This class translates a JSON schema into a BigQuery schema.
 # It also uses the translated schema to generate a CREATE VIEW statement.
 class SchemaTranslator:
-    def __init__(self, schema):
+    def __init__(self, schema, fix_columns):
         self.schema = schema
         self.translated_schema = [
-            self._jsonschema_prop_to_bq_column(name, contents)
+            self._jsonschema_prop_to_bq_column(name, contents, fix_columns)
             for name, contents in self.schema.get("properties", {}).items()
         ]
 
     def _jsonschema_prop_to_bq_column(
-        self, name: str, schema_property: dict
+        self, name: str, schema_property: dict, fix_columns: dict
     ) -> SchemaField:
         # Don't munge names, much more portable the less business logic we apply
         # safe_name = safe_column_name(name, quotes=False)  <- this mutates the name
-        safe_name = safe_column_name(name, quotes=False)
+        safe_name = safe_column_name(name, fix_columns=fix_columns)
         # safe_name = name
 
         if "anyOf" in schema_property and len(schema_property["anyOf"]) > 0:
