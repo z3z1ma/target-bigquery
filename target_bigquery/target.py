@@ -133,7 +133,12 @@ class TargetBigQuery(Target):
                 )
             ),
             description="Whether to apply parsing to columns. Can be customized",
-            required=False
+            required=False,
+            default = {
+                "lower": False,
+                "quotes": False,
+                "add_underscore_when_invalid": False
+            }
         ),
     ).to_dict()
 
