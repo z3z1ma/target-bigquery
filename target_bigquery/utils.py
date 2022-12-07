@@ -61,7 +61,7 @@ class SchemaTranslator:
             "add_underscore_when_invalid": True
         }
         self.translated_schema = [
-            self._jsonschema_prop_to_bq_column(name, contents, fix_columns)
+            self._jsonschema_prop_to_bq_column(name, contents, self.fix_columns)
             for name, contents in self.schema.get("properties", {}).items()
         ]
 
@@ -103,7 +103,7 @@ class SchemaTranslator:
         self, safe_name, schema_property, mode="NULLABLE"
     ) -> SchemaField:
         fields = [
-            self._jsonschema_prop_to_bq_column(col, t)
+            self._jsonschema_prop_to_bq_column(col, t, fix_columns=self.fix_columns)
             for col, t in schema_property.get("properties", {}).items()
         ]
         return SchemaField(safe_name, "RECORD", mode, fields=fields)
