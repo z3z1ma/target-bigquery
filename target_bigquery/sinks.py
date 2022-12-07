@@ -187,7 +187,7 @@ class BaseBigQuerySink(BatchSink):
             )
             self._table_ref = self._client.create_table(table, exists_ok=True)
             if self.config.get("generate_view"):
-                ddl = SchemaTranslator(self.schema).make_view_stmt(self._table)
+                ddl = SchemaTranslator(schema = self.schema, fix_columns= self.config["fix_columns"]).make_view_stmt(self._table)
                 self._client.query(ddl).result()
 
     @property
@@ -232,7 +232,7 @@ class BaseBigQuerySinkDenormalized(BaseBigQuerySink):
         key_properties: Optional[List[str]],
     ) -> None:
         super().__init__(target, stream_name, schema, key_properties)
-        self._bq_schema = SchemaTranslator(schema).translated_schema
+        self._bq_schema = SchemaTranslator(schema = self.schema, fix_columns= self.config["fix_columns"]).translated_schema
 
     @retry(
         retry=retry_if_exception_type(ConnectionError),

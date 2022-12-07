@@ -55,6 +55,7 @@ def safe_column_name(name: str, fix_columns: dict) -> str:
 class SchemaTranslator:
     def __init__(self, schema, fix_columns):
         self.schema = schema
+        self.fix_columns = fix_columns
         self.translated_schema = [
             self._jsonschema_prop_to_bq_column(name, contents, fix_columns)
             for name, contents in self.schema.get("properties", {}).items()
