@@ -133,7 +133,6 @@ class TargetBigQuery(Target):
                 )
             ),
             description="Whether to apply parsing to columns. Can be customized",
-            default=False,
         ),
     ).to_dict()
 
