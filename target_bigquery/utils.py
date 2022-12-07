@@ -61,7 +61,6 @@ class SchemaTranslator:
         #     "add_underscore_when_invalid": True
         # }
         self.fix_columns = fix_columns
-        self.logger.info(fix_columns)
         self.translated_schema = [
             self._jsonschema_prop_to_bq_column(name, contents, self.fix_columns)
             for name, contents in self.schema.get("properties", {}).items()
