@@ -113,6 +113,28 @@ class TargetBigQuery(Target):
             "for GCS based ingestion. Only used if method is gcs_stage.",
             default=250,
         ),
+        th.Property(
+            "fix_columns",
+            th.ObjectType(
+                th.Property(
+                    "lower",
+                    th.BooleanType,
+                    default=False
+                ),
+                th.Property(
+                    "quotes",
+                    th.BooleanType,
+                    default=False
+                ),
+                th.Property(
+                    "add_underscore_when_invalid",
+                    th.BooleanType,
+                    default=False
+                )
+            ),
+            description="Whether to apply parsing to columns. Can be customized",
+            default=False,
+        ),
     ).to_dict()
 
     @property
