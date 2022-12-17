@@ -15,7 +15,7 @@ tens of millions of rows with 3-4-500 key objects, its reasonably performant. It
 fall off given enough scale in the current state of the engineering at Google regarding BQ. Choose wisely.
 
 
-Sink names (you will most liekly be configuring this target via yaml or json so scroll on for the config table):
+Sink names (you will most likely be configuring this target via yaml or json so scroll on for the config table):
 
 ```python
 # batch job based
@@ -86,6 +86,7 @@ environment variable is set either in the terminal context or in the `.env` file
 
 ### Source Authentication and Authorization
 
+Authenticate via service account key file or Application Default Credentials (ADC)
 https://cloud.google.com/bigquery/docs/authentication
 
 ## Capabilities
