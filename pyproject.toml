@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "target-bigquery"
-version = "0.3.4"
+version = "0.3.5"
 description = "`target-bigquery` is a Singer target for BigQuery, built with the Meltano SDK for Singer Targets."
 authors = ["Alex Butler <butler.alex2010@gmail.com>"]
 keywords = ["ELT", "BigQuery"]
@@ -10,7 +10,7 @@ license = "Apache 2.0"
 python = "<3.11,>=3.8"
 requests = "^2.25.1"
 singer-sdk = "^0.14.0"
-google-cloud-bigquery = ">=3.0.0"
+google-cloud-bigquery = { version = ">=3.0.0", extras = ["bqstorage"] }
 orjson = "3.7.2"
 smart-open = { extras = ["gcs"], version = "^6.0.0" }
 tenacity = "^8.0.1"
