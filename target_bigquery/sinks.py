@@ -68,30 +68,28 @@ GLOBAL_EXECUTOR = ThreadPoolExecutor(thread_name_prefix="target-bq-")
 def get_bq_client(
     credentials_path: Optional[str] = None,
     credentials_json: Optional[str] = None,
+    project = None,
 ) -> bigquery.Client:
-    if not credentials_path and not credentials_json:
-        raise KeyError(
-            "Credentials not supplied. Required config of either credentials_path or credentials_json"
-        )
     if credentials_path:
         return bigquery.Client.from_service_account_json(credentials_path)
     elif credentials_json:
         return bigquery.Client.from_service_account_info(orjson.loads(credentials_json))
+    elif project:
+        return(bigquery.Client(project=project))
 
 
 @cached
 def get_gcs_client(
     credentials_path: Optional[str] = None,
     credentials_json: Optional[str] = None,
+    project=None,
 ) -> storage.Client:
-    if not credentials_path and not credentials_json:
-        raise KeyError(
-            "Credentials not supplied. Required config of either credentials_path or credentials_json"
-        )
     if credentials_path:
         return storage.Client.from_service_account_json(credentials_path)
     elif credentials_json:
         return storage.Client.from_service_account_info(orjson.loads(credentials_json))
+    elif project:
+        return(storage.Client(project=project))
 
 
 @cached
@@ -99,10 +97,6 @@ def get_storage_client(
     credentials_path: Optional[str] = None,
     credentials_json: Optional[str] = None,
 ) -> bigquery_storage_v1.BigQueryWriteClient:
-    if not credentials_path and not credentials_json:
-        raise KeyError(
-            "Credentials not supplied. Required config of either credentials_path or credentials_json"
-        )
     if credentials_path:
         return bigquery_storage_v1.BigQueryWriteClient.from_service_account_file(
             credentials_path
@@ -111,6 +105,7 @@ def get_storage_client(
         return bigquery_storage_v1.BigQueryWriteClient.from_service_account_info(
             orjson.loads(credentials_json)
         )
+    return bigquery_storage_v1.BigQueryWriteClient()
 
 
 def create_row_data(
@@ -152,7 +147,7 @@ class BaseBigQuerySink(BatchSink):
     ) -> None:
         super().__init__(target, stream_name, schema, key_properties)
         self._client = get_bq_client(
-            self.config.get("credentials_path"), self.config.get("credentials_json")
+            self.config.get("credentials_path"), self.config.get("credentials_json"), self.config.get("project")
         )
         self._table = f"{self.config['project']}.{self.config['dataset']}.{self.stream_name.lower()}"
         self.jobs_running = set()
@@ -319,7 +314,7 @@ class BigQueryGcsStagingImpl:
     ) -> None:
         super().__init__(target, stream_name, schema, key_properties)
         self._gcs_client = get_gcs_client(
-            self.config.get("credentials_path"), self.config.get("credentials_json")
+            self.config.get("credentials_path"), self.config.get("credentials_json"), self.config.get("project")
         )
         self._blob_path = "gs://{}/{}/{}/{}".format(
             self.config["gcs_bucket"],
