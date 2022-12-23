@@ -119,26 +119,41 @@ class TargetBigQuery(Target):
                 th.Property(
                     "lower",
                     th.BooleanType,
-                    default=False
+                    default=False,
+                    description="Lowercase column names",
                 ),
                 th.Property(
-                    "quotes",
+                    "quote",
                     th.BooleanType,
-                    default=False
+                    default=False,
+                    description="Quote columns during DDL generation",
                 ),
                 th.Property(
                     "add_underscore_when_invalid",
                     th.BooleanType,
-                    default=False
-                )
+                    default=False,
+                    description="Add an underscore when a column starts with a digit",
+                ),
+                th.Property(
+                    "snake_case",
+                    th.BooleanType,
+                    default=False,
+                    description="Convert columns to snake case",
+                ),
             ),
-            description="Whether to apply parsing to columns. Can be customized",
+            description=(
+                "Whether to apply parsing to columns. Can be customized. In a fixed schema strategy where data is "
+                "loaded into an unstructured `data` column, this column name transformation logic only applies if you "
+                "have `generate_view` set to true. In the denormalized strategy, this will translate the schema for "
+                "the created table as well as for incoming record messages."
+            ),
             required=False,
-            default = {
+            default={
                 "lower": False,
-                "quotes": False,
-                "add_underscore_when_invalid": False
-            }
+                "quote": False,
+                "add_underscore_when_invalid": False,
+                "snake_case": False,
+            },
         ),
     ).to_dict()
 

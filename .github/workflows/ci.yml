@@ -1,0 +1,51 @@
+name: Tests
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  FORCE_COLOR: "1"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        py_version: ["3.8", "3.9", "3.10"]
+    runs-on: ubuntu-latest
+    env:
+      PYTHON_VERSION: ${{ matrix.py_version }}
+      BQ_PROJECT: ${{ secrets.BQ_PROJECT }}
+      BQ_DATASET: ${{ secrets.BQ_DATASET }}
+      BQ_CREDS: ${{ secrets.BQ_CREDS }}
+      GCS_BUCKET: ${{ secrets.GCS_BUCKET }}
+    steps:
+    - uses: actions/checkout@v3
+    - name: Setup Python ${{ matrix.py_version }}
+      uses: actions/setup-python@v3
+      with:
+        python-version: ${{ matrix.py_version }}
+    - name: Install Target Bigquery
+      run: |
+        python -m pip install --upgrade pip poetry
+        poetry install
+    - name: Run SDK Tests
+      run: |
+        poetry run pytest -k test_core
+    - name: Run Bigquery Unit Tests
+      run: |
+        poetry run pytest -k test_utils
+    - name: Run Bigquery Integration Tests
+      run: |
+        poetry run pytest -k test_sync

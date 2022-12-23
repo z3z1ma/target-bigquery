@@ -4,10 +4,11 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from textwrap import dedent
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import orjson
 import smart_open
+from google.api_core.exceptions import NotFound
 from google.cloud import _http, bigquery, bigquery_storage_v1, storage
 from google.cloud.bigquery.table import TimePartitioning, TimePartitioningType
 from google.cloud.bigquery_storage_v1 import types, writer
@@ -17,12 +18,13 @@ from singer_sdk import PluginBase
 from singer_sdk.sinks import BatchSink
 from tenacity import retry, retry_if_result
 from tenacity.retry import retry_if_exception_type
-from tenacity.stop import stop_after_attempt
+from tenacity.stop import stop_after_attempt, stop_after_delay
 
 from target_bigquery import record_pb2
 from target_bigquery.utils import SchemaTranslator
 
 DELAY = 1, 10, 1.5
+
 DEFAULT_SCHEMA = [
     bigquery.SchemaField(
         "data",
@@ -63,19 +65,21 @@ DEFAULT_SCHEMA = [
 
 GLOBAL_EXECUTOR = ThreadPoolExecutor(thread_name_prefix="target-bq-")
 
+MIN_TIME_BEFORE_FIRST_WRITE = 5
+
 
 @cached
 def get_bq_client(
     credentials_path: Optional[str] = None,
     credentials_json: Optional[str] = None,
-    project = None,
+    project=None,
 ) -> bigquery.Client:
     if credentials_path:
         return bigquery.Client.from_service_account_json(credentials_path)
     elif credentials_json:
         return bigquery.Client.from_service_account_info(orjson.loads(credentials_json))
     elif project:
-        return(bigquery.Client(project=project))
+        return bigquery.Client(project=project)
 
 
 @cached
@@ -89,7 +93,7 @@ def get_gcs_client(
     elif credentials_json:
         return storage.Client.from_service_account_info(orjson.loads(credentials_json))
     elif project:
-        return(storage.Client(project=project))
+        return storage.Client(project=project)
 
 
 @cached
@@ -136,7 +140,8 @@ def create_row_data(
 # including a view which is created on top of the table to unpack the data
 class BaseBigQuerySink(BatchSink):
 
-    include_sdc_metadata_properties = True
+    include_sdc_metadata_properties: bool = True
+    _table_creation_time: Optional[float] = None
 
     def __init__(
         self,
@@ -147,7 +152,9 @@ class BaseBigQuerySink(BatchSink):
     ) -> None:
         super().__init__(target, stream_name, schema, key_properties)
         self._client = get_bq_client(
-            self.config.get("credentials_path"), self.config.get("credentials_json"), self.config.get("project")
+            self.config.get("credentials_path"),
+            self.config.get("credentials_json"),
+            self.config.get("project"),
         )
         self._table = f"{self.config['project']}.{self.config['dataset']}.{self.stream_name.lower()}"
         self.jobs_running = set()
@@ -182,12 +189,23 @@ class BaseBigQuerySink(BatchSink):
             )
             self._table_ref = self._client.create_table(table, exists_ok=True)
             if self.config.get("generate_view"):
-                ddl = SchemaTranslator(schema = self.schema, fix_columns= self.config.get("fix_columns")).make_view_stmt(self._table)
+                ddl = SchemaTranslator(
+                    schema=self.schema, transforms=self.config.get("fix_columns", {})
+                ).make_view_stmt(self._table)
                 self._client.query(ddl).result()
+            self._table_creation_time = time.time()
 
     @property
     def max_size(self) -> int:
         return self.config.get("batch_size", 10000)
+
+    @cached
+    def await_table(self) -> bool:
+        if self._table_creation_time is None:
+            return True
+        while time.time() - self._table_creation_time < MIN_TIME_BEFORE_FIRST_WRITE:
+            time.sleep(1)
+        return True
 
     def _parse_timestamps_in_record(self, *args, **kwargs) -> None:
         pass
@@ -227,7 +245,10 @@ class BaseBigQuerySinkDenormalized(BaseBigQuerySink):
         key_properties: Optional[List[str]],
     ) -> None:
         super().__init__(target, stream_name, schema, key_properties)
-        self._bq_schema = SchemaTranslator(schema = self.schema, fix_columns= self.config.get("fix_columns")).translated_schema
+        self.translator = SchemaTranslator(
+            schema=self.schema, transforms=self.config.get("fix_columns", {})
+        )
+        self._bq_schema = self.translator.translated_schema_transformed
 
     @retry(
         retry=retry_if_exception_type(ConnectionError),
@@ -287,26 +308,27 @@ class BaseBigQuerySinkDenormalized(BaseBigQuerySink):
                 type_=TimePartitioningType.DAY, field="_sdc_batched_at"
             )
             self._table_ref = self._client.create_table(table, exists_ok=True)
-
-    def preprocess_record(self, record: dict, context: dict) -> dict:
-        return record
+            self._table_creation_time = time.time()
 
     def start_batch(self, context: dict) -> None:
         self._make_target()
         self._evolve_schema()
 
+    def preprocess_record(self, record: dict, context: dict) -> dict:
+        return self.translator.translate_record(record)
+
+
+BigQuerySink = Union[BaseBigQuerySink, BaseBigQuerySinkDenormalized]
 
 # Lowest memory overhead since we eagerly flush to GCS using
 # the multi-part upload API, compresses data in memory
 class BigQueryGcsStagingImpl:
-    executor = GLOBAL_EXECUTOR
-
     @property
-    def is_full(self) -> bool:
+    def is_full(self: Union[BigQuerySink, "BigQueryGcsStagingImpl"]) -> bool:
         return self._fsize > self._max_size
 
     def __init__(
-        self,
+        self: Union[BigQuerySink, "BigQueryGcsStagingImpl"],
         target: PluginBase,
         stream_name: str,
         schema: Dict,
@@ -314,7 +336,9 @@ class BigQueryGcsStagingImpl:
     ) -> None:
         super().__init__(target, stream_name, schema, key_properties)
         self._gcs_client = get_gcs_client(
-            self.config.get("credentials_path"), self.config.get("credentials_json"), self.config.get("project")
+            self.config.get("credentials_path"),
+            self.config.get("credentials_json"),
+            self.config.get("project"),
         )
         self._blob_path = "gs://{}/{}/{}/{}".format(
             self.config["gcs_bucket"],
@@ -326,11 +350,13 @@ class BigQueryGcsStagingImpl:
         self._max_size = self.config.get("gcs_max_file_size", 500) * 1e6
         self._gcs_files = []
 
-    def _get_batch_id(self, context: dict):
+    def _get_batch_id(
+        self: Union[BigQuerySink, "BigQueryGcsStagingImpl"], context: dict
+    ):
         return context["batch_id"]
 
     @property
-    def bufsize(self) -> int:
+    def bufsize(self: Union[BigQuerySink, "BigQueryGcsStagingImpl"]) -> int:
         _256kb: int = 256 * 1024
         return (
             int(_256kb * ((self.config.get("gcs_buffer_size", 0) * 1e6) // _256kb))
@@ -338,7 +364,9 @@ class BigQueryGcsStagingImpl:
         )
 
     @cached(custom_key_maker=_get_batch_id)
-    def _get_gcs_write_handle(self, context: dict) -> BytesIO:
+    def _get_gcs_write_handle(
+        self: Union[BigQuerySink, "BigQueryGcsStagingImpl"], context: dict
+    ) -> BytesIO:
         fh = smart_open.open(
             uri=f"{self._blob_path}/{context['batch_id']}.jsonl.gzip",
             mode="wb",
@@ -356,7 +384,9 @@ class BigQueryGcsStagingImpl:
         reraise=True,
         stop=stop_after_attempt(3),
     )
-    def _upload_records(self, target_files: str) -> bigquery.LoadJob:
+    def _upload_records(
+        self: Union[BigQuerySink, "BigQueryGcsStagingImpl"], target_files: str
+    ) -> bigquery.LoadJob:
         bq_job: bigquery.LoadJob = self._client.load_table_from_uri(
             target_files,
             self._table,
@@ -368,7 +398,6 @@ class BigQueryGcsStagingImpl:
                 ],
             ),
         )
-        bq_job._job_statistics
         self.jobs_running.add(bq_job.job_id)
         bq_job.add_done_callback(
             lambda bq: (
@@ -377,13 +406,17 @@ class BigQueryGcsStagingImpl:
             )
         )
 
-    def process_record(self, record: dict, context: dict) -> None:
+    def process_record(
+        self: Union[BigQuerySink, "BigQueryGcsStagingImpl"], record: dict, context: dict
+    ) -> None:
         self._get_gcs_write_handle(context).write(
             orjson.dumps(record, option=orjson.OPT_APPEND_NEWLINE)
         )
         self._fsize = self._get_gcs_write_handle(context).fileobj.tell()
 
-    def process_batch(self, context: dict) -> None:
+    def process_batch(
+        self: Union[BigQuerySink, "BigQueryGcsStagingImpl"], context: dict
+    ) -> None:
         gcs_file = f"{self._blob_path}/{context['batch_id']}.jsonl.gzip"
         inner_obj_prt = self._get_gcs_write_handle(context).fileobj
         # Flush the GzipFile object to ensure all data is written to the inner object
@@ -392,17 +425,16 @@ class BigQueryGcsStagingImpl:
         inner_obj_prt.close()  # this closes the inner object via captured ptr
         self._gcs_files.append(gcs_file)
 
-    def clean_up(self) -> None:
+    def clean_up(self: Union[BigQuerySink, "BigQueryGcsStagingImpl"]) -> None:
+        self.await_table()
         self._upload_records(self._gcs_files)
-        return super().clean_up()
+        super().clean_up()
 
 
 # Relatively fast and the data is instantly available for querying
 class BigQueryLegacyStreamingImpl:
-    executor = GLOBAL_EXECUTOR
-
     def __init__(
-        self,
+        self: Union[BigQuerySink, "BigQueryLegacyStreamingImpl"],
         target: PluginBase,
         stream_name: str,
         schema: Dict,
@@ -410,18 +442,23 @@ class BigQueryLegacyStreamingImpl:
     ) -> None:
         super().__init__(target, stream_name, schema, key_properties)
         _http.json = orjson  # patch bigquery json
+        self.executor = ThreadPoolExecutor(thread_name_prefix="target-bq-")
 
     @property
     def max_size(self) -> int:
         return max(super().max_size, 500)
 
     @retry(
-        retry=retry_if_exception_type(ConnectionError)
-        | retry_if_result(lambda resp: bool(resp)),
+        retry=retry_if_exception_type(Exception)
+        | retry_if_result(lambda errors: bool(errors)),
         reraise=True,
-        stop=stop_after_attempt(3),
+        stop=stop_after_delay(10),
     )
-    def _upload_records(self, records_to_drain, insert_ids=None):
+    def _upload_records(
+        self: Union[BigQuerySink, "BigQueryLegacyStreamingImpl"],
+        records_to_drain: List[Dict[str, Any]],
+        insert_ids: Optional[List[str]] = None,
+    ):
         errors = self._client.insert_rows_json(
             table=self._table,
             json_rows=records_to_drain,
@@ -432,10 +469,15 @@ class BigQueryLegacyStreamingImpl:
             ),
         )
         if errors:
-            raise ConnectionResetError
+            with open("errors", "a") as f:
+                f.write(str(errors) + "\n")
         return errors
 
-    def preprocess_record(self, record: Dict, context: dict) -> dict:
+    def preprocess_record(
+        self: Union[BigQuerySink, "BigQueryLegacyStreamingImpl"],
+        record: Dict[str, Any],
+        context: Dict[str, Any],
+    ) -> dict:
         record = super().preprocess_record(record, context)
         if not self.config.get("denormalized"):
             # Fixed schema on legacy streaming inserts require string data
@@ -443,46 +485,59 @@ class BigQueryLegacyStreamingImpl:
             record["data"] = orjson.dumps(record["data"]).decode("utf-8")
         return record
 
-    def process_record(self, record: dict, context: dict) -> None:
+    def process_record(
+        self: Union[BigQuerySink, "BigQueryLegacyStreamingImpl"],
+        record: Dict[str, Any],
+        context: Dict[str, Any],
+    ) -> None:
         self.records_to_drain.append(record)
 
-    def process_batch(self, context: dict) -> None:
+    def process_batch(
+        self: Union[BigQuerySink, "BigQueryLegacyStreamingImpl"],
+        context: Dict[str, Any],
+    ) -> None:
+        self.await_table()
         job = self.executor.submit(
             self._upload_records,
             records_to_drain=self.records_to_drain.copy(),
         )
-        self.jobs_running.add(id(job))
+        self.jobs_running.add(context["batch_id"])
         job.add_done_callback(
-            lambda fut: (
-                self.logger.info("Job %s complete", id(fut)),
-                self.jobs_running.discard(id(fut)),
-            )
+            lambda _: (self.jobs_running.discard(context["batch_id"]),)
         )
         self.records_to_drain = []
         time.sleep(
             (len(self.jobs_running) // 25) * 0.01
         )  # mini-interrupt encourages buffer reduction via CPython select polls
 
-    def clean_up(self) -> None:
+    def clean_up(self: Union[BigQuerySink, "BigQueryLegacyStreamingImpl"]) -> None:
         self.executor.shutdown(wait=True)
-        return super().clean_up()
+        super().clean_up()
 
 
 # Possibly the most performant Sink implementation, compresses data in memory
 class BigQueryBatchImpl:
-    executor = GLOBAL_EXECUTOR
-
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(
+        self: Union[BigQuerySink, "BigQueryBatchImpl"], *args, **kwargs
+    ) -> None:
         super().__init__(*args, **kwargs)
         self.buffer = gzip.GzipFile(fileobj=BytesIO(), mode="w")
+        self.executor = ThreadPoolExecutor(thread_name_prefix="target-bq-")
 
-    def process_record(self, record: dict, context: dict) -> None:
+    def process_record(
+        self: Union[BigQuerySink, "BigQueryBatchImpl"],
+        record: Dict[str, Any],
+        context: Dict[str, Any],
+    ) -> None:
         self.buffer.write(orjson.dumps(record, option=orjson.OPT_APPEND_NEWLINE))
 
-    def process_batch(self, context: dict) -> None:
+    def process_batch(
+        self: Union[BigQuerySink, "BigQueryBatchImpl"], context: Dict[str, Any]
+    ) -> None:
         fobj_ptr = self.buffer.fileobj
         self.buffer.close()
         fobj_ptr.flush()
+        self.await_table()
         job = self.executor.submit(
             self._client.load_table_from_file,
             fobj_ptr,
@@ -498,21 +553,21 @@ class BigQueryBatchImpl:
                 ],
             ),
         )
-        self.jobs_running.add(id(job))
+        self.jobs_running.add(context["batch_id"])
         job.add_done_callback(
-            lambda fut: (
-                fut.result(),
-                self.jobs_running.discard(id(fut)),
+            lambda bq: (
+                bq.result(),
+                self.jobs_running.discard(context["batch_id"]),
                 self.logger.info(
-                    "Job %s complete! exc(%s)", fut.result(), fut.exception()
+                    "Job %s complete! exc(%s)", bq.result(), bq.exception()
                 ),
             )
         )
         self.buffer = gzip.GzipFile(fileobj=BytesIO(), mode="w")
 
-    def clean_up(self) -> None:
-        self.executor.shutdown()
-        return super().clean_up()
+    def clean_up(self: Union[BigQuerySink, "BigQueryBatchImpl"]) -> None:
+        self.executor.shutdown(wait=True)
+        super().clean_up()
 
 
 # This sink is tied to non-denormalized load due to a requirement
@@ -522,7 +577,7 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
         self,
         target: PluginBase,
         stream_name: str,
-        schema: Dict,
+        schema: Dict[str, Any],
         key_properties: Optional[List[str]],
     ) -> None:
         super().__init__(target, stream_name, schema, key_properties)
@@ -539,7 +594,9 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
         )
         self.seed_new_append_stream()
 
-    def preprocess_record(self, record: Dict, context: dict) -> dict:
+    def preprocess_record(
+        self, record: Dict[str, Any], context: Dict[str, Any]
+    ) -> dict:
         record = super().preprocess_record(record, context)
         # For now, protobuf requires string data for JSON columns.
         record["data"] = orjson.dumps(record["data"]).decode("utf-8")
@@ -572,13 +629,13 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
         )
         self._offset = self._total_records_written
 
-    def start_batch(self, context: dict) -> None:
+    def start_batch(self, context: Dict[str, Any]) -> None:
         self.proto_rows = types.ProtoRows()
 
-    def process_record(self, record: dict, context: dict) -> None:
+    def process_record(self, record: Dict[str, Any], context: Dict[str, Any]) -> None:
         self.proto_rows.serialized_rows.append(create_row_data(**record))
 
-    def process_batch(self, context: dict) -> None:
+    def process_batch(self, context: Dict[str, Any]) -> None:
         request = types.AppendRowsRequest()
         request.offset = self._total_records_written - self._offset
         proto_data = types.AppendRowsRequest.ProtoData()
@@ -588,33 +645,27 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
             self.seed_new_append_stream()
             request.offset = self._total_records_written - self._offset
         try:
-            f = self.append_rows_stream.send(request)
-            self.jobs_running.add(id(f))
-            f.add_done_callback(lambda fut: self.jobs_running.discard(id(fut)))
+            self.append_rows_stream.send(request)
         except:
             # Simplified self-healing
             self._write_client.finalize_write_stream(name=self.write_stream.name)
             self.seed_new_append_stream()
             request.offset = self._total_records_written - self._offset
-            f = self.append_rows_stream.send(request)
-            self.jobs_running.add(id(f))
-            f.add_done_callback(lambda fut: self.jobs_running.discard(id(fut)))
+            self.append_rows_stream.send(request)
 
     def commit_streams(self):
-        if self.jobs_running:
-            self.append_rows_stream.close()
-            self._write_client.finalize_write_stream(name=self.write_stream.name)
-            batch_commit_write_streams_request = types.BatchCommitWriteStreamsRequest()
-            batch_commit_write_streams_request.parent = self._parent
-            batch_commit_write_streams_request.write_streams = self._tracked_streams
-            self._write_client.batch_commit_write_streams(
-                batch_commit_write_streams_request
-            )
-            self.logger.info(
-                f"Writes to streams: '{self._tracked_streams}' have been committed."
-            )
-            self.jobs_running = set()
-            self._tracked_streams = []
+        self.append_rows_stream.close()
+        self._write_client.finalize_write_stream(name=self.write_stream.name)
+        batch_commit_write_streams_request = types.BatchCommitWriteStreamsRequest()
+        batch_commit_write_streams_request.parent = self._parent
+        batch_commit_write_streams_request.write_streams = self._tracked_streams
+        self._write_client.batch_commit_write_streams(
+            batch_commit_write_streams_request
+        )
+        self.logger.info(
+            f"Writes to streams: '{self._tracked_streams}' have been committed."
+        )
+        self._tracked_streams = []
 
     def clean_up(self):
         self.commit_streams()
