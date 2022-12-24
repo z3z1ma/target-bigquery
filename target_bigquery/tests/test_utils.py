@@ -4,7 +4,7 @@ import pytest
 import singer_sdk.typing as th
 from google.cloud.bigquery import SchemaField
 
-from target_bigquery.utils import SchemaTranslator, bigquery_type, safe_column_name
+from target_bigquery.utils import SchemaTranslator, bigquery_type, transform_column_name
 
 
 @pytest.mark.parametrize(
@@ -69,8 +69,8 @@ from target_bigquery.utils import SchemaTranslator, bigquery_type, safe_column_n
         "all_rules",
     ],
 )
-def test_safe_column_name(name: str, rules: dict, expected: str):
-    assert safe_column_name(name, **rules) == expected
+def test_transform_column_name(name: str, rules: dict, expected: str):
+    assert transform_column_name(name, **rules) == expected
 
 
 @pytest.mark.parametrize(

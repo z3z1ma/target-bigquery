@@ -1,6 +1,6 @@
 import re
 from textwrap import dedent, indent
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from google.cloud.bigquery import SchemaField
 
@@ -29,11 +29,11 @@ def bigquery_type(
         return "string"
 
 
-# TODO: We should try to avoid mutating the column name as it entails
-# business logic employed outside user control which makes them reliant
-# on other load methods performing the same transformation. With that said,
-# it may be necessary when columns would otherwise break a load job.
-def safe_column_name(
+# Column name transforms are configurable and entirely opt-in.
+# This allows users to only use the transforms they need and not
+# become dependent on inconfigurable transforms outside their
+# realm of control which must be recreated if migrating loaders.
+def transform_column_name(
     name: str,
     quote: bool = False,
     lower: bool = False,
@@ -59,7 +59,7 @@ def safe_column_name(
 # This class translates a JSON schema into a BigQuery schema.
 # It also uses the translated schema to generate a CREATE VIEW statement.
 class SchemaTranslator:
-    def __init__(self, schema, transforms):
+    def __init__(self, schema: Dict[str, Any], transforms: Dict[str, bool]):
         self.schema = schema
         self.transforms = transforms
         # Used by fixed schema strategy where we defer transformation
@@ -72,7 +72,7 @@ class SchemaTranslator:
         # the target schema
         self.translated_schema_transformed = [
             self._jsonschema_prop_to_bq_column(
-                safe_column_name(name, **transforms), contents
+                transform_column_name(name, **transforms), contents
             )
             for name, contents in self.schema.get("properties", {}).items()
         ]
@@ -82,7 +82,7 @@ class SchemaTranslator:
             return record
         output = dict(
             [
-                (safe_column_name(k, **{**self.transforms, "quote": False}), v)
+                (transform_column_name(k, **{**self.transforms, "quote": False}), v)
                 for k, v in record.items()
             ]
         )
@@ -177,7 +177,7 @@ class SchemaTranslator:
                     ).rstrip(",\n"),
                 )
                 + (" " * depth * 2)
-                + f") as {safe_column_name(field.name, **self.transforms)},\n"
+                + f") as {transform_column_name(field.name, **self.transforms)},\n"
             )
         # Nullable fields require a JSON_VALUE call which creates a 2-stage cast
         elif field.is_nullable:
@@ -188,22 +188,22 @@ class SchemaTranslator:
         elif field.field_type.upper() == "STRING":
             return (
                 (" " * depth * 2)
-                + f"STRING({scalar}) as {safe_column_name(field.name, **self.transforms)},\n"
+                + f"STRING({scalar}) as {transform_column_name(field.name, **self.transforms)},\n"
             )
         elif field.field_type.upper() == "INTEGER":
             return (
                 (" " * depth * 2)
-                + f"INT64({scalar}) as {safe_column_name(field.name, **self.transforms)},\n"
+                + f"INT64({scalar}) as {transform_column_name(field.name, **self.transforms)},\n"
             )
         elif field.field_type.upper() == "FLOAT":
             return (
                 (" " * depth * 2)
-                + f"FLOAT64({scalar}) as {safe_column_name(field.name, **self.transforms)},\n"
+                + f"FLOAT64({scalar}) as {transform_column_name(field.name, **self.transforms)},\n"
             )
         elif field.field_type.upper() == "BOOLEAN":
             return (
                 (" " * depth * 2)
-                + f"BOOL({scalar}) as {safe_column_name(field.name, **self.transforms)},\n"
+                + f"BOOL({scalar}) as {transform_column_name(field.name, **self.transforms)},\n"
             )
         # Fallback to a 2-stage extract & cast
         else:
@@ -237,12 +237,12 @@ class SchemaTranslator:
     ) -> str:
         typ = field.field_type.upper()
         if typ == "STRING":
-            return f"JSON_VALUE({base}, '{path}') as {safe_column_name(field.name, **self.transforms)},\n"
+            return f"JSON_VALUE({base}, '{path}') as {transform_column_name(field.name, **self.transforms)},\n"
         if typ == "FLOAT":
             typ = "FLOAT64"
         if typ in ("INT", "INTEGER"):
             typ = "INT64"
-        return f"CAST(JSON_VALUE({base}, '{path}') as {typ}) as {safe_column_name(field.name, **self.transforms)},\n"
+        return f"CAST(JSON_VALUE({base}, '{path}') as {typ}) as {transform_column_name(field.name, **self.transforms)},\n"
 
 
 # This can throw if uncastable change in schema

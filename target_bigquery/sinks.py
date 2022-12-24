@@ -19,6 +19,7 @@ from singer_sdk.sinks import BatchSink
 from tenacity import retry, retry_if_result
 from tenacity.retry import retry_if_exception_type
 from tenacity.stop import stop_after_attempt, stop_after_delay
+from tenacity.wait import wait_fixed
 
 from target_bigquery import record_pb2
 from target_bigquery.utils import SchemaTranslator
@@ -163,8 +164,8 @@ class BaseBigQuerySink(BatchSink):
 
     @retry(
         retry=retry_if_exception_type(ConnectionError),
-        reraise=True,
         stop=stop_after_attempt(3),
+        reraise=True,
     )
     def _make_target(self) -> None:
         if self._dataset_ref is None:
@@ -190,7 +191,8 @@ class BaseBigQuerySink(BatchSink):
             self._table_ref = self._client.create_table(table, exists_ok=True)
             if self.config.get("generate_view"):
                 ddl = SchemaTranslator(
-                    schema=self.schema, transforms=self.config.get("fix_columns", {})
+                    schema=self.schema,
+                    transforms=self.config.get("column_name_transforms", {}),
                 ).make_view_stmt(self._table)
                 self._client.query(ddl).result()
             self._table_creation_time = time.time()
@@ -246,14 +248,14 @@ class BaseBigQuerySinkDenormalized(BaseBigQuerySink):
     ) -> None:
         super().__init__(target, stream_name, schema, key_properties)
         self.translator = SchemaTranslator(
-            schema=self.schema, transforms=self.config.get("fix_columns", {})
+            schema=self.schema, transforms=self.config.get("column_name_transforms", {})
         )
         self._bq_schema = self.translator.translated_schema_transformed
 
     @retry(
         retry=retry_if_exception_type(ConnectionError),
-        reraise=True,
         stop=stop_after_attempt(3),
+        reraise=True,
     )
     def _evolve_schema(self):
         if not self.config["append_columns"]:
@@ -283,8 +285,8 @@ class BaseBigQuerySinkDenormalized(BaseBigQuerySink):
 
     @retry(
         retry=retry_if_exception_type(ConnectionError),
-        reraise=True,
         stop=stop_after_attempt(3),
+        reraise=True,
     )
     def _make_target(self) -> None:
         if self._dataset_ref is None:
@@ -381,8 +383,9 @@ class BigQueryGcsStagingImpl:
 
     @retry(
         retry=retry_if_exception_type(ConnectionError),
-        reraise=True,
         stop=stop_after_attempt(3),
+        wait=wait_fixed(1),
+        reraise=True,
     )
     def _upload_records(
         self: Union[BigQuerySink, "BigQueryGcsStagingImpl"], target_files: str
@@ -451,8 +454,9 @@ class BigQueryLegacyStreamingImpl:
     @retry(
         retry=retry_if_exception_type(Exception)
         | retry_if_result(lambda errors: bool(errors)),
+        wait=wait_fixed(1),
+        stop=stop_after_delay(15),
         reraise=True,
-        stop=stop_after_delay(10),
     )
     def _upload_records(
         self: Union[BigQuerySink, "BigQueryLegacyStreamingImpl"],

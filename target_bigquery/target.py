@@ -114,7 +114,7 @@ class TargetBigQuery(Target):
             default=250,
         ),
         th.Property(
-            "fix_columns",
+            "column_name_transforms",
             th.ObjectType(
                 th.Property(
                     "lower",
@@ -142,18 +142,12 @@ class TargetBigQuery(Target):
                 ),
             ),
             description=(
-                "Whether to apply parsing to columns. Can be customized. In a fixed schema strategy where data is "
-                "loaded into an unstructured `data` column, this column name transformation logic only applies if you "
-                "have `generate_view` set to true. In the denormalized strategy, this will translate the schema for "
-                "the created table as well as for incoming record messages."
+                "Accepts a JSON object of options with boolean values to enable them. The available options are `quote` "
+                "(quote columns in DDL), `lower` (lowercase column names), `add_underscore_when_invalid` (add underscore "
+                "if column starts with digit), and `snake_case` (convert to snake case naming). For fixed schema, this "
+                "transform only applies to the generated view if enabled."
             ),
             required=False,
-            default={
-                "lower": False,
-                "quote": False,
-                "add_underscore_when_invalid": False,
-                "snake_case": False,
-            },
         ),
     ).to_dict()
 

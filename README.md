@@ -71,6 +71,7 @@ pipx install target-bigquery
 | gcs_bucket          | False    | None    | The GCS bucket to use for staging data. Only used if method is gcs_stage. |
 | gcs_buffer_size     | False    |      15 | The size of the buffer for GCS stream before flushing a multipart upload chunk. Value in megabytes. Only used if method is gcs_stage. This eager flushing in conjunction with zlib results in very low memory usage. |
 | gcs_max_file_size   | False    |     250 | The maximum file size in megabytes for a bucket file. This is used as the batch indicator for GCS based ingestion. Only used if method is gcs_stage. |
+| column_name_transforms| False    | None    | Accepts a JSON object of options with boolean values to enable them. The available options are `quote` (quote columns in DDL), `lower` (lowercase column names), `add_underscore_when_invalid` (add underscore if column starts with digit), and `snake_case` (convert to snake case naming). For fixed schema, this transform only applies to the generated view if enabled. |
 | stream_maps         | False    | None    | Config object for stream maps capability. For more information check out [Stream Maps](https://sdk.meltano.com/en/latest/stream_maps.html). |
 | stream_map_config   | False    | None    | User-defined config values to be used within map expressions. |
 | flattening_enabled  | False    | None    | 'True' to enable schema flattening and automatically expand nested properties. |
