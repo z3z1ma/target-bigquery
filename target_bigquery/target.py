@@ -54,7 +54,7 @@ class TargetBigQuery(Target):
             "batch_size",
             th.IntegerType,
             description="The maximum number of rows to send in a single batch or commit.",
-            default=250000,
+            default=500,
         ),
         th.Property(
             "timeout",
@@ -84,7 +84,7 @@ class TargetBigQuery(Target):
                 }
             ),
             description="The method to use for writing to BigQuery.",
-            default="batch_job",
+            default="storage_write_api",
             required=True,
         ),
         th.Property(
@@ -176,7 +176,7 @@ class TargetBigQuery(Target):
         raise ValueError(f"Unknown method: {method}")
 
     def get_sink_class(self, stream_name: str) -> Type[Sink]:
-        method = self.config.get("method", "batch_job")
+        method = self.config.get("method", "storage_write_api")
         denormalized = self.config.get("denormalized", False)
         if method == "batch_job":
             if denormalized:

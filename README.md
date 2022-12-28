@@ -74,10 +74,10 @@ First a valid example to give context to the below including a nested key exampl
 | credentials_json    | False    | None    | A JSON string of your service account JSON file. |
 | project             | True     | None    | The target GCP project to materialize data into. |
 | dataset             | True     | None    | The target dataset to materialize data into. |
-| batch_size          | False    |  250000 | The maximum number of rows to send in a single batch or commit. |
+| batch_size          | False    |  500    | The maximum number of rows to send in a single batch to the worker. This should be configured based on load method. For `storage_write_api` and `streaming_insert` it should be `<=500`, for the LoadJob sinks, it can be much higher, ie `>100,000` |
 | timeout             | False    |     600 | Default timeout for batch_job and gcs_stage derived LoadJobs. |
-| denormalized        | False    |       0 | Determines whether to denormalize the data before writing to BigQuery. A false value will write data using a fixed JSON column based schema, while a true value will write data using a dynamic schema derived from the tap. Denormalization is only supported for the batch_job, streaming_insert, and gcs_stage methods. |
-| method              | True     | batch_job | The method to use for writing to BigQuery. |
+| denormalized        | False    |       0 | Determines whether to denormalize the data before writing to BigQuery. A false value will write data using a fixed JSON column based schema, while a true value will write data using a dynamic schema derived from the tap. |
+| method              | True     | storage_write_api | The method to use for writing to BigQuery. Must be one of `batch_job`, `storage_write_api`, `gcs_stage`, `streaming_insert` |
 | generate_view       | False    |       0 | Determines whether to generate a view based on the SCHEMA message parsed from the tap. Only valid if denormalized=false meaning you are using the fixed JSON column based schema. |
 | bucket              | False    | None    | The GCS bucket to use for staging data. Only used if method is gcs_stage. |
 | column_name_transforms.lower| False    | None    | Lowercase column names. |
