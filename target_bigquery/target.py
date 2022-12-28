@@ -5,14 +5,21 @@ from typing import List, Optional, Type
 from singer_sdk import typing as th
 from singer_sdk.target_base import Sink, Target
 
-from target_bigquery.sinks import (
-    BigQueryBatchDenormalizedSink,
-    BigQueryBatchSink,
+from target_bigquery.batch_job import (
+    BigQueryBatchJobDenormalizedSink,
+    BigQueryBatchJobSink,
+)
+from target_bigquery.gcs_stage import (
     BigQueryGcsStagingDenormalizedSink,
     BigQueryGcsStagingSink,
-    BigQueryLegacyStreamingDenormalizedSink,
-    BigQueryLegacyStreamingSink,
+)
+from target_bigquery.storage_write import (
+    BigQueryStorageWriteDenormalizedSink,
     BigQueryStorageWriteSink,
+)
+from target_bigquery.streaming_insert import (
+    BigQueryStreamingInsertDenormalizedSink,
+    BigQueryStreamingInsertSink,
 )
 
 
@@ -81,13 +88,6 @@ class TargetBigQuery(Target):
             required=True,
         ),
         th.Property(
-            "append_columns",
-            th.BooleanType,
-            description="In the case of a denormalize sync, whether to append new columns to existing schema",
-            default=True,
-            required=False,
-        ),
-        th.Property(
             "generate_view",
             th.BooleanType,
             description="Determines whether to generate a view based on the SCHEMA message parsed from the tap. "
@@ -95,23 +95,9 @@ class TargetBigQuery(Target):
             default=False,
         ),
         th.Property(
-            "gcs_bucket",
+            "bucket",
             th.StringType,
             description="The GCS bucket to use for staging data. Only used if method is gcs_stage.",
-        ),
-        th.Property(
-            "gcs_buffer_size",
-            th.NumberType,
-            description="The size of the buffer for GCS stream before flushing a multipart upload chunk. Value in megabytes. "
-            "Only used if method is gcs_stage. This eager flushing in conjunction with zlib results in very low memory usage.",
-            default=15,
-        ),
-        th.Property(
-            "gcs_max_file_size",
-            th.NumberType,
-            description="The maximum file size in megabytes for a bucket file. This is used as the batch indicator "
-            "for GCS based ingestion. Only used if method is gcs_stage.",
-            default=250,
         ),
         th.Property(
             "column_name_transforms",
@@ -149,6 +135,33 @@ class TargetBigQuery(Target):
             ),
             required=False,
         ),
+        th.Property(
+            "options",
+            th.ObjectType(
+                th.Property(
+                    "storage_write_batch_mode",
+                    th.BooleanType,
+                    default=False,
+                    description=(
+                        "By default, we use the default stream (Committed mode) in the storage_write_api load method "
+                        "which results in streaming records which are immediately available and is generally fastest. If this is set to true, we will "
+                        "use the application created streams (Committed mode) to transactionally batch data on STATE messages and at end of pipe."
+                    ),
+                ),
+                th.Property(
+                    "process_pool",
+                    th.BooleanType,
+                    default=False,
+                    description="By default we use an autoscaling threadpool to write to BigQuery. If set to true, we will use a process pool.",
+                ),
+                th.Property(
+                    "max_workers_per_stream",
+                    th.IntegerType,
+                    required=False,
+                    description="By default, each sink type has a preconfigured max worker limit. This sets an override for maximum number of workers per stream.",
+                ),
+            ),
+        ),
     ).to_dict()
 
     @property
@@ -165,23 +178,21 @@ class TargetBigQuery(Target):
     def get_sink_class(self, stream_name: str) -> Type[Sink]:
         method = self.config.get("method", "batch_job")
         denormalized = self.config.get("denormalized", False)
-        if method == "storage_write_api" and denormalized:
-            raise RuntimeError(
-                f"Cannot use denormalized=true with method=storage_write_api"
-            )
         if method == "batch_job":
             if denormalized:
-                return BigQueryBatchDenormalizedSink
-            return BigQueryBatchSink
+                return BigQueryBatchJobDenormalizedSink
+            return BigQueryBatchJobSink
         elif method == "streaming_insert":
             if denormalized:
-                return BigQueryLegacyStreamingDenormalizedSink
-            return BigQueryLegacyStreamingSink
+                return BigQueryStreamingInsertDenormalizedSink
+            return BigQueryStreamingInsertSink
         elif method == "gcs_stage":
             if denormalized:
                 return BigQueryGcsStagingDenormalizedSink
             return BigQueryGcsStagingSink
         elif method == "storage_write_api":
+            if denormalized:
+                return BigQueryStorageWriteDenormalizedSink
             return BigQueryStorageWriteSink
         raise ValueError(f"Unknown method: {method}")
 

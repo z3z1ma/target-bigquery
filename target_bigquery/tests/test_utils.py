@@ -4,7 +4,12 @@ import pytest
 import singer_sdk.typing as th
 from google.cloud.bigquery import SchemaField
 
-from target_bigquery.utils import SchemaTranslator, bigquery_type, transform_column_name
+from target_bigquery.core import (
+    ProtoJIT,
+    SchemaTranslator,
+    bigquery_type,
+    transform_column_name,
+)
 
 
 @pytest.mark.parametrize(
@@ -559,7 +564,7 @@ def test_schema_translator_views(
         SchemaTranslator(
             schema,
             transforms,
-        ).make_view_stmt(table)
+        ).generate_view_statement(table)
         == expected
     )
 
@@ -707,3 +712,96 @@ def test_schema_translator_records(
         ).translate_record(record)
         for record in records
     ] == expected
+
+
+@pytest.mark.parametrize(
+    "schema,expected",
+    [
+        (
+            [
+                SchemaField("IntColumn", "integer"),
+                SchemaField("StringColumn", "string"),
+                SchemaField("FloatColumn", "float"),
+                SchemaField("BooleanColumn", "boolean"),
+                SchemaField("TimestampColumn", "timestamp"),
+                SchemaField("DateColumn", "date"),
+                SchemaField("TimeColumn", "time"),
+            ],
+            """syntax = "proto2";
+message Test {
+  optional int64 IntColumn = 1;
+  optional string StringColumn = 2;
+  optional double FloatColumn = 3;
+  optional bool BooleanColumn = 4;
+  optional string TimestampColumn = 5;
+  optional string DateColumn = 6;
+  optional string TimeColumn = 7;
+}""",
+        ),
+        (
+            [
+                SchemaField("IntColumn", "integer"),
+                SchemaField("StringColumn", "string"),
+                SchemaField(
+                    "RecordColumn",
+                    "record",
+                    mode="repeated",
+                    fields=[
+                        SchemaField("IntColumn", "integer"),
+                        SchemaField("StringColumn", "string"),
+                        SchemaField("FloatColumn", "float"),
+                        SchemaField("BooleanColumn", "boolean"),
+                    ],
+                ),
+            ],
+            """syntax = "proto2";
+message Test {
+  optional int64 IntColumn = 1;
+  optional string StringColumn = 2;
+  message RecordColumn__spec {
+      optional int64 IntColumn = 1;
+      optional string StringColumn = 2;
+      optional double FloatColumn = 3;
+      optional bool BooleanColumn = 4;
+  }
+  repeated RecordColumn__spec RecordColumn = 3;
+}""",
+        ),
+    ],
+    ids=["basic_proto", "nested_proto"],
+)
+def test_make_proto(schema, expected):
+    assert ProtoJIT(schema, "test").generate_proto_schema() == expected
+
+
+def test_jit_compile_proto():
+    jit = ProtoJIT(
+        [
+            SchemaField("IntColumn", "integer"),
+            SchemaField("StringColumn", "string"),
+            SchemaField("FloatColumn", "float"),
+            SchemaField("BooleanColumn", "boolean"),
+            SchemaField("TimestampColumn", "timestamp"),
+            SchemaField("DateColumn", "date"),
+            SchemaField("TimeColumn", "time"),
+        ],
+        "test",
+    )
+    payload = {
+        "IntColumn": 1,
+        "StringColumn": "test",
+        "FloatColumn": 1.0,
+        "BooleanColumn": True,
+        "TimestampColumn": "2020-01-01",
+        "DateColumn": "2020-01-01",
+        "TimeColumn": "00:00:00",
+    }
+    data = jit.message()
+    descript = jit.message.DESCRIPTOR
+    for f in descript.fields:
+        if f.name in payload:
+            setattr(data, f.name, payload[f.name])
+    assert (
+        data.SerializeToString()
+        == b"\x08\x01\x12\x04test\x19\x00\x00\x00\x00\x00\x00\xf0? \x01*\n2020-01-012\n2020-01-01:\x0800:00:00"
+    )

@@ -8,7 +8,7 @@ import pytest
 from google.api_core.exceptions import NotFound
 from singer_sdk.testing import target_sync_test
 
-from target_bigquery.sinks import get_bq_client
+from target_bigquery.core import BigQueryCredentials, bigquery_client_factory
 from target_bigquery.target import TargetBigQuery
 
 BASIC_SINGER_STREAM = """
@@ -32,6 +32,7 @@ def test_basic_sync(method):
         "method": method,
         "denormalized": False,
         "generate_view": False,
+        "options": {"threaded": True},
     }
 
     table_name = OPTS["method"]
@@ -55,7 +56,9 @@ def test_basic_sync(method):
         },
     )
 
-    client = get_bq_client(credentials_json=target.config["credentials_json"])
+    client = bigquery_client_factory(
+        BigQueryCredentials(json=target.config["credentials_json"])
+    )
     try:
         client.query(
             f"DROP TABLE IF EXISTS {target.config['dataset']}.{table_name}"
@@ -65,7 +68,7 @@ def test_basic_sync(method):
 
     stdout, stderr = target_sync_test(target, singer_input)
     del stdout, stderr
-    time.sleep(5)  # wait for the eventual consistency seen in LoadJobs sinks
+    time.sleep(5)  # wait for the eventual consistency seen in LoadJob sinks
 
     records = [
         dict(record)
@@ -96,14 +99,15 @@ def test_basic_sync(method):
 
 @pytest.mark.parametrize(
     "method",
-    ["batch_job", "streaming_insert", "gcs_stage"],
-    ids=["batch_job", "streaming_insert", "gcs_stage"],
+    ["batch_job", "streaming_insert", "gcs_stage", "storage_write_api"],
+    ids=["batch_job", "streaming_insert", "gcs_stage", "storage_write_api"],
 )
 def test_basic_denorm_sync(method):
     OPTS = {
         "method": method,
         "denormalized": True,
         "generate_view": False,
+        "options": {"threaded": True},
     }
 
     table_name = OPTS["method"]
@@ -128,7 +132,9 @@ def test_basic_denorm_sync(method):
         },
     )
 
-    client = get_bq_client(credentials_json=target.config["credentials_json"])
+    client = bigquery_client_factory(
+        BigQueryCredentials(json=target.config["credentials_json"])
+    )
     try:
         client.query(
             f"DROP TABLE IF EXISTS {target.config['dataset']}.{table_name}"

@@ -3,52 +3,47 @@ send_anonymous_usage_stats: true
 project_id: target-bigquery
 default_environment: testing
 environments:
-  - name: testing
+- name: testing
 plugins:
   extractors:
-    - name: tap-infinity
-      namespace: tap_infinity
-      pip_url: git+https://github.com/spacecowboy/tap-infinity.git
-      capabilities:
-        - catalog
-        - discover
-        - batch
-        - test
-        - about
-      config:
-        row_count: 1000000
-        column_count: 150
-        batch_size: 1000000
-        batch_config:
-          encoding:
-            format: jsonl
-            compression: gzip
-          storage:
-            root: file://
-            prefix: ""
+  - name: tap-infinity
+    namespace: tap_infinity
+    pip_url: git+https://github.com/spacecowboy/tap-infinity.git
+    capabilities:
+    - catalog
+    - discover
+    - batch
+    - test
+    - about
+    config:
+      row_count: 1000000
+      column_count: 150
+      batch_size: 1000000
+      batch_config:
+        encoding:
+          format: jsonl
+          compression: gzip
+        storage:
+          root: file://
+          prefix: ''
+  - name: tap-carbon-intensity
+    variant: meltano
+    pip_url: git+https://gitlab.com/meltano/tap-carbon-intensity.git
   loaders:
-    - name: target-bigquery
-      namespace: target_bigquery
-      pip_url: -e .
-      capabilities:
-        - about
-        - batch
-      # TODO: re-add settings
-      config:
-        # `batch`
-        project: proj
-        method: storage_write_api
-        # denormalized: true
-        generate_view: true
-        credentials_path: ${HOME}/.gcp/credentials.json
-        dataset: raw_testing
-        # batch_size: 250000
-        batch_size: 500
-        append_columns: true
-        timeout: 300
-
-        # `gcs`
-        # batch_size: 250000
-        gcs_buffer_size: 15
-        gcs_bucket: buck
-        gcs_max_file_size: 500
+  - name: target-bigquery
+    namespace: target_bigquery
+    pip_url: -e .
+    capabilities:
+    - about
+    - batch
+    - stream-maps
+    - record-flattening
+    config:
+      project: ${BQ_PROJECT}
+      method: storage_write_api
+      denormalized: true
+      credentials_path: ${HOME}/.gcp/dwh-credentials.json
+      dataset: raw_testing
+      batch_size: 500
+      timeout: 300
+      bucket: ${GCS_BUCKET}

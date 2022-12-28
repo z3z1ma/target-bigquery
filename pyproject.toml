@@ -12,8 +12,8 @@ requests = "^2.25.1"
 singer-sdk = "^0.16.0"
 google-cloud-bigquery = { version = "^3.4.1", extras = ["bqstorage"] }
 orjson = "3.7.2"
-smart-open = { extras = ["gcs"], version = "^6.0.0" }
 tenacity = "^8.0.1"
+grpcio-tools = "^1.51.1"
 
 [tool.poetry.dev-dependencies]
 pytest = "^6.2.5"
