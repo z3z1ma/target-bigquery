@@ -51,7 +51,7 @@ def test_basic_sync(method):
             "project": os.environ["BQ_PROJECT"],
             "dataset": os.environ["BQ_DATASET"],
             "batch_size": 100,
-            "gcs_bucket": os.environ["GCS_BUCKET"],
+            "bucket": os.environ["GCS_BUCKET"],
             **OPTS,
         },
     )
@@ -127,7 +127,7 @@ def test_basic_denorm_sync(method):
             "dataset": os.environ["BQ_DATASET"],
             "batch_size": 100,
             "timeout": 60,
-            "gcs_bucket": os.environ["GCS_BUCKET"],
+            "bucket": os.environ["GCS_BUCKET"],
             **OPTS,
         },
     )
