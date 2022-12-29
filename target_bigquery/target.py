@@ -186,6 +186,7 @@ class TargetBigQuery(Target):
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
+        self.max_parallelism = 1
         (
             self.proc_cls,
             self.pipe_cls,
