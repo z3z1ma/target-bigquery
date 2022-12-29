@@ -43,7 +43,7 @@ MAX_IN_FLIGHT = 50
 """Maximum number of concurrent requests per worker be processed by grpc before awaiting."""
 
 
-def make_append_rows_stream(
+def get_application_stream(
     client: BigQueryWriteClient, parent: str, template: types.AppendRowsRequest
 ) -> Tuple[types.WriteStream, writer.AppendRowsStream]:
     write_stream = types.WriteStream()
@@ -81,11 +81,6 @@ def make_request(
     return request
 
 
-class StreamType(str, Enum):
-    STREAM = "Stream"
-    BATCH = "Batch"
-
-
 class Job(NamedTuple):
     parent: str
     template: types.AppendRowsRequest
@@ -96,21 +91,13 @@ class Job(NamedTuple):
 class StorageWriteBatchWorker(BaseWorker):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.get_stream = make_append_rows_stream
+        self.get_stream = get_application_stream
         self.awaiting: List[concurrent.futures.Future] = []
-        self._offset = 0
-
-    @property
-    def offset(self) -> int:
-        return self._offset
-
-    @offset.setter
-    def offset(self, value: int) -> None:
-        self._offset = value
 
     def run(self):
         client: BigQueryWriteClient = storage_client_factory(self.credentials)
         stream = {}
+        offset = 0
         while True:
             try:
                 job: Optional[Job] = self.queue.get(timeout=60.0)
@@ -138,14 +125,21 @@ class StorageWriteBatchWorker(BaseWorker):
                         wait=wait_fixed(1),
                         stop=stop_after_delay(5),
                         reraise=True,
-                    )(make_request(job.data, self.offset))
+                    )(
+                        make_request(
+                            job.data,
+                            offset=None
+                            if stream["write_stream"].name.endswith("_default")
+                            else offset,
+                        )
+                    )
                 )
             except Exception as exc:
                 self.wait(drain=True)
                 stream["append_rows_stream"].close()
                 self.queue.put(job)
                 raise exc
-            self.offset += len(job.data.serialized_rows)
+            offset += len(job.data.serialized_rows)
             if len(self.awaiting) > MAX_IN_FLIGHT:
                 self.wait()
         if stream:
@@ -165,14 +159,6 @@ class StorageWriteStreamWorker(StorageWriteBatchWorker):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.get_stream = get_default_stream
-
-    @property
-    def offset(self) -> None:
-        return None
-
-    @offset.setter
-    def offset(self, value: int) -> None:
-        _ = value
 
 
 class StorageWriteThreadStreamWorker(StorageWriteStreamWorker, _Thread):
