@@ -15,6 +15,7 @@ orjson = "3.7.2"
 tenacity = "^8.0.1"
 grpcio-tools = "^1.51.1"
 google-cloud-storage = "^2.7.0"
+grpcio-status = {extras = ["grpc"], version = "^1.51.1"}
 
 [tool.poetry.dev-dependencies]
 pytest = "^6.2.5"
