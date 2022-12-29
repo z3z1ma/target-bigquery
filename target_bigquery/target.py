@@ -1,6 +1,8 @@
 """BigQuery target class."""
 import copy
-from typing import List, Optional, Type
+import time
+import uuid
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple, Type, Union
 
 from singer_sdk import typing as th
 from singer_sdk.target_base import Sink, Target
@@ -8,6 +10,12 @@ from singer_sdk.target_base import Sink, Target
 from target_bigquery.batch_job import (
     BigQueryBatchJobDenormalizedSink,
     BigQueryBatchJobSink,
+)
+from target_bigquery.core import (
+    BaseBigQuerySink,
+    BaseWorker,
+    BigQueryCredentials,
+    ParType,
 )
 from target_bigquery.gcs_stage import (
     BigQueryGcsStagingDenormalizedSink,
@@ -21,6 +29,18 @@ from target_bigquery.streaming_insert import (
     BigQueryStreamingInsertDenormalizedSink,
     BigQueryStreamingInsertSink,
 )
+
+if TYPE_CHECKING:
+    from multiprocessing import Process, Queue
+    from multiprocessing.connection import Connection
+
+# Defaults for target worker pool parameters
+MAX_WORKERS = 15
+"""Maximum number of workers to spawn."""
+WORKER_CAPACITY_FACTOR = 5
+"""Jobs enqueued must exceed the number of active workers times this number."""
+WORKER_CREATION_MIN_INTERVAL = 5
+"""Minimum time between worker creation attempts."""
 
 
 class TargetBigQuery(Target):
@@ -155,7 +175,7 @@ class TargetBigQuery(Target):
                     description="By default we use an autoscaling threadpool to write to BigQuery. If set to true, we will use a process pool.",
                 ),
                 th.Property(
-                    "max_workers_per_stream",
+                    "max_workers",
                     th.IntegerType,
                     required=False,
                     description="By default, each sink type has a preconfigured max worker limit. This sets an override for maximum number of workers per stream.",
@@ -164,20 +184,134 @@ class TargetBigQuery(Target):
         ),
     ).to_dict()
 
-    @property
-    def max_parallelism(self) -> int:
-        method = self.config.get("method", "batch")
-        if method in ("batch_job",):
-            return 4
-        elif method in ("streaming_insert",):
-            return 8
-        elif method in ("gcs_stage", "storage_write_api"):
-            return 12
-        raise ValueError(f"Unknown method: {method}")
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        (
+            self.proc_cls,
+            self.pipe_cls,
+            self.queue_cls,
+            self.par_typ,
+        ) = self.get_parallelization_components()
+        self.queue = self.queue_cls()
+        self.job_notification, self.job_notifier = self.pipe_cls(False)
+        self._credentials = BigQueryCredentials(
+            self.config.get("credentials_path"),
+            self.config.get("credentials_json"),
+            self.config["project"],
+        )
 
-    def get_sink_class(self, stream_name: str) -> Type[Sink]:
-        method = self.config.get("method", "storage_write_api")
-        denormalized = self.config.get("denormalized", False)
+        def worker_factory():
+            return self.get_sink_class().worker_cls_factory(
+                self.proc_cls,
+                self.config,
+            )(
+                ext_id=uuid.uuid4().hex,
+                queue=self.queue,
+                credentials=self._credentials,
+                job_notifier=self.job_notifier,
+            )
+
+        self.worker_factory = worker_factory
+        self.workers: List[Union[BaseWorker, "Process"]] = []
+        self.worker_pings: Dict[str, float] = {}
+        self._jobs_enqueued = 0
+        self._last_worker_creation = 0.0
+
+    def increment_jobs_enqueued(self) -> None:
+        """Increment the number of jobs enqueued."""
+        self._jobs_enqueued += 1
+
+    # We can expand this to support other parallelization methods in the future.
+    # We woulod approach this by adding a new ParType enum and interpreting the
+    # the Process, Pipe, and Queue classes as protocols which can be duck-typed.
+
+    def get_parallelization_components(
+        self, default=ParType.THREAD
+    ) -> Tuple[
+        Type["Process"],
+        Callable[[bool], Tuple["Connection", "Connection"]],
+        Callable[[], "Queue"],
+        ParType,
+    ]:
+        """Get the appropriate Process, Pipe, and Queue classes and the assoc ParTyp enum."""
+        use_procs: Optional[bool] = self.config.get("options", {}).get("process_pool")
+
+        if use_procs is None:
+            use_procs = default == ParType.PROCESS
+
+        if not use_procs:
+            from multiprocessing.dummy import Pipe, Process, Queue
+
+            self.logger.info("Using thread-based parallelism")
+            return Process, Pipe, Queue, ParType.THREAD
+        else:
+            from multiprocessing import Pipe, Process, Queue
+
+            self.logger.info("Using process-based parallelism")
+            return Process, Pipe, Queue, ParType.PROCESS
+
+    # Worker management methods, which are used to manage the number of
+    # workers in the pool. The ensure_workers method should be called
+    # periodically to ensure that the pool is at the correct size, ideally
+    # once per batch.
+
+    @property
+    def add_worker_predicate(self) -> bool:
+        """Predicate determining when it is valid to add a worker to the pool."""
+        return (
+            self._jobs_enqueued
+            > getattr(
+                self.get_sink_class(), "WORKER_CAPACITY_FACTOR", WORKER_CAPACITY_FACTOR
+            )
+            * (len(self.workers) + 1)
+            and len(self.workers)
+            < self.config.get("options", {}).get(
+                "max_workers",
+                getattr(self.get_sink_class(), "MAX_WORKERS", MAX_WORKERS),
+            )
+            and time.time() - self._last_worker_creation
+            > getattr(
+                self.get_sink_class(),
+                "WORKER_CREATION_MIN_INTERVAL",
+                WORKER_CREATION_MIN_INTERVAL,
+            )
+        )
+
+    def resize_worker_pool(self) -> None:
+        """Right-sizes the worker pool.
+
+        Workers self terminate when they have been idle for a while.
+        This method will remove terminated workers and add new workers
+        if the add_worker_predicate evaluates to True. It will always
+        ensure that there is at least one worker in the pool."""
+        workers_to_cull = []
+        worker_spawned = False
+        for i, worker in enumerate(self.workers):
+            if not worker.is_alive():
+                workers_to_cull.append(i)
+        for i in reversed(workers_to_cull):
+            worker = self.workers.pop(i)
+            worker.join()  # Wait for the worker to terminate. This should be a no-op.
+            self.logger.info("Culling terminated worker %s", worker.ext_id)
+        while self.add_worker_predicate or not self.workers:
+            worker = self.worker_factory()
+            worker.start()
+            self.workers.append(worker)
+            worker_spawned = True
+            self.logger.info("Adding worker %s", worker.ext_id)
+        if worker_spawned:
+            self._last_worker_creation = time.time()
+
+    # SDK overrides to inject our worker management logic and sink selection.
+
+    def get_sink_class(
+        self, stream_name: Optional[str] = None
+    ) -> Type[BaseBigQuerySink]:
+        """Returns the sink class to use for a given stream based on user config."""
+        _ = stream_name
+        method, denormalized = self.config.get(
+            "method", "storage_write_api"
+        ), self.config.get("denormalized", False)
         if method == "batch_job":
             if denormalized:
                 return BigQueryBatchJobDenormalizedSink
@@ -204,6 +338,12 @@ class TargetBigQuery(Target):
         schema: Optional[dict] = None,
         key_properties: Optional[List[str]] = None,
     ) -> Sink:
+        """Get a sink for a stream. If the sink does not exist, create it. This override skips sink recreation
+        on schema change. Meaningful mid stream schema changes are not supported and extremely rare to begin
+        with. Most taps provide a static schema at stream init. We handle +90% of cases with this override without
+        the undue complexity or overhead of mid-stream schema evolution. If you need to support mid-stream schema
+        evolution on a regular basis, you should be using the fixed schema load pattern."""
+        _ = record
         if schema is None:
             self._assert_sink_exists(stream_name)
             return self._sinks_active[stream_name]
@@ -212,20 +352,31 @@ class TargetBigQuery(Target):
             return self.add_sink(stream_name, schema, key_properties)
         return existing_sink
 
+    def drain_one(self, sink: Sink) -> None:  # type: ignore
+        """Drain a sink. Includes a hook to manage the worker pool."""
+        self.resize_worker_pool()
+        while self.job_notification.poll():
+            ext_id = self.job_notification.recv()
+            self.worker_pings[ext_id] = time.time()
+            self._jobs_enqueued -= 1
+        super().drain_one(sink)
+
     def drain_all(self, is_endofpipe: bool = False) -> None:  # type: ignore
+        """Drain all sinks and write state message. If is_endofpipe, execute clean_up() on all sinks.
+        Includes an additional hook to allow sinks to do any pre-state message processing."""
         state = copy.deepcopy(self._latest_state)
-        self._drain_all(self._sinks_to_clear, 1)
-        for sink in self._sinks_to_clear:
-            if is_endofpipe:
-                sink.clean_up()
-            else:
-                sink.pre_state_hook()
-        self._sinks_to_clear = []
+        sink: BaseBigQuerySink
         self._drain_all(list(self._sinks_active.values()), self.max_parallelism)
-        for sink in self._sinks_active.values():
-            if is_endofpipe:
+        if is_endofpipe:
+            for worker in self.workers:
+                if worker.is_alive():
+                    self.queue.put(None)
+            for worker in self.workers:
+                worker.join()
+            for sink in self._sinks_active.values():
                 sink.clean_up()
-            else:
+        else:
+            for sink in self._sinks_active.values():
                 sink.pre_state_hook()
         self._write_state_message(state)
         self._reset_max_record_age()

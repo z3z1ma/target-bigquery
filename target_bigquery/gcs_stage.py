@@ -2,24 +2,14 @@
 Throughput test: 6m 30s @ 1M rows / 150 keys / 1.5GB
 NOTE: This is naive and will vary drastically based on network speed, for example on a GCP VM.
 """
-import concurrent.futures
 import shutil
 import time
 from io import BytesIO
-from multiprocessing import Pipe, Process, Queue
+from multiprocessing import Process
 from multiprocessing.connection import Connection
 from multiprocessing.dummy import Process as _Thread
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Tuple,
-    Type,
-    Union,
-)
+from queue import Empty
+from typing import TYPE_CHECKING, Any, Dict, List, NamedTuple, Optional, Type, Union
 
 import orjson
 from google.cloud import bigquery, storage
@@ -27,59 +17,47 @@ from google.cloud import bigquery, storage
 from target_bigquery.constants import DEFAULT_BUCKET_PATH
 from target_bigquery.core import (
     BaseBigQuerySink,
-    BigQueryCredentials,
+    BaseWorker,
     Compressor,
-    DenormalizedSink,
+    Denormalized,
     ParType,
     bigquery_client_factory,
     gcs_client_factory,
 )
 
-# Stream specific constants
-MAX_CONCURRENCY_PER_WORKER = 1
-"""Maximum number of concurrent LoadJobs per worker before awaiting."""
-MAX_WORKERS_PER_STREAM = 5
-"""Maximum number of workers per stream. We must balance network upload speed with timeouts."""
-WORKER_CREATION_MIN_INTERVAL = 10
-"""Minimum interval between worker creation attempts, in seconds."""
+if TYPE_CHECKING:
+    from target_bigquery.target import TargetBigQuery
 
 
-class GcsStagingWorker:
-    def __init__(
-        self,
-        table: str,
-        dataset: str,
-        bucket: str,
-        queue: Queue,
-        credentials: BigQueryCredentials,
-        job_notifier: Connection,
-        gcs_notifier: Connection,
-    ):
-        super().__init__()
-        self.table: str = table
-        self.dataset: str = dataset
-        self.bucket: str = bucket
-        self.queue: Queue = queue
-        self.credentials: BigQueryCredentials = credentials
-        self.awaiting: List[concurrent.futures.Future] = []
-        self.job_notifier: Connection = job_notifier
-        self.gcs_notifier: Connection = gcs_notifier
+class Job(NamedTuple):
+    """Job to be processed by a worker."""
 
+    buffer: Union[memoryview, bytes]
+    batch_id: str
+    table: str
+    dataset: str
+    bucket: str
+    gcs_notifier: Connection
+
+
+class GcsStagingWorker(BaseWorker):
     def run(self):
         client: storage.Client = gcs_client_factory(self.credentials)
         while True:
-            payload: Optional[Tuple[Union[memoryview, bytes], str]] = self.queue.get()
-            if payload is None:
+            try:
+                job: Optional[Job] = self.queue.get(timeout=30.0)
+            except Empty:
                 break
-            buf, batch_id = payload
+            if job is None:
+                break
             try:
                 # TODO: consider configurability?
                 path = DEFAULT_BUCKET_PATH.format(
-                    bucket=self.bucket,
-                    dataset=self.dataset,
-                    table=self.table,
+                    bucket=job.bucket,
+                    dataset=job.dataset,
+                    table=job.table,
                     date=time.strftime("%Y-%m-%d"),
-                    batch_id=batch_id,
+                    batch_id=job.batch_id,
                 )
                 blob = storage.Blob.from_string(path, client=client)
                 # TODO: pass in timeout?
@@ -89,30 +67,49 @@ class GcsStagingWorker:
                     if_generation_match=0,
                     chunk_size=1024 * 1024 * 10,
                     timeout=300,
-                ) as f:
-                    shutil.copyfileobj(BytesIO(buf), f)
-                self.gcs_notifier.send(path)
+                ) as fh:
+                    shutil.copyfileobj(BytesIO(job.buffer), fh)
+                job.gcs_notifier.send(path)
             except Exception as exc:
-                self.queue.put(payload)
+                self.queue.put(job)
                 raise exc
             self.job_notifier.send(True)
 
 
-GcsStagingThreadWorker = type("GcsStagingThreadWorker", (GcsStagingWorker, _Thread), {})
-GcsStagingProcessWorker = type(
-    "GcsStagingProcessWorker", (GcsStagingWorker, Process), {}
-)
+class GcsStagingThreadWorker(GcsStagingWorker, _Thread):
+    pass
 
 
-if TYPE_CHECKING:
-    _GcsStagingWorker = Union[
-        GcsStagingThreadWorker,
-        GcsStagingProcessWorker,
-    ]
+class GcsStagingProcessWorker(GcsStagingWorker, Process):
+    pass
 
 
 class BigQueryGcsStagingSink(BaseBigQuerySink):
-    worker_factory: Callable[[], "_GcsStagingWorker"]
+
+    MAX_WORKERS = 5
+    WORKER_CAPACITY_FACTOR = 1
+    WORKER_CREATION_MIN_INTERVAL = 10
+
+    def __init__(
+        self,
+        target: "TargetBigQuery",
+        stream_name: str,
+        schema: Dict[str, Any],
+        key_properties: Optional[List[str]],
+    ) -> None:
+        super().__init__(target, stream_name, schema, key_properties)
+        self.bucket = self.config["bucket"]
+        self.buffer = Compressor()
+        self.gcs_notification, self.gcs_notifier = target.pipe_cls(False)
+        self.uris: List[str] = []
+        self.increment_jobs_enqueued = target.increment_jobs_enqueued
+
+    @staticmethod
+    def worker_cls_factory(
+        worker_executor_cls: Type[Process], config: Dict[str, Any]
+    ) -> Type[Union[GcsStagingThreadWorker, GcsStagingProcessWorker,]]:
+        Worker = type("Worker", (GcsStagingWorker, worker_executor_cls), {})
+        return Worker
 
     @property
     def job_config(self) -> Dict[str, Any]:
@@ -122,80 +119,27 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
             "write_disposition": bigquery.WriteDisposition.WRITE_APPEND,
         }
 
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        # Configure parallelism
-        pipe, queue, self.par_typ = self.set_par_typ()
-
-        self.buffer = Compressor()
-        self.queue = queue()
-        self.workers: List["_GcsStagingWorker"] = []
-        self.job_notification, self.job_notifier = pipe(False)
-        self.gcs_notification, self.gcs_notifier = pipe(False)
-        self.uris: List[str] = []
-
-        worker_cls = f"GcsStaging{self.par_typ}Worker"
-        self.logger.info(f"Configured Sink Class: {worker_cls}")
-        self.worker_cls: Type["_GcsStagingWorker"] = globals()[worker_cls]
-
-        def worker_factory() -> "_GcsStagingWorker":
-            return self.worker_cls(
-                table=self.table.table,
-                dataset=self.table.dataset,
-                bucket=self.config["bucket"],
-                queue=self.queue,
-                credentials=self._credentials,
-                job_notifier=self.job_notifier,
-                gcs_notifier=self.gcs_notifier,
-            )
-
-        self.worker_factory = worker_factory
-        worker = worker_factory()
-        worker.start()
-        self.workers.append(worker)
-
-        self._last_worker_creation = time.time()
-        self._jobs_enqueued = 0
-
     def process_record(self, record: Dict[str, Any], context: Dict[str, Any]) -> None:
         self.buffer.write(orjson.dumps(record, option=orjson.OPT_APPEND_NEWLINE))
 
     def process_batch(self, context: Dict[str, Any]) -> None:
-        self.ensure_workers()
-        while self.job_notification.poll():
-            self.job_notification.recv()
-            self._jobs_enqueued -= 1
-        while self.gcs_notification.poll():
-            self.uris.append(self.gcs_notification.recv())
         self.buffer.close()
-        self.queue.put(
-            (
-                self.buffer.getvalue()
-                if self.par_typ == ParType.PROCESS
+        self.global_queue.put(
+            Job(
+                buffer=self.buffer.getvalue()
+                if self.global_par_typ is ParType.PROCESS
                 else self.buffer.getbuffer(),
-                context["batch_id"],
-            )
+                batch_id=context["batch_id"],
+                table=self.table.table,
+                dataset=self.table.dataset,
+                bucket=self.bucket,
+                gcs_notifier=self.gcs_notifier,
+            ),
         )
-        self._jobs_enqueued += 1
+        self.increment_jobs_enqueued()
         self.buffer = Compressor()
 
-    @property
-    def add_worker_predicate(self) -> bool:
-        return (
-            self._jobs_enqueued
-            and len(self.workers)
-            < self.config.get("options", {}).get(
-                "max_workers_per_stream", MAX_WORKERS_PER_STREAM
-            )
-            and time.time() - self._last_worker_creation > WORKER_CREATION_MIN_INTERVAL
-        )
-
     def clean_up(self) -> None:
-        for worker in self.workers:
-            if worker.is_alive():
-                self.queue.put(None)
-        for worker in self.workers:
-            worker.join()
         while self.gcs_notification.poll():
             self.uris.append(self.gcs_notification.recv())
         # Anything in the queue at this point can be considered now a DLQ
@@ -214,7 +158,7 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
             self.logger.info("No data to load")
 
 
-class BigQueryGcsStagingDenormalizedSink(DenormalizedSink, BigQueryGcsStagingSink):
+class BigQueryGcsStagingDenormalizedSink(Denormalized, BigQueryGcsStagingSink):
     @property
     def job_config(self) -> Dict[str, Any]:
         return {

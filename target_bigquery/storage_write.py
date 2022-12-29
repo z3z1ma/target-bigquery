@@ -3,17 +3,17 @@ Throughput test: 11m 0s @ 1M rows / 150 keys / 1.5GB
 NOTE: This is naive and will vary drastically based on network speed, for example on a GCP VM.
 """
 import concurrent.futures
-import time
 from enum import Enum
-from multiprocessing import Pipe, Process, Queue
+from multiprocessing import Process
 from multiprocessing.connection import Connection
 from multiprocessing.dummy import Process as _Thread
+from queue import Empty
 from typing import (
     TYPE_CHECKING,
     Any,
-    Callable,
     Dict,
     List,
+    NamedTuple,
     Optional,
     Set,
     Tuple,
@@ -28,29 +28,24 @@ from google.protobuf import json_format
 from tenacity import retry, retry_if_exception_type, stop_after_delay, wait_fixed
 
 if TYPE_CHECKING:
-    from singer_sdk import PluginBase
+    from target_bigquery.target import TargetBigQuery
 
 from target_bigquery.core import (
     BaseBigQuerySink,
-    BigQueryCredentials,
-    DenormalizedSink,
-    ParType,
+    BaseWorker,
+    Denormalized,
     ProtoJIT,
     storage_client_factory,
 )
 
-# Stream specific constants
-MAX_CONCURRENCY_PER_WORKER = 100
+# Stream specific constant
+MAX_IN_FLIGHT = 50
 """Maximum number of concurrent requests per worker be processed by grpc before awaiting."""
-MAX_WORKERS_PER_STREAM = 10
-"""Maximum number of workers per stream."""
-WORKER_CREATION_MIN_INTERVAL = 5
-"""Minimum interval between worker creation attempts, in seconds."""
 
 
 def make_append_rows_stream(
     client: BigQueryWriteClient, parent: str, template: types.AppendRowsRequest
-) -> Tuple[int, types.WriteStream, writer.AppendRowsStream]:
+) -> Tuple[types.WriteStream, writer.AppendRowsStream]:
     write_stream = types.WriteStream()
     write_stream.type_ = types.WriteStream.Type.PENDING
 
@@ -58,18 +53,18 @@ def make_append_rows_stream(
     template.write_stream = write_stream.name
     append_rows_stream = writer.AppendRowsStream(client, template)
 
-    return 0, write_stream, append_rows_stream
+    return write_stream, append_rows_stream
 
 
 def get_default_stream(
     client: BigQueryWriteClient, parent: str, template: types.AppendRowsRequest
-) -> Tuple[int, types.WriteStream, writer.AppendRowsStream]:
+) -> Tuple[types.WriteStream, writer.AppendRowsStream]:
     write_stream = client.get_write_stream(name=parent + "/streams/_default")
 
     template.write_stream = write_stream.name
     append_rows_stream = writer.AppendRowsStream(client, template)
 
-    return 0, write_stream, append_rows_stream
+    return write_stream, append_rows_stream
 
 
 def make_request(
@@ -91,214 +86,149 @@ class StreamType(str, Enum):
     BATCH = "Batch"
 
 
-class StorageWriteBatchWorker:
-    def __init__(
-        self,
-        parent: str,
-        template: types.AppendRowsRequest,
-        queue: Queue,
-        credentials: BigQueryCredentials,
-        job_notifier: Connection,
-        stream_notifier: Connection,
-    ):
-        super().__init__()
-        self.parent: str = parent
-        self.template: types.AppendRowsRequest = template
-        self.queue: Queue = queue
-        self.credentials: BigQueryCredentials = credentials
+class Job(NamedTuple):
+    parent: str
+    template: types.AppendRowsRequest
+    stream_notifier: Connection
+    data: types.ProtoRows
+
+
+class StorageWriteBatchWorker(BaseWorker):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.get_stream = make_append_rows_stream
         self.awaiting: List[concurrent.futures.Future] = []
-        self.job_notifier = job_notifier
-        self.stream_notifier = stream_notifier
+        self._offset = 0
+
+    @property
+    def offset(self) -> int:
+        return self._offset
+
+    @offset.setter
+    def offset(self, value: int) -> None:
+        self._offset = value
 
     def run(self):
         client: BigQueryWriteClient = storage_client_factory(self.credentials)
-        offset, write_stream, append_rows_stream = make_append_rows_stream(
-            client,
-            self.parent,
-            self.template,
-        )
-        self.stream_notifier.send(write_stream.name)
+        stream = {}
         while True:
-            payload: Optional[types.ProtoRows] = self.queue.get()
-            if payload is None:
-                self.wait(drain=True)
-                append_rows_stream.close()
+            try:
+                job: Optional[Job] = self.queue.get(timeout=60.0)
+            except Empty:
                 break
+            if job is None:
+                break
+            if not stream:
+                (
+                    stream["write_stream"],
+                    stream["append_rows_stream"],
+                ) = self.get_stream(
+                    client,
+                    job.parent,
+                    job.template,
+                )
+                job.stream_notifier.send(
+                    (stream["write_stream"].name, stream["append_rows_stream"])
+                )
             try:
                 self.awaiting.append(
                     retry(
-                        append_rows_stream.send,
+                        stream["append_rows_stream"].send,
                         retry=retry_if_exception_type((Unknown, NotFound)),
                         wait=wait_fixed(1),
                         stop=stop_after_delay(5),
                         reraise=True,
-                    )(make_request(payload, offset))
+                    )(make_request(job.data, self.offset))
                 )
             except Exception as exc:
                 self.wait(drain=True)
-                append_rows_stream.close()
-                self.queue.put(payload)
+                stream["append_rows_stream"].close()
+                self.queue.put(job)
                 raise exc
-            offset += len(payload.serialized_rows)
-            if len(self.awaiting) > MAX_CONCURRENCY_PER_WORKER:
+            self.offset += len(job.data.serialized_rows)
+            if len(self.awaiting) > MAX_IN_FLIGHT:
                 self.wait()
+        if stream:
+            self.wait(drain=True)
+            stream["append_rows_stream"].close()
 
     def wait(self, drain: bool = False) -> None:
-        while self.awaiting and (
-            (len(self.awaiting) > MAX_CONCURRENCY_PER_WORKER // 2) or drain
-        ):
+        while self.awaiting and ((len(self.awaiting) > MAX_IN_FLIGHT // 2) or drain):
             for i in reversed(
-                range(
-                    (MAX_CONCURRENCY_PER_WORKER // 2 + 1)
-                    if not drain
-                    else len(self.awaiting)
-                )
+                range((MAX_IN_FLIGHT // 2 + 1) if not drain else len(self.awaiting))
             ):
                 self.awaiting.pop(i).result()
                 self.job_notifier.send(True)
 
 
-class StorageWriteStreamWorker:
-    def __init__(
-        self,
-        parent: str,
-        template: types.AppendRowsRequest,
-        queue: Queue,
-        credentials: BigQueryCredentials,
-        job_notifier: Connection,
-        stream_notifier: Connection,
-    ):
-        super().__init__()
-        self.parent: str = parent
-        self.template: types.AppendRowsRequest = template
-        self.queue: Queue = queue
-        self.credentials: BigQueryCredentials = credentials
-        self.awaiting: List[concurrent.futures.Future] = []
-        self.job_notifier = job_notifier
-        self.stream_notifier = stream_notifier
+class StorageWriteStreamWorker(StorageWriteBatchWorker):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.get_stream = get_default_stream
 
-    def run(self):
-        client: BigQueryWriteClient = storage_client_factory(self.credentials)
-        _, write_stream, append_rows_stream = get_default_stream(
-            client,
-            self.parent,
-            self.template,
-        )
-        self.stream_notifier.send(write_stream.name)
-        while True:
-            payload: Optional[types.ProtoRows] = self.queue.get()
-            if payload is None:
-                self.wait(drain=True)
-                append_rows_stream.close()
-                break
-            try:
-                retry(
-                    append_rows_stream.send,
-                    retry=retry_if_exception_type((Unknown, NotFound)),
-                    wait=wait_fixed(1),
-                    stop=stop_after_delay(5),
-                    reraise=True,
-                )(make_request(payload))
-            except Exception as exc:
-                self.wait(drain=True)
-                append_rows_stream.close()
-                self.queue.put(payload)
-                raise exc
-            if len(self.awaiting) > MAX_CONCURRENCY_PER_WORKER:
-                self.wait()
+    @property
+    def offset(self) -> None:
+        return None
 
-    def wait(self, drain: bool = False) -> None:
-        while self.awaiting and (
-            (len(self.awaiting) > MAX_CONCURRENCY_PER_WORKER // 2) or drain
-        ):
-            for i in reversed(
-                range(
-                    (MAX_CONCURRENCY_PER_WORKER // 2 + 1)
-                    if not drain
-                    else len(self.awaiting)
-                )
-            ):
-                self.awaiting.pop(i).result()
-                self.job_notifier.send(True)
+    @offset.setter
+    def offset(self, value: int) -> None:
+        _ = value
 
 
-StorageWriteThreadStreamWorker = type(
-    "StorageWriteThreadStreamWorker", (StorageWriteStreamWorker, _Thread), {}
-)
-StorageWriteProcessStreamWorker = type(
-    "StorageWriteProcessStreamWorker", (StorageWriteStreamWorker, Process), {}
-)
-StorageWriteThreadBatchWorker = type(
-    "StorageWriteThreadBatchWorker", (StorageWriteBatchWorker, _Thread), {}
-)
-StorageWriteProcessBatchWorker = type(
-    "StorageWriteProcessBatchWorker", (StorageWriteBatchWorker, Process), {}
-)
+class StorageWriteThreadStreamWorker(StorageWriteStreamWorker, _Thread):
+    pass
 
-if TYPE_CHECKING:
-    _StorageWriteWorker = Union[
-        StorageWriteThreadStreamWorker,
-        StorageWriteProcessStreamWorker,
-        StorageWriteThreadBatchWorker,
-        StorageWriteProcessBatchWorker,
-    ]
+
+class StorageWriteProcessStreamWorker(StorageWriteStreamWorker, Process):
+    pass
+
+
+class StorageWriteThreadBatchWorker(StorageWriteBatchWorker, _Thread):
+    pass
+
+
+class StorageWriteProcessBatchWorker(StorageWriteBatchWorker, Process):
+    pass
 
 
 class BigQueryStorageWriteSink(BaseBigQuerySink):
-    worker_factory: Callable[[], "_StorageWriteWorker"]
+
+    MAX_WORKERS = 50
+    WORKER_CAPACITY_FACTOR = 2
+    WORKER_CREATION_MIN_INTERVAL = 1.0
+
+    @staticmethod
+    def worker_cls_factory(
+        worker_executor_cls: Type[Process], config: Dict[str, Any]
+    ) -> Type[
+        Union[
+            StorageWriteThreadStreamWorker,
+            StorageWriteProcessStreamWorker,
+            StorageWriteThreadBatchWorker,
+            StorageWriteProcessBatchWorker,
+        ]
+    ]:
+        if config.get("options", {}).get("storage_write_batch_mode", False):
+            Worker = type("Worker", (StorageWriteStreamWorker, worker_executor_cls), {})
+        else:
+            Worker = type("Worker", (StorageWriteBatchWorker, worker_executor_cls), {})
+        return Worker
 
     def __init__(
         self,
-        target: "PluginBase",
+        target: "TargetBigQuery",
         stream_name: str,
         schema: Dict[str, Any],
         key_properties: Optional[List[str]],
     ) -> None:
         super().__init__(target, stream_name, schema, key_properties)
-        # Configure parallelism
-        pipe, queue, self.par_typ = self.set_par_typ()
-
-        self.queue = queue()
-        self.workers: List["_StorageWriteWorker"] = []
-        self.open_streams: Set[str] = set()
+        self.open_streams: Set[Tuple[str, writer.AppendRowsStream]] = set()
         self.parent = BigQueryWriteClient.table_path(
             self.table.project,
             self.table.dataset,
             self.table.table,
         )
-        self.job_notification, self.job_notifier = pipe(False)
-        self.stream_notification, self.stream_notifier = pipe(False)
-
-        if self.config.get("options", {}).get("storage_write_batch_mode", False):
-            self.logger.info(
-                "Using storage write application created streams (batching)"
-            )
-            self.stream_typ = StreamType.BATCH
-        else:
-            self.logger.info("Using storage write _default stream (streaming)")
-            self.stream_typ = StreamType.STREAM
-
-        worker_cls = f"StorageWrite{self.par_typ}{self.stream_typ}Worker"
-        self.logger.info(f"Configured Sink Class: {worker_cls}")
-        self.worker_cls: Type["_StorageWriteWorker"] = globals()[worker_cls]
-
-        def worker_factory() -> "_StorageWriteWorker":
-            return self.worker_cls(
-                self.parent,
-                self.jit.generate_template(),
-                self.queue,
-                self._credentials,
-                self.job_notifier,
-                self.stream_notifier,
-            )
-
-        self.worker_factory = worker_factory
-        worker = self.worker_factory()
-        worker.start()
-        self.workers.append(worker)
-
-        self._last_worker_creation = time.time()
-        self._jobs_enqueued = 0
+        self.stream_notification, self.stream_notifier = target.pipe_cls(False)
 
     @property
     def jit(self) -> ProtoJIT:
@@ -320,46 +250,36 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
         )
 
     def process_batch(self, context: Dict[str, Any]) -> None:
-        self.ensure_workers()
-        while self.job_notification.poll():
-            self.job_notification.recv()
-            self._jobs_enqueued -= 1
+        self.global_queue.put(
+            Job(
+                parent=self.parent,
+                template=self.jit.generate_template(),
+                data=self.proto_rows,
+                stream_notifier=self.stream_notifier,
+            )
+        )
+        self.increment_jobs_enqueued()
+
+    def commit_streams(self) -> None:
         while self.stream_notification.poll():
             stream_name = self.stream_notification.recv()
             self.logger.info("New stream %s", stream_name)
             self.open_streams.add(stream_name)
-        self.queue.put(self.proto_rows)
-        self._jobs_enqueued += 1
-
-    @property
-    def add_worker_predicate(self) -> bool:
-        return (
-            self._jobs_enqueued > MAX_CONCURRENCY_PER_WORKER * (len(self.workers) + 1)
-            and len(self.workers)
-            < self.config.get("options", {}).get(
-                "max_workers_per_stream", MAX_WORKERS_PER_STREAM
-            )
-            and time.time() - self._last_worker_creation > WORKER_CREATION_MIN_INTERVAL
-        )
-
-    def commit_streams(self) -> None:
-        for worker in self.workers:
-            if worker.is_alive():
-                self.queue.put(None)
-        for worker in self.workers:
-            worker.join()
-        # Anything in the queue at this point can be considered now a DLQ
-        if self.stream_typ == "Stream":
+        if not self.open_streams:
+            return
+        if all(name == "_default" for name, _ in self.open_streams):
             self.logger.info(
                 f"Writes to table '{self.table.table}' have been streamed."
             )
         else:
             committer = storage_client_factory(self._credentials)
-            for stream in self.open_streams:
-                committer.finalize_write_stream(name=stream)
+            for name, stream in self.open_streams:
+                stream.close()
+                committer.finalize_write_stream(name=name)
             write = committer.batch_commit_write_streams(
                 types.BatchCommitWriteStreamsRequest(
-                    parent=self.parent, write_streams=list(self.open_streams)
+                    parent=self.parent,
+                    write_streams=[name for name, _ in self.open_streams],
                 )
             )
             self.logger.info(f"Batch commit time: {write.commit_time}")
@@ -376,11 +296,11 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
         self.commit_streams()
 
 
-class BigQueryStorageWriteDenormalizedSink(DenormalizedSink, BigQueryStorageWriteSink):
+class BigQueryStorageWriteDenormalizedSink(Denormalized, BigQueryStorageWriteSink):
     @property
     def jit(self) -> ProtoJIT:
         if not hasattr(self, "_jit"):
             self._jit = ProtoJIT(
-                self.table.get_schema(self.apply_transforms), self.stream_name
+                self.table.get_resolved_schema(self.apply_transforms), self.stream_name
             )
         return self._jit
