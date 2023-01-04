@@ -1,11 +1,10 @@
 import gzip
 import json
 import mmap
-import random
 import re
 import shutil
-import string
 import sys
+import time
 from abc import ABC, abstractmethod
 
 try:
@@ -23,7 +22,6 @@ from pathlib import Path
 from subprocess import PIPE, Popen
 from tempfile import TemporaryFile
 from textwrap import dedent, indent
-from types import ModuleType
 from typing import (
     IO,
     TYPE_CHECKING,
@@ -39,9 +37,8 @@ from typing import (
 
 from google.api_core.exceptions import Conflict
 from google.cloud import bigquery, bigquery_storage_v1, storage
-from google.cloud.bigquery import SchemaField
+from google.cloud.bigquery import DEFAULT_RETRY, SchemaField
 from google.cloud.bigquery.table import TimePartitioning, TimePartitioningType
-from proto import Message
 from singer_sdk.sinks import BatchSink
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_fixed
 
@@ -143,7 +140,8 @@ class BigQueryTable:
             except Conflict:
                 self._table = client.get_table(self.as_ref())
             else:
-                ...  # Created Table
+                # Wait for eventual consistency
+                time.sleep(5)
         return self._dataset, self._table
 
     def default_table_options(self) -> Dict[str, Any]:
@@ -357,6 +355,7 @@ def augmented_syspath(new_paths: Optional[Iterable[str]] = None):
         sys.path = original_sys_path
 
 
+@cache
 def bigquery_client_factory(creds: BigQueryCredentials) -> bigquery.Client:
     """Get a BigQuery client."""
     if creds.path:
@@ -366,6 +365,7 @@ def bigquery_client_factory(creds: BigQueryCredentials) -> bigquery.Client:
     return bigquery.Client(project=creds.project)
 
 
+@cache
 def gcs_client_factory(creds: BigQueryCredentials) -> storage.Client:
     """Get a GCS client."""
     if creds.path:
@@ -375,6 +375,7 @@ def gcs_client_factory(creds: BigQueryCredentials) -> storage.Client:
     return storage.Client(project=creds.project)
 
 
+@cache
 def storage_client_factory(
     creds: BigQueryCredentials,
 ) -> bigquery_storage_v1.BigQueryWriteClient:
@@ -600,118 +601,6 @@ class SchemaTranslator:
         if typ in ("INT", "INTEGER"):
             typ = "INT64"
         return f"CAST(JSON_VALUE({base}, '{path}') as {typ}) as {transform_column_name(field.name, **self.transforms)},\n"
-
-
-# This class translates a BigQuery schema into a protobuf schema.
-# It is used to generate a protobuf schema for the BigQuery target
-# based on incoming SCHEMA messages.
-class ProtoJIT:
-    """JIT compiler for protobuf schemas."""
-
-    # BigQuery -> protobuf type mapping
-    # https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types
-    # https://developers.google.com/protocol-buffers/docs/proto3#scalar
-    # We afford a simpler mapping here because we don't need to support all the
-    # BigQuery types, just the ones that are supported by the BigQuery target.
-    MAP = {
-        "TIMESTAMP": "string",
-        "DATE": "string",
-        "TIME": "string",
-        "FLOAT": "double",
-        "INTEGER": "int64",
-        "BOOLEAN": "bool",
-        "STRING": "string",
-        "JSON": "string",
-    }
-
-    def __init__(self, bigquery_schema: List[SchemaField], stream_name: str):
-        self.bigquery_schema = bigquery_schema
-        self.stream_name = stream_name
-        self.stream_id = stream_name.replace("-", "_").title()
-
-    @classmethod
-    def fixed_schema(cls, stream_name: str) -> "ProtoJIT":
-        """Create a default ProtoJIT instance."""
-        return cls(DEFAULT_SCHEMA, stream_name)
-
-    def generate_proto_schema(self) -> str:
-        """Generate a protobuf schema from a BigQuery schema."""
-        message = 'syntax = "proto2";\n'
-        message += f"message {self.stream_id} {{\n"
-        for i, field in enumerate(self.bigquery_schema):
-            message += self._translate_bigquery_field_to_proto(field, i + 1)
-        message += "}"
-        return message
-
-    @cache
-    def compile(self) -> ModuleType:
-        """Compile and import a protobuf schema based on the internally stored BigQuery schema."""
-        from grpc_tools import command, protoc
-
-        tmpdir = Path("".join(random.choices(string.ascii_lowercase, k=10)))
-        tmpdir.mkdir(exist_ok=True)
-        try:
-            fname = "".join(random.choices(string.ascii_lowercase, k=10))
-            target = f"{tmpdir}/{fname}.proto"
-            with open(target, "w") as f:
-                f.write(self.generate_proto_schema())
-            command.build_package_protos(tmpdir)
-            with augmented_syspath((tmpdir,)):
-                return protoc._protos(target)
-        finally:
-            shutil.rmtree(tmpdir)
-
-    def generate_template(self):
-        from google.cloud.bigquery_storage_v1 import types
-        from google.protobuf import descriptor_pb2
-
-        template = types.AppendRowsRequest()
-        proto_schema = types.ProtoSchema()
-        proto_descriptor = descriptor_pb2.DescriptorProto()
-        self.message.DESCRIPTOR.CopyToProto(proto_descriptor)
-        proto_schema.proto_descriptor = proto_descriptor
-        proto_data = types.AppendRowsRequest.ProtoData()
-        proto_data.writer_schema = proto_schema
-        template.proto_rows = proto_data
-
-        return template
-
-    def _translate_bigquery_field_to_proto(
-        self, base: SchemaField, i: int = 1, depth: int = 1
-    ) -> str:
-        """Recursively translate a BigQuery schema field into a protobuf field."""
-        typ: str = base.field_type
-        if base.mode == "REPEATED":
-            mode = "repeated"
-        else:
-            if base.is_nullable:
-                mode = "optional"
-            else:
-                mode = "required"
-        if typ.upper() == "RECORD":
-            name = f"{base.name}__spec"
-            message = f"message {name} {{\n"
-            for j, inner in enumerate(base.fields):
-                message += self._translate_bigquery_field_to_proto(
-                    inner, j + 1, depth + 1
-                )
-            message += "}\n"
-            message += f"{mode} {name} {base.name} = {i};\n"
-        else:
-            message = f"{mode} {self.MAP[typ.upper()]} {base.name} = {i};\n"
-        return indent(message, "  " * depth)
-
-    @property
-    def proto(self) -> ModuleType:
-        """Return the compiled protobuf schema."""
-        if not hasattr(self, "_proto"):
-            self._proto = self.compile()
-        return self._proto
-
-    @property
-    def message(self) -> Message:
-        """Return the compiled protobuf Message subclass."""
-        return getattr(self.proto, self.stream_id)
 
 
 class Compressor:

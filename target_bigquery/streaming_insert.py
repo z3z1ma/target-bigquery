@@ -2,6 +2,7 @@
 Throughput test: ...slower than all other methods, no test results available.
 NOTE: This is naive and will vary drastically based on network speed, for example on a GCP VM.
 """
+import os
 from multiprocessing import Process
 from multiprocessing.dummy import Process as _Thread
 from queue import Empty
@@ -64,8 +65,8 @@ class StreamingInsertProcessWorker(StreamingInsertWorker, Process):
 
 class BigQueryStreamingInsertSink(BaseBigQuerySink):
 
-    MAX_WORKERS = 25
-    WORKER_CAPACITY_FACTOR = 2
+    MAX_WORKERS = os.cpu_count() * 2
+    WORKER_CAPACITY_FACTOR = 10
     WORKER_CREATION_MIN_INTERVAL = 1.0
 
     @staticmethod

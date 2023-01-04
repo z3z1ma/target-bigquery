@@ -32,6 +32,7 @@ def test_basic_sync(method):
         "method": method,
         "denormalized": False,
         "generate_view": False,
+        "batch_size": 2,  # force multiple batches
         "options": {"threaded": True},
     }
 
@@ -50,7 +51,6 @@ def test_basic_sync(method):
             "credentials_json": os.environ["BQ_CREDS"],
             "project": os.environ["BQ_PROJECT"],
             "dataset": os.environ["BQ_DATASET"],
-            "batch_size": 100,
             "bucket": os.environ["GCS_BUCKET"],
             **OPTS,
         },
@@ -60,9 +60,7 @@ def test_basic_sync(method):
         BigQueryCredentials(json=target.config["credentials_json"])
     )
     try:
-        client.query(
-            f"DROP TABLE IF EXISTS {target.config['dataset']}.{table_name}"
-        ).result()
+        client.query(f"TRUNCATE TABLE {target.config['dataset']}.{table_name}").result()
     except NotFound:
         pass
 
@@ -107,7 +105,10 @@ def test_basic_denorm_sync(method):
         "method": method,
         "denormalized": True,
         "generate_view": False,
-        "options": {"threaded": True},
+        "batch_size": 2,  # force multiple batches
+        "options": {
+            "threaded": True,
+        },
     }
 
     table_name = OPTS["method"]
@@ -125,8 +126,6 @@ def test_basic_denorm_sync(method):
             "credentials_json": os.environ["BQ_CREDS"],
             "project": os.environ["BQ_PROJECT"],
             "dataset": os.environ["BQ_DATASET"],
-            "batch_size": 100,
-            "timeout": 60,
             "bucket": os.environ["GCS_BUCKET"],
             **OPTS,
         },
@@ -136,15 +135,13 @@ def test_basic_denorm_sync(method):
         BigQueryCredentials(json=target.config["credentials_json"])
     )
     try:
-        client.query(
-            f"DROP TABLE IF EXISTS {target.config['dataset']}.{table_name}"
-        ).result()
+        client.query(f"TRUNCATE TABLE {target.config['dataset']}.{table_name}").result()
     except NotFound:
         pass
 
     stdout, stderr = target_sync_test(target, singer_input)
     del stdout, stderr
-    time.sleep(5)  # wait for the eventual consistency seen in LoadJobs sinks
+    time.sleep(10)  # wait for the eventual consistency seen in LoadJobs sinks
 
     records = [
         dict(record)
@@ -153,7 +150,6 @@ def test_basic_denorm_sync(method):
         ).result()
     ]
 
-    print(records)
     assert len(records) == 5
     assert records == [
         {

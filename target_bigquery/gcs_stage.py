@@ -2,6 +2,7 @@
 Throughput test: 6m 30s @ 1M rows / 150 keys / 1.5GB
 NOTE: This is naive and will vary drastically based on network speed, for example on a GCP VM.
 """
+import os
 import shutil
 import time
 from io import BytesIO
@@ -86,9 +87,9 @@ class GcsStagingProcessWorker(GcsStagingWorker, Process):
 
 class BigQueryGcsStagingSink(BaseBigQuerySink):
 
-    MAX_WORKERS = 5
+    MAX_WORKERS = os.cpu_count() * 2
     WORKER_CAPACITY_FACTOR = 1
-    WORKER_CREATION_MIN_INTERVAL = 10
+    WORKER_CREATION_MIN_INTERVAL = 10.0
 
     def __init__(
         self,

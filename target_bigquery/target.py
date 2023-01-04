@@ -300,8 +300,9 @@ class TargetBigQuery(Target):
             self.workers.append(worker)
             worker_spawned = True
             self.logger.info("Adding worker %s", worker.ext_id)
-        if worker_spawned:
             self._last_worker_creation = time.time()
+        if worker_spawned:
+            ...
 
     # SDK overrides to inject our worker management logic and sink selection.
 

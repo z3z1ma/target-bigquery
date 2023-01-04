@@ -2,6 +2,7 @@
 Throughput test: 6m 25s @ 1M rows / 150 keys / 1.5GB
 NOTE: This is naive and will vary drastically based on network speed, for example on a GCP VM.
 """
+import os
 from io import BytesIO
 from multiprocessing import Process
 from multiprocessing.dummy import Process as _Thread
@@ -60,9 +61,9 @@ class BatchJobProcessWorker(BatchJobWorker, Process):
 
 class BigQueryBatchJobSink(BaseBigQuerySink):
 
-    MAX_WORKERS = 5
+    MAX_WORKERS = os.cpu_count() * 2
     WORKER_CAPACITY_FACTOR = 1
-    WORKER_CREATION_MIN_INTERVAL = 10
+    WORKER_CREATION_MIN_INTERVAL = 10.0
 
     @property
     def job_config(self) -> Dict[str, Any]:
