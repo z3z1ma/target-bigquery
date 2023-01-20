@@ -12,6 +12,16 @@
 
 It is the most versatile target for BigQuery. Extremely performant, resource efficient, and fast in all configurations enabling over 8 different ingestion patterns. Denormalized variants indicate data is unpacked during load with a resultant schema in BigQuery based on the tap schema. Non-denormalized means we have a fixed schema which loads all data into an unstructured `JSON` column. They are both useful patterns. The latter allowing BigQuery to work with schemaless or rapidly changing sources such as MongoDB instantly, while the former is more performant and convenient to start modeling quickly.
 
+## Installation 📈
+
+The package on pypi is named `z3-target-bigquery` but the executable it ships with is simply `target-bigquery`. This allows me to release work without concerns of naming conflicts on the package index.
+
+```bash
+# Use pipx or pip
+pipx install z3-target-bigquery
+# Verify it is installed
+target-bigquery --version
+```
 
 ## Features ✨
 
@@ -23,6 +33,7 @@ It is the most versatile target for BigQuery. Extremely performant, resource eff
 - BATCH message support 😎
 
 ## Load Patterns 🏎
+
 - `Batch Load Job` ingestion pattern using in memory compression (fixed schema + denormalized)
 - `Storage Write API` ingestion pattern using gRPC and protocol buffers supporting both streaming and batch patterns. Capable of JIT compilation of BQ schemas to protobuf to enable denormalized loads of input structures only known at runtime. (fixed schema + denormalized 🎉)
 - `GCS Staging` ingestion pattern using in memory compression and a GCS staging layer which generates a well organized data lake which backs the data warehouse providing additional failsafes and data sources (fixed schema + denormalized)
@@ -41,11 +52,6 @@ This is the first truly unstructured sink for BigQuery leveraging the recent GA 
 
 Built with the [Meltano Target SDK](https://sdk.meltano.com).
 
-## Installation 📈
-
-```bash
-pipx install target-bigquery
-```
 
 ## Configuration 🔨
 
@@ -80,6 +86,8 @@ First a valid example to give context to the below including a nested key exampl
 | method              | True     | storage_write_api | The method to use for writing to BigQuery. Must be one of `batch_job`, `storage_write_api`, `gcs_stage`, `streaming_insert` |
 | generate_view       | False    |       0 | Determines whether to generate a view based on the SCHEMA message parsed from the tap. Only valid if denormalized=false meaning you are using the fixed JSON column based schema. |
 | bucket              | False    | None    | The GCS bucket to use for staging data. Only used if method is gcs_stage. |
+| cluster_on_key_properties| False    | False    | Indicates if we should use the key_properties from the tap to cluster our table. By default, tables created by this target cluster on `_sdc_batched_at`. |
+| partition_granularity| False    | "month"    | Indicates the granularity of the created table partitioning scheme which is based on `_sdc_batched_at`. By default the granularity is monthly. Must be one of: "hour", "day", "month", "year". |
 | column_name_transforms.lower| False    | None    | Lowercase column names. |
 | column_name_transforms.quote| False    | None    | Quote column names in any generated DDL. |
 | column_name_transforms.add_underscore_when_invalid| False    | None    | Add an underscore to the column name if it starts with a digit to make it valid. |

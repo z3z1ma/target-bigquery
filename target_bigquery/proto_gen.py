@@ -1,11 +1,20 @@
+# Copyright (c) 2023 Alex Butler
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy of this
+# software and associated documentation files (the "Software"), to deal in the Software
+# without restriction, including without limitation the rights to use, copy, modify, merge,
+# publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons
+# to whom the Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all copies or
+# substantial portions of the Software.
 import hashlib
 import os
-from typing import Any, Dict, List, Optional, Tuple, Type, cast
+from typing import Any, Dict, List, Optional, Type, cast
 
 import proto
 from google.cloud.bigquery import SchemaField
 from google.protobuf import descriptor_pb2, message_factory
-from google.protobuf.proto_builder import MakeSimpleProtoClass
 
 MAP = {
     # Limited scope of types as these are the only primitive types we can infer

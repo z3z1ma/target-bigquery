@@ -1,3 +1,13 @@
+# Copyright (c) 2023 Alex Butler
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy of this
+# software and associated documentation files (the "Software"), to deal in the Software
+# without restriction, including without limitation the rights to use, copy, modify, merge,
+# publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons
+# to whom the Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all copies or
+# substantial portions of the Software.
 """BigQuery target class."""
 import copy
 import time
@@ -118,6 +128,28 @@ class TargetBigQuery(Target):
             "bucket",
             th.StringType,
             description="The GCS bucket to use for staging data. Only used if method is gcs_stage.",
+        ),
+        th.Property(
+            "partition_granularity",
+            th.CustomType(
+                {
+                    "type": "string",
+                    "enum": [
+                        "year",
+                        "month",
+                        "day",
+                        "hour",
+                    ],
+                }
+            ),
+            default="month",
+            description="The granularity of the partitioning strategy. Defaults to month.",
+        ),
+        th.Property(
+            "cluster_on_key_properties",
+            th.BooleanType,
+            default=False,
+            description="Determines whether to cluster on the key properties from the tap. Defaults to false.",
         ),
         th.Property(
             "column_name_transforms",

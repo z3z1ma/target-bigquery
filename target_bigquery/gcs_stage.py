@@ -1,3 +1,13 @@
+# Copyright (c) 2023 Alex Butler
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy of this
+# software and associated documentation files (the "Software"), to deal in the Software
+# without restriction, including without limitation the rights to use, copy, modify, merge,
+# publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons
+# to whom the Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all copies or
+# substantial portions of the Software.
 """BigQuery GCS Staging Sink.
 Throughput test: 6m 30s @ 1M rows / 150 keys / 1.5GB
 NOTE: This is naive and will vary drastically based on network speed, for example on a GCP VM.
@@ -131,7 +141,7 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
                 if self.global_par_typ is ParType.PROCESS
                 else self.buffer.getbuffer(),
                 batch_id=context["batch_id"],
-                table=self.table.table,
+                table=self.table.name,
                 dataset=self.table.dataset,
                 bucket=self.bucket,
                 gcs_notifier=self.gcs_notifier,

@@ -1,3 +1,13 @@
+# Copyright (c) 2023 Alex Butler
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy of this
+# software and associated documentation files (the "Software"), to deal in the Software
+# without restriction, including without limitation the rights to use, copy, modify, merge,
+# publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons
+# to whom the Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all copies or
+# substantial portions of the Software.
 import gzip
 import json
 import mmap
@@ -37,7 +47,7 @@ from typing import (
 
 from google.api_core.exceptions import Conflict
 from google.cloud import bigquery, bigquery_storage_v1, storage
-from google.cloud.bigquery import DEFAULT_RETRY, SchemaField
+from google.cloud.bigquery import SchemaField
 from google.cloud.bigquery.table import TimePartitioning, TimePartitioningType
 from singer_sdk.sinks import BatchSink
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_fixed
@@ -58,9 +68,17 @@ class ParType(str, Enum):
     PROCESS = "Process"
 
 
+PARTITION_STRATEGY = {
+    "YEAR": TimePartitioningType.YEAR,
+    "MONTH": TimePartitioningType.MONTH,
+    "DAY": TimePartitioningType.DAY,
+    "HOUR": TimePartitioningType.HOUR,
+}
+
+
 @dataclass
 class BigQueryTable:
-    table: str
+    name: str
     dataset: str
     project: str
     jsonschema: Dict[str, Any]
@@ -93,7 +111,7 @@ class BigQueryTable:
             return self.get_schema(apply_transforms)
 
     def __str__(self) -> str:
-        return f"{self.project}.{self.dataset}.{self.table}"
+        return f"{self.project}.{self.dataset}.{self.name}"
 
     def as_ref(self) -> bigquery.TableReference:
         """Returns a TableReference for this table."""
@@ -156,13 +174,13 @@ class BigQueryTable:
                 strategy=self.ingestion_strategy,
             ),
             "time_partitioning": TimePartitioning(
-                type_=TimePartitioningType.DAY, field="_sdc_batched_at"
+                type_=TimePartitioningType.MONTH, field="_sdc_batched_at"
             ),
         }
 
     def __hash__(self) -> int:
         return hash(
-            (self.table, self.dataset, self.project, json.dumps(self.jsonschema))
+            (self.name, self.dataset, self.project, json.dumps(self.jsonschema))
         )
 
 
@@ -222,7 +240,7 @@ class BaseBigQuerySink(BatchSink):
         )
         self.client = bigquery_client_factory(self._credentials)
         self.table = BigQueryTable(
-            table=self.stream_name.lower(),
+            name=self.table_name,
             dataset=self.config["dataset"],
             project=self.config["project"],
             jsonschema=self.schema,
@@ -230,11 +248,16 @@ class BaseBigQuerySink(BatchSink):
             ingestion_strategy=self.ingestion_strategy,
         )
 
-        self.create_target()
+        self.create_target(key_properties)
         self.update_schema()
         self.global_par_typ = target.par_typ
         self.global_queue = target.queue
         self.increment_jobs_enqueued = target.increment_jobs_enqueued
+
+    @property
+    def table_name(self) -> str:
+        """Returns the table name."""
+        return self.stream_name.lower().replace("-", "_").replace(".", "_")
 
     @property
     def max_size(self) -> int:
@@ -281,9 +304,18 @@ class BaseBigQuerySink(BatchSink):
         wait=wait_fixed(1),
         reraise=True,
     )
-    def create_target(self) -> None:
+    def create_target(self, key_properties: Optional[List[str]] = None) -> None:
         """Create the table in BigQuery."""
-        self.table.create_table(self.client, self.apply_transforms)
+        kwargs = {}
+        if key_properties and self.config.get("cluster_on_key_properties", False):
+            kwargs["clustering_fields"] = key_properties[:4]
+        partition_grain: str = self.config.get("partition_granularity")
+        if partition_grain:
+            kwargs["time_partitioning"] = TimePartitioning(
+                type_=PARTITION_STRATEGY[partition_grain.upper()],
+                field="_sdc_batched_at",
+            )
+        self.table.create_table(self.client, self.apply_transforms, **kwargs)
         if self.generate_view:
             self.client.query(
                 self.table.schema_translator.generate_view_statement(

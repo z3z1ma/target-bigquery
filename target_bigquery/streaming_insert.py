@@ -1,3 +1,13 @@
+# Copyright (c) 2023 Alex Butler
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy of this
+# software and associated documentation files (the "Software"), to deal in the Software
+# without restriction, including without limitation the rights to use, copy, modify, merge,
+# publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons
+# to whom the Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all copies or
+# substantial portions of the Software.
 """BigQuery Streaming Insert Sink.
 Throughput test: ...slower than all other methods, no test results available.
 NOTE: This is naive and will vary drastically based on network speed, for example on a GCP VM.
