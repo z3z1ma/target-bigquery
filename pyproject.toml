@@ -36,7 +36,7 @@ orjson = ">=3.7.2,<4"
 tenacity = ">=8.0.1,<9"
 grpcio-tools = ">=1.51.1,<2"
 google-cloud-storage = ">=2.7.0,<3"
-grpcio-status = { extras = ["grpc"], version = ">=1.51.1,<2" }
+grpcio-status = ">=1.51.1,<2"
 
 [tool.poetry.dev-dependencies]
 pytest = "^6.2.5"

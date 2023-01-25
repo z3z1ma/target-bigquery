@@ -65,7 +65,7 @@ uvloop = ["uvloop (>=0.15.2)"]
 
 [[package]]
 name = "cachetools"
-version = "5.2.1"
+version = "5.3.0"
 description = "Extensible memoizing collections and decorators"
 category = "main"
 optional = false
@@ -268,7 +268,7 @@ tqdm = ["tqdm (>=4.7.4,<5.0.0dev)"]
 
 [[package]]
 name = "google-cloud-bigquery-storage"
-version = "2.18.0"
+version = "2.18.1"
 description = "Google Cloud Bigquery Storage API client library"
 category = "main"
 optional = false
@@ -565,7 +565,7 @@ python-versions = ">=3.7"
 
 [[package]]
 name = "pathspec"
-version = "0.10.3"
+version = "0.11.0"
 description = "Utility library for gitignore style pattern matching of file paths."
 category = "dev"
 optional = false
@@ -777,7 +777,7 @@ six = ">=1.5"
 
 [[package]]
 name = "python-dotenv"
-version = "0.21.0"
+version = "0.21.1"
 description = "Read key-value pairs from a .env file and set them as environment variables"
 category = "main"
 optional = false
@@ -862,7 +862,7 @@ python-versions = ">=2.5, !=3.0.*, !=3.1.*, !=3.2.*"
 
 [[package]]
 name = "singer-sdk"
-version = "0.17.0"
+version = "0.18.0"
 description = "A framework for building Singer taps"
 category = "main"
 optional = false
@@ -1062,7 +1062,7 @@ testing = ["flake8 (<5)", "func-timeout", "jaraco.functools", "jaraco.itertools"
 [metadata]
 lock-version = "1.1"
 python-versions = "<3.11,>=3.8"
-content-hash = "553abdc9071bd28e37f7febe36e54be35d3e4c5ebebbd29bf711dbbef4d424cf"
+content-hash = "af2214cb8e416cf486b3172d8ff99e09c19a3125638e968d8c79f2f072a55be6"
 
 [metadata.files]
 appdirs = [
@@ -1085,8 +1085,8 @@ black = [
     {file = "black-21.12b0.tar.gz", hash = "sha256:77b80f693a569e2e527958459634f18df9b0ba2625ba4e0c2d5da5be42e6f2b3"},
 ]
 cachetools = [
-    {file = "cachetools-5.2.1-py3-none-any.whl", hash = "sha256:8462eebf3a6c15d25430a8c27c56ac61340b2ecf60c9ce57afc2b97e450e47da"},
-    {file = "cachetools-5.2.1.tar.gz", hash = "sha256:5991bc0e08a1319bb618d3195ca5b6bc76646a49c21d55962977197b301cc1fe"},
+    {file = "cachetools-5.3.0-py3-none-any.whl", hash = "sha256:429e1a1e845c008ea6c85aa35d4b98b65d6a9763eeef3e37e92728a12d1de9d4"},
+    {file = "cachetools-5.3.0.tar.gz", hash = "sha256:13dfddc7b8df938c21a940dfa6557ce6e94a2f1cdfa58eb90c805721d58f2c14"},
 ]
 certifi = [
     {file = "certifi-2022.12.7-py3-none-any.whl", hash = "sha256:4ad3232f5e926d6718ec31cfc1fcadfde020920e278684144551c91769c7bc18"},
@@ -1314,8 +1314,8 @@ google-cloud-bigquery = [
     {file = "google_cloud_bigquery-3.4.2-py2.py3-none-any.whl", hash = "sha256:2d9f59f4e23cb796877ed89cb626013eae437457dc5b268b67072f3bdc6255cb"},
 ]
 google-cloud-bigquery-storage = [
-    {file = "google-cloud-bigquery-storage-2.18.0.tar.gz", hash = "sha256:46772910f70d78265da5e7af4847939aed4bea6e2a64efe1b993c0c686b3af16"},
-    {file = "google_cloud_bigquery_storage-2.18.0-py2.py3-none-any.whl", hash = "sha256:2971abf697661e631ee44ea603549cbd2724c2e14ff16cac4c4c4ffb0647124d"},
+    {file = "google-cloud-bigquery-storage-2.18.1.tar.gz", hash = "sha256:5cd3de59ef27606989aff315c6dd2e05931fd0dd90129e616207b444945652a0"},
+    {file = "google_cloud_bigquery_storage-2.18.1-py2.py3-none-any.whl", hash = "sha256:ddc97b5186dbde2009cff3254036d99d9b62b5cb737cf369f413a3cdf2ea5ae1"},
 ]
 google-cloud-core = [
     {file = "google-cloud-core-2.3.2.tar.gz", hash = "sha256:b9529ee7047fd8d4bf4a2182de619154240df17fbe60ead399078c1ae152af9a"},
@@ -1710,8 +1710,8 @@ packaging = [
     {file = "packaging-23.0.tar.gz", hash = "sha256:b6ad297f8907de0fa2fe1ccbd26fdaf387f5f47c7275fedf8cce89f99446cf97"},
 ]
 pathspec = [
-    {file = "pathspec-0.10.3-py3-none-any.whl", hash = "sha256:3c95343af8b756205e2aba76e843ba9520a24dd84f68c22b9f93251507509dd6"},
-    {file = "pathspec-0.10.3.tar.gz", hash = "sha256:56200de4077d9d0791465aa9095a01d421861e405b5096955051deefd697d6f6"},
+    {file = "pathspec-0.11.0-py3-none-any.whl", hash = "sha256:3a66eb970cbac598f9e5ccb5b2cf58930cd8e3ed86d393d541eaf2d8b1705229"},
+    {file = "pathspec-0.11.0.tar.gz", hash = "sha256:64d338d4e0914e91c1792321e6907b5a593f1ab1851de7fc269557a21b30ebbc"},
 ]
 pendulum = [
     {file = "pendulum-2.1.2-cp27-cp27m-macosx_10_15_x86_64.whl", hash = "sha256:b6c352f4bd32dff1ea7066bd31ad0f71f8d8100b9ff709fb343f3b86cee43efe"},
@@ -1891,8 +1891,8 @@ python-dateutil = [
     {file = "python_dateutil-2.8.2-py2.py3-none-any.whl", hash = "sha256:961d03dc3453ebbc59dbdea9e4e11c5651520a876d0f4db161e8674aae935da9"},
 ]
 python-dotenv = [
-    {file = "python-dotenv-0.21.0.tar.gz", hash = "sha256:b77d08274639e3d34145dfa6c7008e66df0f04b7be7a75fd0d5292c191d79045"},
-    {file = "python_dotenv-0.21.0-py3-none-any.whl", hash = "sha256:1684eb44636dd462b66c3ee016599815514527ad99965de77f43e0944634a7e5"},
+    {file = "python-dotenv-0.21.1.tar.gz", hash = "sha256:1c93de8f636cde3ce377292818d0e440b6e45a82f215c3744979151fa8151c49"},
+    {file = "python_dotenv-0.21.1-py3-none-any.whl", hash = "sha256:41e12e0318bebc859fcc4d97d4db8d20ad21721a6aa5047dd59f090391cb549a"},
 ]
 pytz = [
     {file = "pytz-2022.7.1-py2.py3-none-any.whl", hash = "sha256:78f4f37d8198e0627c5f1143240bb0206b8691d8d7ac6d78fee88b78733f8c4a"},
@@ -2031,8 +2031,8 @@ simplejson = [
     {file = "simplejson-3.18.1.tar.gz", hash = "sha256:746086e3ef6d74b53599df31b491d88a355abf2e31c837137dd90f8c4561cafa"},
 ]
 singer-sdk = [
-    {file = "singer_sdk-0.17.0-py3-none-any.whl", hash = "sha256:0cc9b4c30f96b19f8c8d64da560e929be304bddc2b3ec3219101d5da10fda978"},
-    {file = "singer_sdk-0.17.0.tar.gz", hash = "sha256:f2dbc133aeae7c85b7abb8400012a6e6e1dda2df4e4627a52460ada88cf7b8db"},
+    {file = "singer_sdk-0.18.0-py3-none-any.whl", hash = "sha256:1f68c3378fa9f89389088eff74ecd2066fe19a4547308eefb241ad66cf132807"},
+    {file = "singer_sdk-0.18.0.tar.gz", hash = "sha256:e0a49dfda8b4e183fefa2a932d21cb99584ade5cb8d5897b88fe5d77754aba28"},
 ]
 six = [
     {file = "six-1.16.0-py2.py3-none-any.whl", hash = "sha256:8abb2f1d86890a2dfb989f9a77cfcfd3e47c2a354b01111771326f8aa26e0254"},
