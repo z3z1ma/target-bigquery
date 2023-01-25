@@ -276,10 +276,8 @@ class BaseBigQuerySink(BatchSink):
             "generate_view", False
         )
 
-    # We override this because it offers us no benefit (that I have observed)
-    # but halves throughput in multiple tests I have run.
-    def _parse_timestamps_in_record(self, *args, **kwargs) -> None:
-        pass
+    def _validate_and_parse(self, record: dict) -> dict:
+        return record
 
     def preprocess_record(
         self, record: Dict[str, Any], context: Dict[str, Any]
