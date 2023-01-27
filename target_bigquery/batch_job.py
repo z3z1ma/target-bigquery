@@ -21,7 +21,6 @@ from typing import Any, Dict, NamedTuple, Optional, Type, Union
 
 import orjson
 from google.cloud import bigquery
-
 from target_bigquery.core import (
     BaseBigQuerySink,
     BaseWorker,
@@ -70,7 +69,6 @@ class BatchJobProcessWorker(BatchJobWorker, Process):
 
 
 class BigQueryBatchJobSink(BaseBigQuerySink):
-
     MAX_WORKERS = os.cpu_count() * 2
     WORKER_CAPACITY_FACTOR = 1
     WORKER_CREATION_MIN_INTERVAL = 10.0

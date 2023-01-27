@@ -32,9 +32,7 @@ MAP = {
 }
 
 
-def generate_field_v2(
-    base: SchemaField, i: int = 1, pool: Optional[Any] = None
-) -> Dict[str, Any]:
+def generate_field_v2(base: SchemaField, i: int = 1, pool: Optional[Any] = None) -> Dict[str, Any]:
     """Generate proto2 field properties from a SchemaField."""
     name: str = base.name
     typ: str = cast(str, base.field_type).upper()
@@ -74,9 +72,7 @@ def proto_schema_factory_v2(
     for f in bigquery_schema:
         fhash.update(hash(f).to_bytes(8, "big", signed=True))
     fname = f"AnonymousProto_{fhash.hexdigest()}.proto"
-    clsname = (
-        f"net.proto2.python.public.target_bigquery.AnonymousProto_{fhash.hexdigest()}"
-    )
+    clsname = f"net.proto2.python.public.target_bigquery.AnonymousProto_{fhash.hexdigest()}"
     factory = message_factory.MessageFactory(pool=pool)
     try:
         proto_descriptor = factory.pool.FindMessageTypeByName(clsname)
@@ -131,8 +127,6 @@ def proto_schema_factory(bigquery_schema: List[SchemaField]) -> Type[proto.Messa
         (proto.Message,),
         {
             name: f
-            for f, name in (
-                generate_field(field, i + 1) for i, field in enumerate(bigquery_schema)
-            )
+            for f, name in (generate_field(field, i + 1) for i, field in enumerate(bigquery_schema))
         },
     )

@@ -24,7 +24,6 @@ from typing import TYPE_CHECKING, Any, Dict, List, NamedTuple, Optional, Type, U
 
 import orjson
 from google.cloud import bigquery, storage
-
 from target_bigquery.constants import DEFAULT_BUCKET_PATH
 from target_bigquery.core import (
     BaseBigQuerySink,
@@ -96,7 +95,6 @@ class GcsStagingProcessWorker(GcsStagingWorker, Process):
 
 
 class BigQueryGcsStagingSink(BaseBigQuerySink):
-
     MAX_WORKERS = os.cpu_count() * 2
     WORKER_CAPACITY_FACTOR = 1
     WORKER_CREATION_MIN_INTERVAL = 10.0

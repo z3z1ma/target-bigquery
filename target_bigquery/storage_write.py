@@ -43,12 +43,7 @@ if TYPE_CHECKING:
 
 import logging
 
-from target_bigquery.core import (
-    BaseBigQuerySink,
-    BaseWorker,
-    Denormalized,
-    storage_client_factory,
-)
+from target_bigquery.core import BaseBigQuerySink, BaseWorker, Denormalized, storage_client_factory
 from target_bigquery.proto_gen import proto_schema_factory_v2
 
 # Stream specific constant
@@ -61,12 +56,11 @@ StreamComponents = Tuple[str, writer.AppendRowsStream, Dispatcher]
 
 
 def get_application_stream(client: BigQueryWriteClient, job: "Job") -> StreamComponents:
-    """Get an application created stream for the parent. This stream must be finalized and committed."""
+    """Get an application created stream for the parent. This stream must be finalized and committed.
+    """
     write_stream = types.WriteStream()
     write_stream.type_ = types.WriteStream.Type.PENDING
-    write_stream = client.create_write_stream(
-        parent=job.parent, write_stream=write_stream
-    )
+    write_stream = client.create_write_stream(parent=job.parent, write_stream=write_stream)
     job.template.write_stream = write_stream.name
     append_rows_stream = writer.AppendRowsStream(client, job.template)
     rv = (write_stream.name, append_rows_stream)
@@ -158,9 +152,7 @@ class StorageWriteBatchWorker(BaseWorker):
                 break
             if job.parent not in cache:
                 cache[job.parent] = self.get_stream_components(client, job)
-            write_stream, append_rows_stream, dispatch = cast(
-                StreamComponents, cache[job.parent]
-            )
+            write_stream, append_rows_stream, dispatch = cast(StreamComponents, cache[job.parent])
             try:
                 kwargs = {}
                 if write_stream.endswith("_default"):
@@ -210,7 +202,6 @@ class StorageWriteProcessBatchWorker(StorageWriteBatchWorker, Process):
 
 
 class BigQueryStorageWriteSink(BaseBigQuerySink):
-
     MAX_WORKERS = os.cpu_count() * 2
     WORKER_CAPACITY_FACTOR = 10
     WORKER_CREATION_MIN_INTERVAL = 1.0
@@ -289,9 +280,7 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
         if not self.open_streams:
             return
         self.open_streams = [
-            (name, stream)
-            for name, stream in self.open_streams
-            if not name.endswith("_default")
+            (name, stream) for name, stream in self.open_streams if not name.endswith("_default")
         ]
         if self.open_streams:
             committer = storage_client_factory(self._credentials)
@@ -306,9 +295,7 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
             )
             self.logger.info(f"Batch commit time: {write.commit_time}")
             self.logger.info(f"Batch commit errors: {write.stream_errors}")
-            self.logger.info(
-                f"Writes to streams: '{self.open_streams}' have been committed."
-            )
+            self.logger.info(f"Writes to streams: '{self.open_streams}' have been committed.")
         self.open_streams = set()
 
     def clean_up(self) -> None:

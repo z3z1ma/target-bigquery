@@ -34,17 +34,27 @@ DEFAULT_SCHEMA = [
     bigquery.SchemaField(
         "_sdc_deleted_at",
         bigquery.SqlTypeNames.TIMESTAMP,
-        description="Passed from a Singer tap if DELETE events are able to be tracked. In general, this is populated when the tap is synced LOG_BASED replication. If not sent from the tap, this field will be null.",
+        description=(
+            "Passed from a Singer tap if DELETE events are able to be tracked. In general, this is"
+            " populated when the tap is synced LOG_BASED replication. If not sent from the tap,"
+            " this field will be null."
+        ),
     ),
     bigquery.SchemaField(
         "_sdc_sequence",
         bigquery.SqlTypeNames.INT64,
-        description="The epoch (milliseconds) that indicates the order in which the record was queued for loading",
+        description=(
+            "The epoch (milliseconds) that indicates the order in which the record was queued for"
+            " loading"
+        ),
     ),
     bigquery.SchemaField(
         "_sdc_table_version",
         bigquery.SqlTypeNames.INTEGER,
-        description="Indicates the version of the table. This column is used to determine when to issue TRUNCATE commands during loading, where applicable",
+        description=(
+            "Indicates the version of the table. This column is used to determine when to issue"
+            " TRUNCATE commands during loading, where applicable"
+        ),
     ),
 ]
 
@@ -57,4 +67,6 @@ SDC_FIELDS = [
     "_sdc_table_version",
 ]
 
-DEFAULT_BUCKET_PATH = "gs://{bucket}/target_bigquery/{dataset}/{table}/extracted_date={date}/{batch_id}.jsonl.gz"
+DEFAULT_BUCKET_PATH = (
+    "gs://{bucket}/target_bigquery/{dataset}/{table}/extracted_date={date}/{batch_id}.jsonl.gz"
+)

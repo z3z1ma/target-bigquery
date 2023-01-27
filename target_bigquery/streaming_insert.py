@@ -21,14 +21,8 @@ from typing import Any, Dict, List, NamedTuple, Optional, Type, Union
 import orjson
 from google.api_core.exceptions import GatewayTimeout, NotFound
 from google.cloud import _http, bigquery
+from target_bigquery.core import BaseBigQuerySink, BaseWorker, Denormalized, bigquery_client_factory
 from tenacity import retry, retry_if_exception_type, stop_after_delay, wait_fixed
-
-from target_bigquery.core import (
-    BaseBigQuerySink,
-    BaseWorker,
-    Denormalized,
-    bigquery_client_factory,
-)
 
 
 class Job(NamedTuple):
@@ -74,7 +68,6 @@ class StreamingInsertProcessWorker(StreamingInsertWorker, Process):
 
 
 class BigQueryStreamingInsertSink(BaseBigQuerySink):
-
     MAX_WORKERS = os.cpu_count() * 2
     WORKER_CAPACITY_FACTOR = 10
     WORKER_CREATION_MIN_INTERVAL = 1.0
@@ -99,14 +92,10 @@ class BigQueryStreamingInsertSink(BaseBigQuerySink):
         self.records_to_drain.append(record)
 
     def process_batch(self, context: Dict[str, Any]) -> None:
-        self.global_queue.put(
-            Job(table=self.table.as_ref(), records=self.records_to_drain.copy())
-        )
+        self.global_queue.put(Job(table=self.table.as_ref(), records=self.records_to_drain.copy()))
         self.increment_jobs_enqueued()
         self.records_to_drain = []
 
 
-class BigQueryStreamingInsertDenormalizedSink(
-    Denormalized, BigQueryStreamingInsertSink
-):
+class BigQueryStreamingInsertDenormalizedSink(Denormalized, BigQueryStreamingInsertSink):
     pass

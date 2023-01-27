@@ -16,21 +16,9 @@ from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple, Type, U
 
 from singer_sdk import typing as th
 from singer_sdk.target_base import Sink, Target
-
-from target_bigquery.batch_job import (
-    BigQueryBatchJobDenormalizedSink,
-    BigQueryBatchJobSink,
-)
-from target_bigquery.core import (
-    BaseBigQuerySink,
-    BaseWorker,
-    BigQueryCredentials,
-    ParType,
-)
-from target_bigquery.gcs_stage import (
-    BigQueryGcsStagingDenormalizedSink,
-    BigQueryGcsStagingSink,
-)
+from target_bigquery.batch_job import BigQueryBatchJobDenormalizedSink, BigQueryBatchJobSink
+from target_bigquery.core import BaseBigQuerySink, BaseWorker, BigQueryCredentials, ParType
+from target_bigquery.gcs_stage import BigQueryGcsStagingDenormalizedSink, BigQueryGcsStagingSink
 from target_bigquery.storage_write import (
     BigQueryStorageWriteDenormalizedSink,
     BigQueryStorageWriteSink,
@@ -95,9 +83,12 @@ class TargetBigQuery(Target):
         th.Property(
             "denormalized",
             th.BooleanType,
-            description="Determines whether to denormalize the data before writing to BigQuery. A false value "
-            "will write data using a fixed JSON column based schema, while a true value will write data using a dynamic "
-            "schema derived from the tap. Denormalization is only supported for the batch_job, streaming_insert, and gcs_stage methods.",
+            description=(
+                "Determines whether to denormalize the data before writing to BigQuery. A false"
+                " value will write data using a fixed JSON column based schema, while a true value"
+                " will write data using a dynamic schema derived from the tap. Denormalization is"
+                " only supported for the batch_job, streaming_insert, and gcs_stage methods."
+            ),
             default=False,
         ),
         th.Property(
@@ -120,8 +111,11 @@ class TargetBigQuery(Target):
         th.Property(
             "generate_view",
             th.BooleanType,
-            description="Determines whether to generate a view based on the SCHEMA message parsed from the tap. "
-            "Only valid if denormalized=false meaning you are using the fixed JSON column based schema.",
+            description=(
+                "Determines whether to generate a view based on the SCHEMA message parsed from the"
+                " tap. Only valid if denormalized=false meaning you are using the fixed JSON column"
+                " based schema."
+            ),
             default=False,
         ),
         th.Property(
@@ -149,7 +143,10 @@ class TargetBigQuery(Target):
             "cluster_on_key_properties",
             th.BooleanType,
             default=False,
-            description="Determines whether to cluster on the key properties from the tap. Defaults to false.",
+            description=(
+                "Determines whether to cluster on the key properties from the tap. Defaults to"
+                " false."
+            ),
         ),
         th.Property(
             "column_name_transforms",
@@ -180,10 +177,11 @@ class TargetBigQuery(Target):
                 ),
             ),
             description=(
-                "Accepts a JSON object of options with boolean values to enable them. The available options are `quote` "
-                "(quote columns in DDL), `lower` (lowercase column names), `add_underscore_when_invalid` (add underscore "
-                "if column starts with digit), and `snake_case` (convert to snake case naming). For fixed schema, this "
-                "transform only applies to the generated view if enabled."
+                "Accepts a JSON object of options with boolean values to enable them. The available"
+                " options are `quote` (quote columns in DDL), `lower` (lowercase column names),"
+                " `add_underscore_when_invalid` (add underscore if column starts with digit), and"
+                " `snake_case` (convert to snake case naming). For fixed schema, this transform"
+                " only applies to the generated view if enabled."
             ),
             required=False,
         ),
@@ -195,22 +193,30 @@ class TargetBigQuery(Target):
                     th.BooleanType,
                     default=False,
                     description=(
-                        "By default, we use the default stream (Committed mode) in the storage_write_api load method "
-                        "which results in streaming records which are immediately available and is generally fastest. If this is set to true, we will "
-                        "use the application created streams (Committed mode) to transactionally batch data on STATE messages and at end of pipe."
+                        "By default, we use the default stream (Committed mode) in the"
+                        " storage_write_api load method which results in streaming records which"
+                        " are immediately available and is generally fastest. If this is set to"
+                        " true, we will use the application created streams (Committed mode) to"
+                        " transactionally batch data on STATE messages and at end of pipe."
                     ),
                 ),
                 th.Property(
                     "process_pool",
                     th.BooleanType,
                     default=False,
-                    description="By default we use an autoscaling threadpool to write to BigQuery. If set to true, we will use a process pool.",
+                    description=(
+                        "By default we use an autoscaling threadpool to write to BigQuery. If set"
+                        " to true, we will use a process pool."
+                    ),
                 ),
                 th.Property(
                     "max_workers",
                     th.IntegerType,
                     required=False,
-                    description="By default, each sink type has a preconfigured max worker limit. This sets an override for maximum number of workers per stream.",
+                    description=(
+                        "By default, each sink type has a preconfigured max worker limit. This sets"
+                        " an override for maximum number of workers per stream."
+                    ),
                 ),
             ),
         ),
@@ -234,10 +240,7 @@ class TargetBigQuery(Target):
         )
 
         def worker_factory():
-            return self.get_sink_class().worker_cls_factory(
-                self.proc_cls,
-                self.config,
-            )(
+            return self.get_sink_class().worker_cls_factory(self.proc_cls, self.config,)(
                 ext_id=uuid.uuid4().hex,
                 queue=self.queue,
                 credentials=self._credentials,
@@ -293,9 +296,7 @@ class TargetBigQuery(Target):
         """Predicate determining when it is valid to add a worker to the pool."""
         return (
             self._jobs_enqueued
-            > getattr(
-                self.get_sink_class(), "WORKER_CAPACITY_FACTOR", WORKER_CAPACITY_FACTOR
-            )
+            > getattr(self.get_sink_class(), "WORKER_CAPACITY_FACTOR", WORKER_CAPACITY_FACTOR)
             * (len(self.workers) + 1)
             and len(self.workers)
             < self.config.get("options", {}).get(
@@ -338,14 +339,12 @@ class TargetBigQuery(Target):
 
     # SDK overrides to inject our worker management logic and sink selection.
 
-    def get_sink_class(
-        self, stream_name: Optional[str] = None
-    ) -> Type[BaseBigQuerySink]:
+    def get_sink_class(self, stream_name: Optional[str] = None) -> Type[BaseBigQuerySink]:
         """Returns the sink class to use for a given stream based on user config."""
         _ = stream_name
-        method, denormalized = self.config.get(
-            "method", "storage_write_api"
-        ), self.config.get("denormalized", False)
+        method, denormalized = self.config.get("method", "storage_write_api"), self.config.get(
+            "denormalized", False
+        )
         if method == "batch_job":
             if denormalized:
                 return BigQueryBatchJobDenormalizedSink

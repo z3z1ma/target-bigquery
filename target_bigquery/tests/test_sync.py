@@ -7,7 +7,6 @@ import time
 import pytest
 from google.api_core.exceptions import NotFound
 from singer_sdk.testing import target_sync_test
-
 from target_bigquery.core import BigQueryCredentials, bigquery_client_factory
 from target_bigquery.target import TargetBigQuery
 
@@ -56,9 +55,7 @@ def test_basic_sync(method):
         },
     )
 
-    client = bigquery_client_factory(
-        BigQueryCredentials(json=target.config["credentials_json"])
-    )
+    client = bigquery_client_factory(BigQueryCredentials(json=target.config["credentials_json"]))
     try:
         client.query(f"TRUNCATE TABLE {target.config['dataset']}.{table_name}").result()
     except NotFound:
@@ -131,9 +128,7 @@ def test_basic_denorm_sync(method):
         },
     )
 
-    client = bigquery_client_factory(
-        BigQueryCredentials(json=target.config["credentials_json"])
-    )
+    client = bigquery_client_factory(BigQueryCredentials(json=target.config["credentials_json"]))
     try:
         client.query(f"TRUNCATE TABLE {target.config['dataset']}.{table_name}").result()
     except NotFound:
@@ -146,7 +141,9 @@ def test_basic_denorm_sync(method):
     records = [
         dict(record)
         for record in client.query(
-            f"SELECT * except(_sdc_extracted_at, _sdc_received_at, _sdc_batched_at, _sdc_deleted_at, _sdc_sequence, _sdc_table_version) FROM {target.config['dataset']}.{table_name} ORDER BY id"
+            "SELECT * except(_sdc_extracted_at, _sdc_received_at, _sdc_batched_at,"
+            " _sdc_deleted_at, _sdc_sequence, _sdc_table_version) FROM"
+            f" {target.config['dataset']}.{table_name} ORDER BY id"
         ).result()
     ]
 
