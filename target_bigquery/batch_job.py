@@ -21,6 +21,7 @@ from typing import Any, Dict, NamedTuple, Optional, Type, Union
 
 import orjson
 from google.cloud import bigquery
+
 from target_bigquery.core import (
     BaseBigQuerySink,
     BaseWorker,

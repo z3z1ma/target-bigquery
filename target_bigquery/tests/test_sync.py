@@ -7,6 +7,7 @@ import time
 import pytest
 from google.api_core.exceptions import NotFound
 from singer_sdk.testing import target_sync_test
+
 from target_bigquery.core import BigQueryCredentials, bigquery_client_factory
 from target_bigquery.target import TargetBigQuery
 

@@ -3,6 +3,7 @@ from typing import List
 import pytest
 import singer_sdk.typing as th
 from google.cloud.bigquery import SchemaField
+
 from target_bigquery.core import SchemaTranslator, bigquery_type, transform_column_name
 from target_bigquery.proto_gen import proto_schema_factory_v2
 

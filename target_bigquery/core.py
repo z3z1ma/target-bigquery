@@ -8,6 +8,7 @@
 #
 # The above copyright notice and this permission notice shall be included in all copies or
 # substantial portions of the Software.
+import datetime
 import gzip
 import json
 import mmap
@@ -39,8 +40,9 @@ from google.cloud import bigquery, bigquery_storage_v1, storage
 from google.cloud.bigquery import SchemaField
 from google.cloud.bigquery.table import TimePartitioning, TimePartitioningType
 from singer_sdk.sinks import BatchSink
-from target_bigquery.constants import DEFAULT_SCHEMA
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_fixed
+
+from target_bigquery.constants import DEFAULT_SCHEMA
 
 if TYPE_CHECKING:
     from target_bigquery.target import TargetBigQuery
@@ -67,11 +69,17 @@ PARTITION_STRATEGY = {
 @dataclass
 class BigQueryTable:
     name: str
+    """The name of the table."""
     dataset: str
+    """The dataset that this table belongs to."""
     project: str
+    """The project that this table belongs to."""
     jsonschema: Dict[str, Any]
+    """The jsonschema for this table."""
     ingestion_strategy: IngestionStrategy
+    """The ingestion strategy for this table."""
     transforms: Dict[str, bool] = field(default_factory=dict)
+    """A dict of transformation rules to apply to the table schema."""
 
     @property
     def schema_translator(self) -> "SchemaTranslator":
@@ -91,9 +99,9 @@ class BigQueryTable:
 
     def get_resolved_schema(self, apply_transforms: bool = False) -> List[bigquery.SchemaField]:
         """Returns the schema for this table after factoring in the ingestion strategy."""
-        if self.ingestion_strategy == IngestionStrategy.FIXED:
+        if self.ingestion_strategy is IngestionStrategy.FIXED:
             return DEFAULT_SCHEMA
-        elif self.ingestion_strategy == IngestionStrategy.DENORMALIZED:
+        elif self.ingestion_strategy is IngestionStrategy.DENORMALIZED:
             return self.get_schema(apply_transforms)
 
     def __str__(self) -> str:
@@ -129,14 +137,18 @@ class BigQueryTable:
         apply_transforms: bool = False,
         **kwargs,
     ) -> Tuple[bigquery.Dataset, bigquery.Table]:
-        """Creates a dataset and table for this table."""
+        """Creates a dataset and table for this table.
+
+        This is a convenience method that wraps the creation of a dataset and
+        table in a single method call. It is idempotent and will not create
+        a new table if one already exists."""
         if not hasattr(self, "_dataset"):
             self._dataset = client.create_dataset(self.as_dataset(), exists_ok=True)
         if not hasattr(self, "_table"):
             try:
                 self._table = client.create_table(
                     self.as_table(
-                        apply_transforms and self.ingestion_strategy != IngestionStrategy.FIXED,
+                        apply_transforms and self.ingestion_strategy is not IngestionStrategy.FIXED,
                         **kwargs,
                     )
                 )
@@ -218,6 +230,7 @@ class BaseBigQuerySink(BatchSink):
         schema: Dict[str, Any],
         key_properties: Optional[List[str]],
     ) -> None:
+        """Initialize the sink."""
         super().__init__(target, stream_name, schema, key_properties)
         self._credentials = BigQueryCredentials(
             self.config.get("credentials_path"),
@@ -225,17 +238,32 @@ class BaseBigQuerySink(BatchSink):
             self.config["project"],
         )
         self.client = bigquery_client_factory(self._credentials)
-        self.table = BigQueryTable(
-            name=self.table_name,
-            dataset=self.config["dataset"],
-            project=self.config["project"],
-            jsonschema=self.schema,
-            transforms=self.config.get("column_name_transforms", {}),
-            ingestion_strategy=self.ingestion_strategy,
-        )
-
-        self.create_target(key_properties)
+        opts = {
+            "project": self.config["project"],
+            "dataset": self.config["dataset"],
+            "jsonschema": self.schema,
+            "transforms": self.config.get("column_name_transforms", {}),
+            "ingestion_strategy": self.ingestion_strategy,
+        }
+        self.table = BigQueryTable(name=self.table_name, **opts)
+        self.create_target(key_properties=key_properties)
         self.update_schema()
+        self.merge_target: Optional[BigQueryTable] = None
+        if (
+            key_properties
+            and self.ingestion_strategy is IngestionStrategy.DENORMALIZED
+            and self.config.get("merge_from_temp_table")
+        ):
+            from copy import copy
+
+            self.merge_target = copy(self.table)
+            self.table = BigQueryTable(name=f"{self.table_name}__{int(time.time())}", **opts)
+            self.table.create_table(
+                self.client,
+                self.apply_transforms,
+                expires=datetime.datetime.now() + datetime.timedelta(days=1),
+            )
+            time.sleep(2.5)  # Wait for eventual consistency
         self.global_par_typ = target.par_typ
         self.global_queue = target.queue
         self.increment_jobs_enqueued = target.increment_jobs_enqueued
@@ -320,6 +348,32 @@ class BaseBigQuerySink(BatchSink):
     ) -> Union[Type[BaseWorker], Type["Process"]]:
         """Return a worker class for the given parallelization type."""
         raise NotImplementedError
+
+    def clean_up(self) -> None:
+        """Clean up the target table."""
+        if self.merge_target is not None:
+            # We must merge the temp table into the target table
+            target = self.merge_target.as_table()
+            self.client.query(
+                "MERGE `{}` AS target USING `{}` AS source ON {} WHEN MATCHED THEN UPDATE SET {} "
+                "WHEN NOT MATCHED THEN INSERT ({}) VALUES ({})".format(
+                    # Merge into
+                    self.merge_target,
+                    # Merge from
+                    self.table,
+                    # On clause
+                    " AND ".join(f"target.`{f}` = source.`{f}`" for f in self.key_properties),
+                    # Update clause
+                    ", ".join(f"target.`{f.name}` = source.`{f.name}`" for f in target.schema),
+                    # Insert clause
+                    ", ".join(f.name for f in target.schema),
+                    # Values clause
+                    ", ".join(f"source.`{f.name}`" for f in target.schema),
+                )
+            ).result()
+            self.client.delete_table(self.table.as_ref())
+            self.table = self.merge_target
+            self.merge_target = None
 
 
 class Denormalized:
@@ -462,11 +516,11 @@ class SchemaTranslator:
     def generate_view_statement(self, table_name: str) -> str:
         """Generate a CREATE VIEW statement for the SchemaTranslator `schema`."""
         projection = ""
-        for field in self.translated_schema[:]:
-            if field.mode == "REPEATED":
-                projection += indent(self._wrap_json_array(field, path="$", depth=1), " " * 4)
+        for field_ in self.translated_schema[:]:
+            if field_.mode == "REPEATED":
+                projection += indent(self._wrap_json_array(field_, path="$", depth=1), " " * 4)
             else:
-                projection += indent(self._bigquery_field_to_projection(field), " " * 4)
+                projection += indent(self._bigquery_field_to_projection(field_), " " * 4)
 
         return (
             f"CREATE OR REPLACE VIEW {table_name}_view AS \nSELECT \n{projection} FROM {table_name}"
@@ -487,6 +541,8 @@ class SchemaTranslator:
             property_format = schema_property.get("format", None)
 
         if "array" in property_type:
+            if "items" not in schema_property:
+                return SchemaField(name, "JSON", "REPEATED")
             items_schema: dict = schema_property["items"]
             items_type = bigquery_type(items_schema["type"], items_schema.get("format", None))
             if items_type == "record":
@@ -614,6 +670,7 @@ class Compressor:
     """Compresses streams of bytes using gzip."""
 
     def __init__(self) -> None:
+        """Initialize the compressor."""
         self._compressor = None
         self._closed = False
         if shutil.which("gzip") is not None:
@@ -627,15 +684,18 @@ class Compressor:
             self._gzip = gzip.GzipFile(fileobj=self._buffer, mode="wb")
 
     def write(self, data: bytes) -> None:
+        """Write data to the compressor."""
         if self._closed:
             raise ValueError("I/O operation on closed compressor.")
         self._gzip.write(data)
 
     def flush(self) -> None:
+        """Flush the compressor buffer."""
         self._gzip.flush()
         self._buffer.flush()
 
     def close(self) -> None:
+        """Close the compressor and wait for the gzip process to finish."""
         if self._closed:
             return
         self._gzip.close()
@@ -646,6 +706,7 @@ class Compressor:
         self._closed = True
 
     def getvalue(self) -> bytes:
+        """Return the compressed buffer as a bytes object."""
         if not self._closed:
             self.close()
         if self._compressor is not None:
@@ -653,6 +714,7 @@ class Compressor:
         return self._buffer.getvalue()
 
     def getbuffer(self) -> Union[memoryview, mmap.mmap]:
+        """Return the compressed buffer as a memoryview or mmap."""
         if not self._closed:
             self.close()
         if self._compressor is not None:
@@ -661,9 +723,11 @@ class Compressor:
 
     @property
     def buffer(self) -> IO[bytes]:
+        """Return the compressed buffer as a file-like object."""
         return self._buffer
 
     def __del__(self) -> None:
+        """Close the compressor and wait for the gzip process to finish. Dereference the buffer."""
         if not self._closed:
             self.close()
         # close the buffer, ignore error if we have an incremented rc due to memoryview

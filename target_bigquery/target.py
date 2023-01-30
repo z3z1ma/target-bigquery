@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple, Type, U
 
 from singer_sdk import typing as th
 from singer_sdk.target_base import Sink, Target
+
 from target_bigquery.batch_job import BigQueryBatchJobDenormalizedSink, BigQueryBatchJobSink
 from target_bigquery.core import BaseBigQuerySink, BaseWorker, BigQueryCredentials, ParType
 from target_bigquery.gcs_stage import BigQueryGcsStagingDenormalizedSink, BigQueryGcsStagingSink

@@ -21,8 +21,9 @@ from typing import Any, Dict, List, NamedTuple, Optional, Type, Union
 import orjson
 from google.api_core.exceptions import GatewayTimeout, NotFound
 from google.cloud import _http, bigquery
-from target_bigquery.core import BaseBigQuerySink, BaseWorker, Denormalized, bigquery_client_factory
 from tenacity import retry, retry_if_exception_type, stop_after_delay, wait_fixed
+
+from target_bigquery.core import BaseBigQuerySink, BaseWorker, Denormalized, bigquery_client_factory
 
 
 class Job(NamedTuple):

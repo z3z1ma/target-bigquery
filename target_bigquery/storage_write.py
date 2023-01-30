@@ -300,6 +300,7 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
 
     def clean_up(self) -> None:
         self.commit_streams()
+        super().clean_up()
 
     def pre_state_hook(self) -> None:
         self.commit_streams()

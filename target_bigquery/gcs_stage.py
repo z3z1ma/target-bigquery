@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, NamedTuple, Optional, Type, U
 
 import orjson
 from google.cloud import bigquery, storage
+
 from target_bigquery.constants import DEFAULT_BUCKET_PATH
 from target_bigquery.core import (
     BaseBigQuerySink,
@@ -165,6 +166,7 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
             self.logger.info("Data loaded successfully")
         else:
             self.logger.info("No data to load")
+        super().clean_up()
 
 
 class BigQueryGcsStagingDenormalizedSink(Denormalized, BigQueryGcsStagingSink):
