@@ -120,6 +120,7 @@ class BigQueryBatchJobDenormalizedSink(Denormalized, BigQueryBatchJobSink):
             "schema_update_options": [
                 bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION,
             ],
+            "ignore_unknown_values": True,
         }
 
     # Defer schema evolution the the write disposition
