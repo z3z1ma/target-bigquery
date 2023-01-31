@@ -252,7 +252,7 @@ class BaseBigQuerySink(BatchSink):
         if (
             key_properties
             and self.ingestion_strategy is IngestionStrategy.DENORMALIZED
-            and self.config.get("merge_from_temp_table")
+            and self.config.get("dedupe")
         ):
             from copy import copy
 
@@ -352,26 +352,37 @@ class BaseBigQuerySink(BatchSink):
     def clean_up(self) -> None:
         """Clean up the target table."""
         if self.merge_target is not None:
-            # We must merge the temp table into the target table
+            # We must merge the temp table into the target table.
             target = self.merge_target.as_table()
-            self.client.query(
-                "MERGE `{}` AS target USING `{}` AS source ON {} WHEN MATCHED THEN UPDATE SET {} "
-                "WHEN NOT MATCHED THEN INSERT ({}) VALUES ({})".format(
-                    # Merge into
-                    self.merge_target,
-                    # Merge from
-                    self.table,
-                    # On clause
-                    " AND ".join(f"target.`{f}` = source.`{f}`" for f in self.key_properties),
-                    # Update clause
-                    ", ".join(f"target.`{f.name}` = source.`{f.name}`" for f in target.schema),
-                    # Insert clause
-                    ", ".join(f.name for f in target.schema),
-                    # Values clause
-                    ", ".join(f"source.`{f.name}`" for f in target.schema),
+            date_columns = ["_sdc_extracted_at", "_sdc_received_at"]
+            tmp, ctas_tmp = None, "SELECT 1 AS _no_op"
+            if self.config.get("non_unique_key_properties", True):
+                # We can't use MERGE with a non-unique key, so we need to dedupe the temp table into
+                # a _SESSION scoped intermediate table.
+                tmp = f"{target.name}__tmp"
+                dedupe_query = (
+                    f"SELECT * FROM {self.table} "
+                    f"QUALIFY ROW_NUMBER() OVER (PARTITION BY {', '.join(self.key_properties)} "
+                    f"ORDER BY COALESCE({', '.join(date_columns)}) DESC) = 1"
                 )
+                ctas_tmp = f"CREATE OR REPLACE TEMP TABLE {tmp} AS {dedupe_query}"
+            merge_clause = (
+                f"MERGE `{self.merge_target}` AS target USING `{tmp or self.table}` AS source ON "
+                + " AND ".join(f"target.`{f}` = source.`{f}`" for f in self.key_properties)
+            )
+            update_clause = "UPDATE SET " + ", ".join(
+                f"target.`{f.name}` = source.`{f.name}`" for f in target.schema
+            )
+            insert_clause = (
+                f"INSERT ({', '.join(f.name for f in target.schema)}) "
+                f"VALUES ({', '.join(f'source.`{f.name}`' for f in target.schema)})"
+            )
+            self.client.query(
+                f"{ctas_tmp}; {merge_clause} "
+                f"WHEN MATCHED THEN {update_clause} "
+                f"WHEN NOT MATCHED THEN {insert_clause}; "
+                f"DROP TABLE IF EXISTS {self.table};"
             ).result()
-            self.client.delete_table(self.table.as_ref())
             self.table = self.merge_target
             self.merge_target = None
 
