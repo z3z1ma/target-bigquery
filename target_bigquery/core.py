@@ -576,18 +576,15 @@ class SchemaTranslator:
         return SchemaField(name, "RECORD", mode, fields=fields)
 
     def _bigquery_field_to_projection(
-        self,
-        field: SchemaField,
-        path: str = "$",
-        depth: int = 0,
-        base: str = "data",
-        rebase: bool = False,
+        self, field: SchemaField, path: str = "$", depth: int = 0, base: str = "data"
     ) -> str:
         """Translate a BigQuery schema field into a SQL projection."""
         # Pass-through _sdc columns into the projection as-is
         if field.name.startswith("_sdc_"):
             return f"{field.name},\n"
-        scalar = f"{base}.{field.name}" if not rebase else f"{base}"
+
+        scalar = f"{base}.{field.name}"
+        from_base = f"{path}.{field.name}" if base == "data" else "$"
 
         # Records are handled recursively
         if field.field_type.upper() == "RECORD":
@@ -596,9 +593,11 @@ class SchemaTranslator:
                 + "STRUCT(\n{}\n".format(
                     "".join(
                         [
-                            self._bigquery_field_to_projection(f, f"{path}.{field.name}", depth + 1)
+                            self._bigquery_field_to_projection(
+                                f, path=from_base, depth=depth + 1, base=base
+                            )
                             if not f.mode == "REPEATED"
-                            else self._wrap_json_array(f, f"{path}.{field.name}", depth, base)
+                            else self._wrap_json_array(f, path=from_base, depth=depth, base=base)
                             for f in field.fields
                         ]
                     ).rstrip(",\n"),
@@ -608,9 +607,7 @@ class SchemaTranslator:
             )
         # Nullable fields require a JSON_VALUE call which creates a 2-stage cast
         elif field.is_nullable:
-            return (" " * depth * 2) + self._wrap_nullable_json_value(
-                field, f"{path}.{field.name}", base
-            )
+            return (" " * depth * 2) + self._wrap_nullable_json_value(field, path=path, base=base)
         # These are not nullable so if the type is known, we can do a 1-stage extract & cast
         elif field.field_type.upper() == "STRING":
             return (
@@ -631,16 +628,14 @@ class SchemaTranslator:
             ) + f"BOOL({scalar}) as {transform_column_name(field.name, **self.transforms)},\n"
         # Fallback to a 2-stage extract & cast
         else:
-            return (" " * depth * 2) + self._wrap_nullable_json_value(
-                field, f"{path}.{field.name}" if not rebase else "$", base
-            )
+            return (" " * depth * 2) + self._wrap_nullable_json_value(field, path, base)
 
     def _wrap_json_array(
         self, field: SchemaField, path: str, depth: int = 0, base: str = "data"
     ) -> str:
         """Translate a BigQuery schema field into a SQL projection for a repeated field."""
         v = self._bigquery_field_to_projection(
-            field, "$", depth, f"{field.name}__rows", rebase=True
+            field, path="$", depth=depth, base=f"{field.name}__rows"
         ).rstrip(", \n")
         return (" " * depth * 2) + indent(
             dedent(
@@ -664,7 +659,7 @@ class SchemaTranslator:
         typ = field.field_type.upper()
         if typ == "STRING":
             return (
-                f"JSON_VALUE({base}, '{path}') as"
+                f"JSON_VALUE({base}, '{path}.{field.name}') as"
                 f" {transform_column_name(field.name, **self.transforms)},\n"
             )
         if typ == "FLOAT":
@@ -672,7 +667,7 @@ class SchemaTranslator:
         if typ in ("INT", "INTEGER"):
             typ = "INT64"
         return (
-            f"CAST(JSON_VALUE({base}, '{path}') as {typ}) as"
+            f"CAST(JSON_VALUE({base}, '{path}.{field.name}') as {typ}) as"
             f" {transform_column_name(field.name, **self.transforms)},\n"
         )
 

@@ -377,13 +377,13 @@ SELECT
       STRUCT(
         JSON_VALUE(data, '$.work.customColumns.column_1655996461265') as column_1655996461265,
         ARRAY(
-          SELECT   STRING(column_1644862416222__rows) as column_1644862416222
+          SELECT   STRING(column_1644862416222__rows.column_1644862416222) as column_1644862416222
           FROM UNNEST(
               JSON_QUERY_ARRAY(data, '$.work.customColumns.column_1644862416222')
           ) AS column_1644862416222__rows
         ) AS column_1644862416222,
         ARRAY(
-          SELECT   STRING(column_1644861659664__rows) as column_1644861659664
+          SELECT   STRING(column_1644861659664__rows.column_1644861659664) as column_1644861659664
           FROM UNNEST(
               JSON_QUERY_ARRAY(data, '$.work.customColumns.column_1644861659664')
           ) AS column_1644861659664__rows
