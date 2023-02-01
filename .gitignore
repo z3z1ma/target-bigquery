@@ -138,3 +138,6 @@ dmypy.json
 # Test plugins
 plugins/
 output/
+
+# IDE
+.idea/

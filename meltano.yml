@@ -46,4 +46,3 @@ plugins:
       dataset: raw_testing
       batch_size: 500
       timeout: 300
-      bucket: ${GCS_BUCKET}

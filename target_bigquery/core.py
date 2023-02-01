@@ -127,9 +127,13 @@ class BigQueryTable:
             setattr(table, option, value)
         return table
 
-    def as_dataset(self) -> bigquery.Dataset:
-        """Returns a Dataset instance for this table."""
-        return bigquery.Dataset(self.as_dataset_ref())
+    def as_dataset(self, **kwargs) -> bigquery.Dataset:
+        """Returns a Dataset instance for this dataset."""
+        dataset = bigquery.Dataset(self.as_dataset_ref())
+        config = {**self.default_dataset_options(), **kwargs}
+        for option, value in config.items():
+            setattr(dataset, option, value)
+        return dataset
 
     def create_table(
         self,
@@ -143,13 +147,22 @@ class BigQueryTable:
         table in a single method call. It is idempotent and will not create
         a new table if one already exists."""
         if not hasattr(self, "_dataset"):
-            self._dataset = client.create_dataset(self.as_dataset(), exists_ok=True)
+            try:
+                self._dataset = client.create_dataset(self.as_dataset(**kwargs['dataset']), exists_ok=False)
+            except Conflict:
+                dataset = client.get_dataset(self.as_dataset(**kwargs['dataset']))
+                if dataset.location != kwargs['dataset']['location']:
+                    raise Exception(f"Location of existing dataset {dataset.dataset_id} ({dataset.location})"
+                                    f" does not match specified location: {kwargs['dataset']['location']}")
+                else:
+                    self._dataset = dataset
         if not hasattr(self, "_table"):
             try:
                 self._table = client.create_table(
                     self.as_table(
-                        apply_transforms and self.ingestion_strategy is not IngestionStrategy.FIXED,
-                        **kwargs,
+                        apply_transforms
+                        and self.ingestion_strategy != IngestionStrategy.FIXED,
+                        **kwargs['table']
                     )
                 )
             except Conflict:
@@ -176,6 +189,13 @@ class BigQueryTable:
             "time_partitioning": TimePartitioning(
                 type_=TimePartitioningType.MONTH, field="_sdc_batched_at"
             ),
+        }
+
+    @staticmethod
+    def default_dataset_options() -> Dict[str, Any]:
+        """Returns the default dataset options for this dataset."""
+        return {
+            "location": "US"
         }
 
     def __hash__(self) -> int:
@@ -316,15 +336,17 @@ class BaseBigQuerySink(BatchSink):
     )
     def create_target(self, key_properties: Optional[List[str]] = None) -> None:
         """Create the table in BigQuery."""
-        kwargs = {}
+        kwargs = {"table": {}, "dataset": {}}
         if key_properties and self.config.get("cluster_on_key_properties", False):
-            kwargs["clustering_fields"] = key_properties[:4]
+            kwargs["table"]["clustering_fields"] = key_properties[:4]
         partition_grain: str = self.config.get("partition_granularity")
         if partition_grain:
-            kwargs["time_partitioning"] = TimePartitioning(
+            kwargs["table"]["time_partitioning"] = TimePartitioning(
                 type_=PARTITION_STRATEGY[partition_grain.upper()],
                 field="_sdc_batched_at",
             )
+        location: str = self.config.get("location", BigQueryTable.default_dataset_options()["location"])
+        kwargs["dataset"]["location"] = location
         self.table.create_table(self.client, self.apply_transforms, **kwargs)
         if self.generate_view:
             self.client.query(

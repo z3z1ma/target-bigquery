@@ -23,6 +23,7 @@ from queue import Empty
 from typing import TYPE_CHECKING, Any, Dict, List, NamedTuple, Optional, Type, Union
 
 import orjson
+from google.api_core.exceptions import Conflict
 from google.cloud import bigquery, storage
 
 from target_bigquery.constants import DEFAULT_BUCKET_PATH
@@ -33,7 +34,7 @@ from target_bigquery.core import (
     Denormalized,
     ParType,
     bigquery_client_factory,
-    gcs_client_factory,
+    gcs_client_factory, BigQueryCredentials,
 )
 
 if TYPE_CHECKING:
@@ -54,6 +55,7 @@ class Job(NamedTuple):
 class GcsStagingWorker(BaseWorker):
     def run(self):
         client: storage.Client = gcs_client_factory(self.credentials)
+        # client.
         while True:
             try:
                 job: Optional[Job] = self.queue.get(timeout=30.0)
@@ -108,7 +110,15 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
         key_properties: Optional[List[str]],
     ) -> None:
         super().__init__(target, stream_name, schema, key_properties)
-        self.bucket = self.config["bucket"]
+        self.bucket_name = self.config["bucket"]
+        self._credentials = BigQueryCredentials(
+            self.config.get("credentials_path"),
+            self.config.get("credentials_json"),
+            self.config["project"],
+        )
+        self.client = gcs_client_factory(self._credentials)
+        self.create_bucket_if_not_exists()
+        self.buffer = Compressor()
         self.buffer = Compressor()
         self.gcs_notification, self.gcs_notifier = target.pipe_cls(False)
         self.uris: List[str] = []
@@ -142,7 +152,7 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
                 batch_id=context["batch_id"],
                 table=self.table.name,
                 dataset=self.table.dataset,
-                bucket=self.bucket,
+                bucket=self.bucket_name,
                 gcs_notifier=self.gcs_notifier,
             ),
         )
@@ -168,6 +178,52 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
             self.logger.info("No data to load")
         super().clean_up()
 
+    def as_bucket(self, **kwargs) -> storage.Bucket:
+        """Returns a Bucket instance for this GCS specification."""
+        bucket = storage.Bucket(client=self.client, name=self.bucket_name)
+        config = {**self.default_bucket_options(), **kwargs}
+        for option, value in config.items():
+            if option != "location":
+                setattr(bucket, option, value)
+        return bucket
+
+    def create_bucket_if_not_exists(self) -> storage.Bucket:
+        """Creates a cloud storage bucket.
+
+        This is idempotent and will not create
+        a new GCS bucket if one already exists."""
+        kwargs = {}
+        storage_class: str = self.config.get("storage_class")
+        if storage_class:
+            kwargs["storage_class"] = storage_class
+        location: str = self.config.get("location", self.default_bucket_options()["location"])
+        kwargs["location"] = location
+
+        if not hasattr(self, "_gcs_bucket"):
+            try:
+                self._gcs_bucket = self.client.create_bucket(
+                    self.as_bucket(),
+                    location=location
+                )
+            except Conflict:
+                gcs_bucket = self.client.get_bucket(self.as_bucket())
+                if gcs_bucket.location.lower() != location:
+                    raise Exception(f"Location of existing GCS bucket {self.bucket_name} "
+                                    f"({gcs_bucket.location.lower()}) does not match specified location: {location}")
+                else:
+                    self._gcs_bucket = gcs_bucket
+        else:
+            # Wait for eventual consistency
+            time.sleep(5)
+        return self._gcs_bucket
+
+    @staticmethod
+    def default_bucket_options() -> Dict[str, str]:
+        return {
+            "storage_class": "STANDARD",
+            "location": "US"
+        }
+
 
 class BigQueryGcsStagingDenormalizedSink(Denormalized, BigQueryGcsStagingSink):
     @property
@@ -182,6 +238,6 @@ class BigQueryGcsStagingDenormalizedSink(Denormalized, BigQueryGcsStagingSink):
             "ignore_unknown_values": True,
         }
 
-    # Defer schema evolution the the write disposition
+    # Defer schema evolution to the write disposition
     def evolve_schema(self: BaseBigQuerySink) -> None:
         pass
