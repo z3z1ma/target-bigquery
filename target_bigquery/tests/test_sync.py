@@ -33,7 +33,6 @@ def test_basic_sync(method):
         "denormalized": False,
         "generate_view": False,
         "batch_size": 2,  # force multiple batches
-        "options": {"threaded": True}
     }
 
     table_name = OPTS["method"]
@@ -104,9 +103,6 @@ def test_basic_denorm_sync(method):
         "denormalized": True,
         "generate_view": False,
         "batch_size": 2,  # force multiple batches
-        "options": {
-            "threaded": True,
-        },
     }
 
     table_name = OPTS["method"]

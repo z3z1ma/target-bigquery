@@ -72,8 +72,8 @@ class TargetBigQuery(Target):
         th.Property(
             "location",
             th.StringType,
-            description="The target dataset location to materialize data into.",
-            default="US"
+            description="The target dataset/bucket location to materialize data into.",
+            default="US",
         ),
         th.Property(
             "batch_size",

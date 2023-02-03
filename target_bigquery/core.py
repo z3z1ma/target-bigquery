@@ -24,6 +24,7 @@ except ImportError:
     from functools import lru_cache as cache
 
 from contextlib import contextmanager
+from copy import copy
 from dataclasses import dataclass, field
 from enum import Enum
 from io import BytesIO
@@ -148,21 +149,24 @@ class BigQueryTable:
         a new table if one already exists."""
         if not hasattr(self, "_dataset"):
             try:
-                self._dataset = client.create_dataset(self.as_dataset(**kwargs['dataset']), exists_ok=False)
+                self._dataset = client.create_dataset(
+                    self.as_dataset(**kwargs["dataset"]), exists_ok=False
+                )
             except Conflict:
-                dataset = client.get_dataset(self.as_dataset(**kwargs['dataset']))
-                if dataset.location != kwargs['dataset']['location']:
-                    raise Exception(f"Location of existing dataset {dataset.dataset_id} ({dataset.location})"
-                                    f" does not match specified location: {kwargs['dataset']['location']}")
+                dataset = client.get_dataset(self.as_dataset(**kwargs["dataset"]))
+                if dataset.location != kwargs["dataset"]["location"]:
+                    raise Exception(
+                        f"Location of existing dataset {dataset.dataset_id} ({dataset.location}) "
+                        f"does not match specified location: {kwargs['dataset']['location']}"
+                    )
                 else:
                     self._dataset = dataset
         if not hasattr(self, "_table"):
             try:
                 self._table = client.create_table(
                     self.as_table(
-                        apply_transforms
-                        and self.ingestion_strategy != IngestionStrategy.FIXED,
-                        **kwargs['table']
+                        apply_transforms and self.ingestion_strategy != IngestionStrategy.FIXED,
+                        **kwargs["table"],
                     )
                 )
             except Conflict:
@@ -194,9 +198,7 @@ class BigQueryTable:
     @staticmethod
     def default_dataset_options() -> Dict[str, Any]:
         """Returns the default dataset options for this dataset."""
-        return {
-            "location": "US"
-        }
+        return {"location": "US"}
 
     def __hash__(self) -> int:
         return hash((self.name, self.dataset, self.project, json.dumps(self.jsonschema)))
@@ -269,13 +271,12 @@ class BaseBigQuerySink(BatchSink):
         self.create_target(key_properties=key_properties)
         self.update_schema()
         self.merge_target: Optional[BigQueryTable] = None
+        self.overwrite_target: Optional[BigQueryTable] = None
         if (
             key_properties
             and self.ingestion_strategy is IngestionStrategy.DENORMALIZED
             and self.config.get("dedupe")
         ):
-            from copy import copy
-
             self.merge_target = copy(self.table)
             self.table = BigQueryTable(name=f"{self.table_name}__{int(time.time())}", **opts)
             self.table.create_table(
@@ -284,6 +285,16 @@ class BaseBigQuerySink(BatchSink):
                 expires=datetime.datetime.now() + datetime.timedelta(days=1),
             )
             time.sleep(2.5)  # Wait for eventual consistency
+        elif self.config.get("overwrite"):
+            self.overwrite_target = copy(self.table)
+            self.table = BigQueryTable(name=f"{self.table_name}__{int(time.time())}", **opts)
+            self.table.create_table(
+                self.client,
+                self.apply_transforms,
+                expires=datetime.datetime.now() + datetime.timedelta(days=1),
+            )
+            time.sleep(2.5)  # Wait for eventual consistency
+
         self.global_par_typ = target.par_typ
         self.global_queue = target.queue
         self.increment_jobs_enqueued = target.increment_jobs_enqueued
@@ -337,6 +348,7 @@ class BaseBigQuerySink(BatchSink):
     def create_target(self, key_properties: Optional[List[str]] = None) -> None:
         """Create the table in BigQuery."""
         kwargs = {"table": {}, "dataset": {}}
+        # Table opts
         if key_properties and self.config.get("cluster_on_key_properties", False):
             kwargs["table"]["clustering_fields"] = key_properties[:4]
         partition_grain: str = self.config.get("partition_granularity")
@@ -345,8 +357,12 @@ class BaseBigQuerySink(BatchSink):
                 type_=PARTITION_STRATEGY[partition_grain.upper()],
                 field="_sdc_batched_at",
             )
-        location: str = self.config.get("location", BigQueryTable.default_dataset_options()["location"])
+        # Dataset opts
+        location: str = self.config.get(
+            "location", BigQueryTable.default_dataset_options()["location"]
+        )
         kwargs["dataset"]["location"] = location
+        # Create the table
         self.table.create_table(self.client, self.apply_transforms, **kwargs)
         if self.generate_view:
             self.client.query(
@@ -404,6 +420,17 @@ class BaseBigQuerySink(BatchSink):
                 f"WHEN MATCHED THEN {update_clause} "
                 f"WHEN NOT MATCHED THEN {insert_clause}; "
                 f"DROP TABLE IF EXISTS {self.table};"
+            ).result()
+            self.table = self.merge_target
+            self.merge_target = None
+        elif self.overwrite_target is not None:
+            # We must overwrite the target table with the temp table.
+            # Do it in a transaction to avoid partial writes.
+            target = self.overwrite_target.as_table()
+            self.client.query(
+                f"DROP TABLE IF EXISTS {self.overwrite_target}; "
+                f"CREATE TABLE {self.overwrite_target} LIKE {self.table} AS "
+                f"SELECT * FROM {self.table};"
             ).result()
             self.table = self.merge_target
             self.merge_target = None

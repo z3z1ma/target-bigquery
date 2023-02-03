@@ -30,11 +30,12 @@ from target_bigquery.constants import DEFAULT_BUCKET_PATH
 from target_bigquery.core import (
     BaseBigQuerySink,
     BaseWorker,
+    BigQueryCredentials,
     Compressor,
     Denormalized,
     ParType,
     bigquery_client_factory,
-    gcs_client_factory, BigQueryCredentials,
+    gcs_client_factory,
 )
 
 if TYPE_CHECKING:
@@ -197,19 +198,18 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
         if storage_class:
             kwargs["storage_class"] = storage_class
         location: str = self.config.get("location", self.default_bucket_options()["location"])
-        kwargs["location"] = location
 
         if not hasattr(self, "_gcs_bucket"):
             try:
-                self._gcs_bucket = self.client.create_bucket(
-                    self.as_bucket(),
-                    location=location
-                )
+                self._gcs_bucket = self.client.create_bucket(self.as_bucket(), location=location)
             except Conflict:
                 gcs_bucket = self.client.get_bucket(self.as_bucket())
-                if gcs_bucket.location.lower() != location:
-                    raise Exception(f"Location of existing GCS bucket {self.bucket_name} "
-                                    f"({gcs_bucket.location.lower()}) does not match specified location: {location}")
+                if gcs_bucket.location.lower() != location.lower():
+                    raise Exception(
+                        "Location of existing GCS bucket "
+                        f"{self.bucket_name} ({gcs_bucket.location.lower()}) does not match "
+                        f"specified location: {location}"
+                    )
                 else:
                     self._gcs_bucket = gcs_bucket
         else:
@@ -219,10 +219,7 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
 
     @staticmethod
     def default_bucket_options() -> Dict[str, str]:
-        return {
-            "storage_class": "STANDARD",
-            "location": "US"
-        }
+        return {"storage_class": "STANDARD", "location": "US"}
 
 
 class BigQueryGcsStagingDenormalizedSink(Denormalized, BigQueryGcsStagingSink):
