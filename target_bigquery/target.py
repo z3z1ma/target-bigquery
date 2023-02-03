@@ -70,6 +70,12 @@ class TargetBigQuery(Target):
             required=True,
         ),
         th.Property(
+            "location",
+            th.StringType,
+            description="The target dataset location to materialize data into.",
+            default="US"
+        ),
+        th.Property(
             "batch_size",
             th.IntegerType,
             description="The maximum number of rows to send in a single batch or commit.",
