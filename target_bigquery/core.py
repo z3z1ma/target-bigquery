@@ -286,7 +286,12 @@ class BaseBigQuerySink(BatchSink):
             self.table.create_table(
                 self.client,
                 self.apply_transforms,
-                expires=datetime.datetime.now() + datetime.timedelta(days=1),
+                **{
+                    "table": {
+                        "expires": datetime.datetime.now() + datetime.timedelta(days=1),
+                    },
+                    "dataset": {},
+                },
             )
             time.sleep(2.5)  # Wait for eventual consistency
         elif self._is_overwrite_candidate():
@@ -295,7 +300,12 @@ class BaseBigQuerySink(BatchSink):
             self.table.create_table(
                 self.client,
                 self.apply_transforms,
-                expires=datetime.datetime.now() + datetime.timedelta(days=1),
+                **{
+                    "table": {
+                        "expires": datetime.datetime.now() + datetime.timedelta(days=1),
+                    },
+                    "dataset": {},
+                },
             )
             time.sleep(2.5)  # Wait for eventual consistency
 
