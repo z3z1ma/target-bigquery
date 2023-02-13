@@ -27,6 +27,7 @@ from contextlib import contextmanager
 from copy import copy
 from dataclasses import dataclass, field
 from enum import Enum
+from fnmatch import fnmatch
 from io import BytesIO
 from multiprocessing import Process, Queue
 from multiprocessing.connection import Connection
@@ -272,10 +273,13 @@ class BaseBigQuerySink(BatchSink):
         self.update_schema()
         self.merge_target: Optional[BigQueryTable] = None
         self.overwrite_target: Optional[BigQueryTable] = None
+        # In absence of dedupe or overwrite candidacy, we append to the target table directly
+        # If the stream is marked for one of these strategies, we create a temporary table instead
+        # and merge or overwrite the target table with the temporary table after the ingest.
         if (
             key_properties
             and self.ingestion_strategy is IngestionStrategy.DENORMALIZED
-            and self.config.get("dedupe")
+            and self._is_upsert_candidate()
         ):
             self.merge_target = copy(self.table)
             self.table = BigQueryTable(name=f"{self.table_name}__{int(time.time())}", **opts)
@@ -285,7 +289,7 @@ class BaseBigQuerySink(BatchSink):
                 expires=datetime.datetime.now() + datetime.timedelta(days=1),
             )
             time.sleep(2.5)  # Wait for eventual consistency
-        elif self.config.get("overwrite"):
+        elif self._is_overwrite_candidate():
             self.overwrite_target = copy(self.table)
             self.table = BigQueryTable(name=f"{self.table_name}__{int(time.time())}", **opts)
             self.table.create_table(
@@ -298,6 +302,57 @@ class BaseBigQuerySink(BatchSink):
         self.global_par_typ = target.par_typ
         self.global_queue = target.queue
         self.increment_jobs_enqueued = target.increment_jobs_enqueued
+
+    def _is_upsert_candidate(self) -> bool:
+        """Determine if this stream is an upsert candidate based on user configuration."""
+        upsert_selection = self.config.get("upsert", False)
+        upsert_candidate = False
+        if isinstance(upsert_selection, list):
+            selection: str
+            for selection in upsert_selection:
+                invert = selection.startswith("!")
+                if invert:
+                    selection = selection[1:]
+                if fnmatch(self.stream_name, selection):
+                    upsert_candidate = True ^ invert
+        elif upsert_selection:
+            upsert_candidate = True
+        return upsert_candidate
+
+    def _is_overwrite_candidate(self) -> bool:
+        """Determine if this stream is an overwrite candidate based on user configuration."""
+        overwrite_selection = self.config.get("overwrite", False)
+        overwrite_candidate = False
+        if isinstance(overwrite_selection, list):
+            selection: str
+            for selection in overwrite_selection:
+                invert = selection.startswith("!")
+                if invert:
+                    selection = selection[1:]
+                if fnmatch(self.stream_name, selection):
+                    overwrite_candidate = True ^ invert
+        elif overwrite_selection:
+            overwrite_candidate = True
+        return overwrite_candidate
+
+    def _is_dedupe_before_upsert_candidate(self) -> bool:
+        """Determine if this stream is a dedupe before upsert candidate based on user configuration.
+        """
+        # TODO: we can enable this for `overwrite` too if we want but the purpose would
+        # be less for functional reasons (merge constraints) and more for convenience
+        dedupe_before_upsert_selection = self.config.get("dedupe_before_upsert", False)
+        dedupe_before_upsert_candidate = False
+        if isinstance(dedupe_before_upsert_selection, list):
+            selection: str
+            for selection in dedupe_before_upsert_selection:
+                invert = selection.startswith("!")
+                if invert:
+                    selection = selection[1:]
+                if fnmatch(self.stream_name, selection):
+                    dedupe_before_upsert_candidate = True ^ invert
+        elif dedupe_before_upsert_selection:
+            dedupe_before_upsert_candidate = True
+        return dedupe_before_upsert_candidate
 
     @property
     def table_name(self) -> str:
@@ -394,7 +449,7 @@ class BaseBigQuerySink(BatchSink):
             target = self.merge_target.as_table()
             date_columns = ["_sdc_extracted_at", "_sdc_received_at"]
             tmp, ctas_tmp = None, "SELECT 1 AS _no_op"
-            if self.config.get("non_unique_key_properties", True):
+            if self._is_dedupe_before_upsert_candidate():
                 # We can't use MERGE with a non-unique key, so we need to dedupe the temp table into
                 # a _SESSION scoped intermediate table.
                 tmp = f"{target.name}__tmp"
@@ -431,6 +486,7 @@ class BaseBigQuerySink(BatchSink):
                 f"DROP TABLE IF EXISTS {self.overwrite_target}; "
                 f"CREATE TABLE {self.overwrite_target} LIKE {self.table} AS "
                 f"SELECT * FROM {self.table};"
+                f"DROP TABLE IF EXISTS {self.table};"
             ).result()
             self.table = self.merge_target
             self.merge_target = None

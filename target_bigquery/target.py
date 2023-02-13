@@ -93,8 +93,7 @@ class TargetBigQuery(Target):
             description=(
                 "Determines whether to denormalize the data before writing to BigQuery. A false"
                 " value will write data using a fixed JSON column based schema, while a true value"
-                " will write data using a dynamic schema derived from the tap. Denormalization is"
-                " only supported for the batch_job, streaming_insert, and gcs_stage methods."
+                " will write data using a dynamic schema derived from the tap."
             ),
             default=False,
         ),
@@ -152,7 +151,7 @@ class TargetBigQuery(Target):
             default=False,
             description=(
                 "Determines whether to cluster on the key properties from the tap. Defaults to"
-                " false."
+                " false. When false, clustering will be based on _sdc_batched_at instead."
             ),
         ),
         th.Property(
@@ -222,9 +221,76 @@ class TargetBigQuery(Target):
                     required=False,
                     description=(
                         "By default, each sink type has a preconfigured max worker limit. This sets"
-                        " an override for maximum number of workers per stream."
+                        " an override for maximum number of workers."
                     ),
                 ),
+            ),
+            description=(
+                "Accepts a JSON object of options with boolean values to enable them. These are"
+                " more advanced options that shouldn't need tweaking but are here for flexibility."
+            ),
+        ),
+        th.Property(
+            "upsert",
+            th.CustomType(
+                {
+                    "anyOf": [
+                        {"type": "boolean"},
+                        {"type": "array", "items": {"type": "string"}},
+                    ]
+                }
+            ),
+            default=False,
+            description=(
+                "Determines if we should upsert. Defaults to false. A value of true will write to a"
+                " temporary table and then merge into the target table (upsert). This requires the"
+                " target table to be unique on the key properties. A value of false will write to"
+                " the target table directly (append). A value of an array of strings will evaluate"
+                " the strings in order using fnmatch. At the end of the array, the value of the"
+                " last match will be used. If not matched, the default value is false (append)."
+            ),
+        ),
+        th.Property(
+            "overwrite",
+            th.CustomType(
+                {
+                    "anyOf": [
+                        {"type": "boolean"},
+                        {"type": "array", "items": {"type": "string"}},
+                    ]
+                }
+            ),
+            default=False,
+            description=(
+                "Determines if the target table should be overwritten on load. Defaults to false. A"
+                " value of true will write to a temporary table and then overwrite the target table"
+                " inside a transaction (so it is safe). A value of false will write to the target"
+                " table directly (append). A value of an array of strings will evaluate the strings"
+                " in order using fnmatch. At the end of the array, the value of the last match will"
+                " be used. If not matched, the default value is false. This is mutually exclusive"
+                " with the `upsert` option. If both are set, `upsert` will take precedence."
+            ),
+        ),
+        th.Property(
+            "dedupe_before_upsert",
+            th.CustomType(
+                {
+                    "anyOf": [
+                        {"type": "boolean"},
+                        {"type": "array", "items": {"type": "string"}},
+                    ]
+                }
+            ),
+            default=False,
+            description=(
+                "This option is only used if `upsert` is enabled for a stream. The selection"
+                " criteria for the stream's candidacy is the same as upsert. If the stream is"
+                " marked for deduping before upsert, we will create a _session scoped temporary"
+                " table during the merge transaction to dedupe the ingested records. This is useful"
+                " for streams that are not unique on the key properties during an ingest but are"
+                " unique in the source system. Data lake ingestion is often a good example of this"
+                " where the same unique record may exist in the lake at different points in time"
+                " from different extracts."
             ),
         ),
     ).to_dict()
