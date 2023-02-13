@@ -10,7 +10,30 @@
 
 `target-bigquery` is a Singer target for BigQuery.
 
-It is the most versatile target for BigQuery. Extremely performant, resource efficient, and fast in all configurations enabling over 8 different ingestion patterns. Denormalized variants indicate data is unpacked during load with a resultant schema in BigQuery based on the tap schema. Non-denormalized means we have a fixed schema which loads all data into an unstructured `JSON` column. They are both useful patterns. The latter allowing BigQuery to work with schemaless or rapidly changing sources such as MongoDB instantly, while the former is more performant and convenient to start modeling quickly.
+It is the most versatile target for BigQuery. Extremely performant, resource efficient, and fast in all configurations enabling 20 different ingestion patterns. Denormalized variants indicate data is unpacked during load with a resultant schema in BigQuery based on the tap schema. Non-denormalized means we have a fixed schema which loads all data into an unstructured `JSON` column. They are both useful patterns. The latter allowing BigQuery to work with schemaless or rapidly changing sources such as MongoDB instantly, while the former is more performant and convenient to start modeling quickly.
+
+**Patterns** 🛠 (more details below)
+
+- Batch Job, Denormalized, Overwrite
+- Batch Job, Denormalized, Upsert
+- Batch Job, Denormalized, Append
+- Batch Job, Fixed Schema, Overwrite
+- Batch Job, Fixed Schema, Append
+- GCS Staging Data Lake, Denormalized, Overwrite
+- GCS Staging Data Lake, Denormalized, Upsert
+- GCS Staging Data Lake, Denormalized, Append
+- GCS Staging Data Lake, Fixed Schema, Overwrite
+- GCS Staging Data Lake, Fixed Schema, Append
+- Storage Write API, Denormalized, Overwrite
+- Storage Write API, Denormalized, Upsert
+- Storage Write API, Denormalized, Append
+- Storage Write API, Fixed Schema, Overwrite
+- Storage Write API, Fixed Schema, Append
+- Legacy Streaming API, Denormalized, Overwrite
+- Legacy Streaming API, Denormalized, Upsert
+- Legacy Streaming API, Denormalized, Append
+- Legacy Streaming API, Fixed Schema, Overwrite
+- Legacy Streaming API, Fixed Schema, Append
 
 ## Installation 📈
 
@@ -84,11 +107,14 @@ First a valid example to give context to the below including a nested key exampl
 | location                                           |  False   |        US         | The target dataset location to materialize data into. Applies also to the GCS bucket if using `gcs_stage` load method.                                                                                                                                                                                                                            |
 | batch_size                                         |  False   |        500        | The maximum number of rows to send in a single batch to the worker. This should be configured based on load method. For `storage_write_api` and `streaming_insert` it should be `<=500`, for the LoadJob sinks, it can be much higher, ie `>100,000`                                                                                              |
 | timeout                                            |  False   |        600        | Default timeout for batch_job and gcs_stage derived LoadJobs.                                                                                                                                                                                                                                                                                     |
-| denormalized                                       |  False   |         0         | Determines whether to denormalize the data before writing to BigQuery. A false value will write data using a fixed JSON column based schema, while a true value will write data using a dynamic schema derived from the tap.                                                                                                                      |
+| denormalized                                       |  False   |         False     | Determines whether to denormalize the data before writing to BigQuery. A false value will write data using a fixed JSON column based schema, while a true value will write data using a dynamic schema derived from the tap.                                                                                                                      |
 | method                                             |   True   | storage_write_api | The method to use for writing to BigQuery. Must be one of `batch_job`, `storage_write_api`, `gcs_stage`, `streaming_insert`                                                                                                                                                                                                                       |
-| generate_view                                      |  False   |         0         | Determines whether to generate a view based on the SCHEMA message parsed from the tap. Only valid if denormalized=false meaning you are using the fixed JSON column based schema.                                                                                                                                                                 |
+| generate_view                                      |  False   |         False     | Determines whether to generate a view based on the SCHEMA message parsed from the tap. Only valid if denormalized=false meaning you are using the fixed JSON column based schema.                                                                                                                                                                 |
+| upsert                   | False    |   False | Determines if we should upsert. Defaults to false. A value of true will write to a temporary table and then merge into the target table (upsert). This requires the target table to be unique on the key properties. A value of false will write to the target table directly (append). A value of an array of strings will evaluate the strings in order using fnmatch. At the end of the array, the value of the last match will be used. If not matched, the default value is false (append). |
+| overwrite                | False    |   False | Determines if the target table should be overwritten on load. Defaults to false. A value of true will write to a temporary table and then overwrite the target table inside a transaction (so it is safe). A value of false will write to the target table directly (append). A value of an array of strings will evaluate the strings in order using fnmatch. At the end of the array, the value of the last match will be used. If not matched, the default value is false. This is mutually exclusive with the `upsert` option. If both are set, `upsert` will take precedence. |
+| dedupe_before_upsert     | False    |   False | This option is only used if `upsert` is enabled for a stream. The selection criteria for the stream's candidacy is the same as upsert. If the stream is marked for deduping before upsert, we will create a _session scoped temporary table during the merge transaction to dedupe the ingested records. This is useful for streams that are not unique on the key properties during an ingest but are unique in the source system. Data lake ingestion is often a good example of this where the same unique record may exist in the lake at different points in time from different extracts. |
 | bucket                                             |  False   |       None        | The GCS bucket to use for staging data. Only used if method is gcs_stage.                                                                                                                                                                                                                                                                         |
-| cluster_on_key_properties                          |  False   |       False       | Indicates if we should use the key_properties from the tap to cluster our table. By default, tables created by this target cluster on `_sdc_batched_at`.                                                                                                                                                                                          |
+| cluster_on_key_properties| False    |       0 | Determines whether to cluster on the key properties from the tap. Defaults to false. When false, clustering will be based on _sdc_batched_at instead. |
 | partition_granularity                              |  False   |      "month"      | Indicates the granularity of the created table partitioning scheme which is based on `_sdc_batched_at`. By default the granularity is monthly. Must be one of: "hour", "day", "month", "year".                                                                                                                                                    |
 | column_name_transforms.lower                       |  False   |       None        | Lowercase column names.                                                                                                                                                                                                                                                                                                                           |
 | column_name_transforms.quote                       |  False   |       None        | Quote column names in any generated DDL.                                                                                                                                                                                                                                                                                                          |
