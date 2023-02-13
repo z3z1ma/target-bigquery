@@ -290,7 +290,11 @@ class BaseBigQuerySink(BatchSink):
                     "table": {
                         "expires": datetime.datetime.now() + datetime.timedelta(days=1),
                     },
-                    "dataset": {},
+                    "dataset": {
+                        "location": self.config.get(
+                            "location", BigQueryTable.default_dataset_options()["location"]
+                        )
+                    },
                 },
             )
             time.sleep(2.5)  # Wait for eventual consistency
@@ -304,7 +308,11 @@ class BaseBigQuerySink(BatchSink):
                     "table": {
                         "expires": datetime.datetime.now() + datetime.timedelta(days=1),
                     },
-                    "dataset": {},
+                    "dataset": {
+                        "location": self.config.get(
+                            "location", BigQueryTable.default_dataset_options()["location"]
+                        )
+                    },
                 },
             )
             time.sleep(2.5)  # Wait for eventual consistency
