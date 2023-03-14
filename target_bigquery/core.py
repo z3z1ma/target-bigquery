@@ -11,6 +11,7 @@
 import datetime
 import gzip
 import json
+import logging
 import mmap
 import re
 import shutil
@@ -226,12 +227,14 @@ class BaseWorker(ABC):
         queue: "Queue",
         credentials: BigQueryCredentials,
         job_notifier: "Connection",
+        logger: logging.Logger
     ):
         super().__init__()
         self.ext_id: str = ext_id
         self.queue: "Queue" = queue
         self.credentials: BigQueryCredentials = credentials
         self.job_notifier: "Connection" = job_notifier
+        self.logger: logging.logger = logger
 
     @abstractmethod
     def run(self) -> None:
