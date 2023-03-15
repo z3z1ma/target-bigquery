@@ -318,6 +318,7 @@ class TargetBigQuery(Target):
                 queue=self.queue,
                 credentials=self._credentials,
                 job_notifier=self.job_notifier,
+                logger=self.logger,
             )
 
         self.worker_factory = worker_factory
