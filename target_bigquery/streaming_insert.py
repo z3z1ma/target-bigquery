@@ -31,11 +31,15 @@ class Job(NamedTuple):
 
     table: bigquery.TableReference
     records: List[Dict[str, Any]]
+    attempt: int = 1
 
 
 class StreamingInsertWorker(BaseWorker):
-    def run(self):
-        # A hack since we can't override the default json encoder...
+    """Worker that streams data into BigQuery."""
+
+    def run(self) -> None:
+        """Run the worker."""
+        # A monkey patch since we can't override the default json encoder...
         _http.json = orjson
         client: bigquery.Client = bigquery_client_factory(self.credentials)
         while True:
@@ -56,8 +60,20 @@ class StreamingInsertWorker(BaseWorker):
                     reraise=True,
                 )(table=job.table, json_rows=job.records)
             except Exception as exc:
-                self.queue.put(job)
-                raise exc
+                job.attempt += 1
+                if job.attempt > 3:
+                    # TODO: add a metric for this + a DLQ & wrap exception type
+                    self.error_notifier.send((exc, self.serialize_exception(exc)))
+                    raise
+                else:
+                    self.queue.put(job)
+            else:
+                self.job_notifier.send(True)
+                self.log_notifier.send(
+                    f"[{self.ext_id}] Inserted {len(job.records)} records into {job.table}"
+                )
+            finally:
+                self.queue.task_done()
 
 
 class StreamingInsertThreadWorker(StreamingInsertWorker, _Thread):

@@ -56,8 +56,7 @@ StreamComponents = Tuple[str, writer.AppendRowsStream, Dispatcher]
 
 
 def get_application_stream(client: BigQueryWriteClient, job: "Job") -> StreamComponents:
-    """Get an application created stream for the parent. This stream must be finalized and committed.
-    """
+    """Get an application created stream for the parent. This stream must be finalized and committed."""
     write_stream = types.WriteStream()
     write_stream.type_ = types.WriteStream.Type.PENDING
     write_stream = client.create_write_stream(parent=job.parent, write_stream=write_stream)
@@ -128,55 +127,93 @@ class Job(NamedTuple):
     template: types.AppendRowsRequest
     stream_notifier: Connection
     data: types.ProtoRows
+    offset: int = 0
+    attempts: int = 1
 
 
 class StorageWriteBatchWorker(BaseWorker):
+    """Worker process for the storage write API."""
+
     def __init__(self, *args, **kwargs):
+        """Initialize the worker process."""
         super().__init__(*args, **kwargs)
         self.get_stream_components = get_application_stream
         self.awaiting: List[writer.AppendRowsFuture] = []
+        self.cache: Dict[str, StreamComponents] = {}
+        self.max_errors_before_recycle = 5
 
     def run(self):
+        """Run the worker process."""
         client: BigQueryWriteClient = storage_client_factory(self.credentials)
-        cache: Dict[str, StreamComponents] = {}
-        offset = 0
         if os.getenv("TARGET_BIGQUERY_DEBUG", "false").lower() == "true":
             bidi_logger = logging.getLogger("google.api_core.bidi")
             bidi_logger.setLevel(logging.DEBUG)
         while True:
             try:
-                job: Optional[Job] = self.queue.get(timeout=60.0)
+                job: Optional[Job] = self.queue.get(timeout=30.0)
             except Empty:
                 break
             if job is None:
                 break
-            if job.parent not in cache:
-                cache[job.parent] = self.get_stream_components(client, job)
-            write_stream, append_rows_stream, dispatch = cast(StreamComponents, cache[job.parent])
+            if job.parent not in self.cache:
+                self.cache[job.parent] = self.get_stream_components(client, job)
+            write_stream, _, dispatch = cast(StreamComponents, self.cache[job.parent])
             try:
                 kwargs = {}
                 if write_stream.endswith("_default"):
                     kwargs["offset"] = None
                     kwargs["path"] = write_stream
                 else:
-                    kwargs["offset"] = offset
+                    kwargs["offset"] = job.offset
                 self.awaiting.append(dispatch(generate_request(job.data, **kwargs)))
             except Exception as exc:
-                self.wait(drain=True)
-                append_rows_stream.close()
-                self.queue.put(job)
-                raise exc
-            offset += len(job.data.serialized_rows)
-            if len(self.awaiting) > MAX_IN_FLIGHT:
-                self.wait()
+                job.attempts += 1
+                self.max_errors_before_recycle -= 1
+                if job.attempts > 3:
+                    # TODO: add a metric for this + a DLQ & wrap exception type
+                    self.error_notifier.send((exc, self.serialize_exception(exc)))
+                else:
+                    self.queue.put(job)
+                # Track errors and recycle the stream if we hit a threshold
+                # 1 bad payload 👆 is not indicative of a bad bidi stream as it _could_
+                # be a transient error or luck of the draw with the first payload.
+                # 5 worker-specific errors is a good threshold to recycle the stream
+                # and start fresh. This is an arbitrary number and can be adjusted.
+                if self.max_errors_before_recycle == 0:
+                    self.wait(drain=True)
+                    self.close_cached_streams()
+                    raise
+            else:
+                self.log_notifier.send(
+                    f"[{self.ext_id}] Sent {len(job.data.serialized_rows)} rows to {write_stream}"
+                    f" with offset {job.offset}."
+                )
+                if len(self.awaiting) > MAX_IN_FLIGHT:
+                    self.wait()
+            finally:
+                self.queue.task_done()
+        # Wait for all in-flight requests to complete after poison pill
         self.wait(drain=True)
-        for _, stream, _ in cache.values():
-            stream.close()
+        self.close_cached_streams()
+        self.log_notifier.send("Worker process exiting.")
+
+    def close_cached_streams(self) -> None:
+        """Close all cached streams."""
+        for _, stream, _ in self.cache.values():
+            try:
+                stream.close()
+            except Exception as exc:
+                self.error_notifier.send((exc, self.serialize_exception(exc)))
 
     def wait(self, drain: bool = False) -> None:
+        """Wait for in-flight requests to complete."""
         while self.awaiting and ((len(self.awaiting) > MAX_IN_FLIGHT // 2) or drain):
-            self.awaiting.pop(0).result()
-            self.job_notifier.send(True)
+            try:
+                self.awaiting.pop(0).result()
+            except Exception as exc:
+                self.error_notifier.send((exc, self.serialize_exception(exc)))
+            finally:
+                self.job_notifier.send(True)
 
 
 class StorageWriteStreamWorker(StorageWriteBatchWorker):
@@ -239,6 +276,7 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
         )
         self.stream_notification, self.stream_notifier = target.pipe_cls(False)
         self.template = generate_template(self.proto_schema)
+        self.offset = 0
 
     @property
     def proto_schema(self) -> Type[Message]:
@@ -268,9 +306,11 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
                 template=self.template,
                 data=self.proto_rows,
                 stream_notifier=self.stream_notifier,
+                offset=self.offset,
             )
         )
         self.increment_jobs_enqueued()
+        self.offset += len(self.proto_rows.serialized_rows)
 
     def commit_streams(self) -> None:
         while self.stream_notification.poll():

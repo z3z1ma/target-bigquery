@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "z3-target-bigquery"
-version = "0.6.2"
+version = "0.6.3"
 description = "z3-target-bigquery is a Singer target for BigQuery. It supports storage write, GCS, streaming, and batch load methods. Built with the Meltano SDK."
 authors = ["Alex Butler <butler.alex2010@gmail.com>"]
 keywords = ["ELT", "BigQuery"]

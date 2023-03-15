@@ -51,12 +51,15 @@ class Job(NamedTuple):
     dataset: str
     bucket: str
     gcs_notifier: Connection
+    attempt: int = 1
 
 
 class GcsStagingWorker(BaseWorker):
-    def run(self):
+    """Worker that uploads data to GCS."""
+
+    def run(self) -> None:
+        """Run the worker."""
         client: storage.Client = gcs_client_factory(self.credentials)
-        # client.
         while True:
             try:
                 job: Optional[Job] = self.queue.get(timeout=30.0)
@@ -85,9 +88,20 @@ class GcsStagingWorker(BaseWorker):
                     shutil.copyfileobj(BytesIO(job.buffer), fh)
                 job.gcs_notifier.send(path)
             except Exception as exc:
-                self.queue.put(job)
-                raise exc
-            self.job_notifier.send(True)
+                job.attempt += 1
+                if job.attempt > 3:
+                    # TODO: add a metric for this + a DLQ & wrap exception type
+                    self.error_notifier.send((exc, self.serialize_exception(exc)))
+                    raise
+                else:
+                    self.queue.put(job)
+            else:
+                self.job_notifier.send(True)
+                self.log_notifier.send(
+                    f"[{self.ext_id}] Successfully uploaded {len(job.buffer)} bytes to {path}"
+                )
+            finally:
+                self.queue.task_done()
 
 
 class GcsStagingThreadWorker(GcsStagingWorker, _Thread):
@@ -147,9 +161,11 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
         self.buffer.close()
         self.global_queue.put(
             Job(
-                buffer=self.buffer.getvalue()
-                if self.global_par_typ is ParType.PROCESS
-                else self.buffer.getbuffer(),
+                buffer=(
+                    self.buffer.getvalue()
+                    if self.global_par_typ is ParType.PROCESS
+                    else self.buffer.getbuffer()
+                ),
                 batch_id=context["batch_id"],
                 table=self.table.name,
                 dataset=self.table.dataset,

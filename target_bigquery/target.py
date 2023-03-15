@@ -82,6 +82,12 @@ class TargetBigQuery(Target):
             default=500,
         ),
         th.Property(
+            "fail_fast",
+            th.BooleanType,
+            description="Fail the entire load job if any row fails to insert.",
+            default=True,
+        ),
+        th.Property(
             "timeout",
             th.IntegerType,
             description="Default timeout for batch_job and gcs_stage derived LoadJobs.",
@@ -220,8 +226,8 @@ class TargetBigQuery(Target):
                     th.IntegerType,
                     required=False,
                     description=(
-                        "By default, each sink type has a preconfigured max worker limit. This sets"
-                        " an override for maximum number of workers."
+                        "By default, each sink type has a preconfigured max worker pool limit."
+                        " This sets an override for maximum number of workers in the pool."
                     ),
                 ),
             ),
@@ -306,6 +312,8 @@ class TargetBigQuery(Target):
         ) = self.get_parallelization_components()
         self.queue = self.queue_cls()
         self.job_notification, self.job_notifier = self.pipe_cls(False)
+        self.log_notification, self.log_notifier = self.pipe_cls(False)
+        self.error_notification, self.error_notifier = self.pipe_cls(False)
         self._credentials = BigQueryCredentials(
             self.config.get("credentials_path"),
             self.config.get("credentials_json"),
@@ -313,12 +321,16 @@ class TargetBigQuery(Target):
         )
 
         def worker_factory():
-            return self.get_sink_class().worker_cls_factory(self.proc_cls, self.config,)(
+            return self.get_sink_class().worker_cls_factory(
+                self.proc_cls,
+                self.config,
+            )(
                 ext_id=uuid.uuid4().hex,
                 queue=self.queue,
                 credentials=self._credentials,
                 job_notifier=self.job_notifier,
-                logger=self.logger,
+                log_notifier=self.log_notifier,
+                error_notifier=self.error_notifier,
             )
 
         self.worker_factory = worker_factory
@@ -460,12 +472,30 @@ class TargetBigQuery(Target):
         return existing_sink
 
     def drain_one(self, sink: Sink) -> None:  # type: ignore
-        """Drain a sink. Includes a hook to manage the worker pool."""
+        """Drain a sink. Includes a hook to manage the worker pool and notifications."""
         self.resize_worker_pool()
         while self.job_notification.poll():
             ext_id = self.job_notification.recv()
             self.worker_pings[ext_id] = time.time()
             self._jobs_enqueued -= 1
+        while self.log_notification.poll():
+            msg = self.log_notification.recv()
+            self.logger.info(msg)
+        if self.error_notification.poll():
+            e, msg = self.error_notification.recv()
+            if self.config.get("fail_fast", True):
+                self.logger.error(msg)
+                try:
+                    # Try to drain if we can. This is a best effort.
+                    # TODO: we should consider if draining here is the right thing
+                    # to do. It's _possible_ we increment the state message when
+                    # data is not actually written. Its _unlikely_ so the upside is
+                    # greater than the downside for now but will revisit this.
+                    self.logger.error("Draining all sinks and terminating.")
+                    self.drain_all(is_endofpipe=True)
+                except Exception:
+                    self.logger.error("Drain failed.")
+                raise RuntimeError(msg) from e
         super().drain_one(sink)
 
     def drain_all(self, is_endofpipe: bool = False) -> None:  # type: ignore

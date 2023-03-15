@@ -34,33 +34,31 @@ BASIC_SINGER_STREAM = """
     ["batch_job", "streaming_insert", "storage_write_api", "gcs_stage"],
     ids=["batch_job", "streaming_insert", "storage_write_api", "gcs_stage"],
 )
-@pytest.mark.parametrize(
-    'batch_mode',
-    [False, True],
-    ids=['no_batch_mode', 'batch_mode']
-)
+@pytest.mark.parametrize("batch_mode", [False, True], ids=["no_batch_mode", "batch_mode"])
 def test_basic_sync(method, batch_mode):
     OPTS = {
         "method": method,
         "denormalized": False,
         "generate_view": False,
         "batch_size": 2,  # force multiple batches
-        "options": {
-            'storage_write_batch_mode': batch_mode
-        }
+        "options": {"storage_write_batch_mode": batch_mode},
     }
 
     table_name = method
     if batch_mode:
-        table_name += '_batch'
+        table_name += "_batch"
     if OPTS["denormalized"]:
         table_name += "_denorm"
     if "PYTHON_VERSION" in os.environ:
         table_name += f"_py{os.environ['PYTHON_VERSION'].replace('.', '')}"
-    table_name_2 = table_name + '_2'
+    table_name_2 = table_name + "_2"
 
     singer_input = io.StringIO()
-    singer_input.write(BASIC_SINGER_STREAM.replace("{stream_name}", table_name).replace("{stream_name_2}", table_name_2))
+    singer_input.write(
+        BASIC_SINGER_STREAM.replace("{stream_name}", table_name).replace(
+            "{stream_name_2}", table_name_2
+        )
+    )
 
     singer_input.seek(0)
 

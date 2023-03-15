@@ -36,10 +36,14 @@ class Job(NamedTuple):
     table: str
     data: Union[bytes, memoryview]
     config: Dict[str, Any]
+    attempt: int = 1
 
 
 class BatchJobWorker(BaseWorker):
-    def run(self):
+    """Worker that loads data into BigQuery via LoadJobs."""
+
+    def run(self) -> None:
+        """Run the worker."""
         client: bigquery.Client = bigquery_client_factory(self.credentials)
         while True:
             try:
@@ -56,9 +60,20 @@ class BatchJobWorker(BaseWorker):
                     job_config=bigquery.LoadJobConfig(**job.config),
                 ).result()
             except Exception as exc:
-                self.queue.put(job)
-                raise exc
-            self.job_notifier.send(True)
+                job.attempt += 1
+                if job.attempt > 3:
+                    # TODO: add a metric for this + a DLQ & wrap exception type
+                    self.error_notifier.send((exc, self.serialize_exception(exc)))
+                    raise
+                else:
+                    self.queue.put(job)
+            else:
+                self.job_notifier.send(True)
+                self.log_notifier.send(
+                    f"[{self.ext_id}] Loaded {len(job.data)} bytes into {job.table}."
+                )
+            finally:
+                self.queue.task_done()
 
 
 class BatchJobThreadWorker(BatchJobWorker, _Thread):
@@ -100,9 +115,11 @@ class BigQueryBatchJobSink(BaseBigQuerySink):
         self.buffer.close()
         self.global_queue.put(
             Job(
-                data=self.buffer.getvalue()
-                if self.global_par_typ is ParType.PROCESS
-                else self.buffer.getbuffer(),
+                data=(
+                    self.buffer.getvalue()
+                    if self.global_par_typ is ParType.PROCESS
+                    else self.buffer.getbuffer()
+                ),
                 table=self.table.as_ref(),
                 config=self.job_config,
             ),
