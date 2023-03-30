@@ -14,8 +14,9 @@ import time
 import uuid
 from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple, Type, Union
 
+from singer_sdk import Sink
 from singer_sdk import typing as th
-from singer_sdk.target_base import Sink, Target
+from singer_sdk.target_base import Target
 
 from target_bigquery.batch_job import BigQueryBatchJobDenormalizedSink, BigQueryBatchJobSink
 from target_bigquery.core import BaseBigQuerySink, BaseWorker, BigQueryCredentials, ParType
