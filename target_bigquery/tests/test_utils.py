@@ -4,7 +4,7 @@ import pytest
 import singer_sdk.typing as th
 from google.cloud.bigquery import SchemaField
 
-from target_bigquery.core import SchemaTranslator, bigquery_type, transform_column_name
+from target_bigquery.core import SchemaTranslator, bigquery_type, transform_column_name, BigQueryTable, IngestionStrategy
 from target_bigquery.proto_gen import proto_schema_factory_v2
 
 
@@ -96,21 +96,21 @@ def test_bigquery_type(jsonschema_type: str, jsonschema_format: str, expected: s
     [
         (
             {"type": "object", "properties": {"int_col_1": {"type": "integer"}}},
-            "some.table",
+            BigQueryTable(name="table", dataset="some", project="project", jsonschema={}, ingestion_strategy=IngestionStrategy.FIXED),
             {},
-            """CREATE OR REPLACE VIEW some.table_view AS 
+            """CREATE OR REPLACE VIEW `project`.`some`.`table_view` AS 
 SELECT 
     CAST(JSON_VALUE(data, '$.int_col_1') as INT64) as int_col_1,
- FROM some.table""",
+ FROM `project`.`some`.`table`""",
         ),
         (
             {"type": "object", "properties": {"IntCol1": {"type": "integer"}}},
-            "some.table",
+            BigQueryTable(name="table", dataset="some", project="project", jsonschema={}, ingestion_strategy=IngestionStrategy.FIXED),
             {"snake_case": True},
-            """CREATE OR REPLACE VIEW some.table_view AS 
+            """CREATE OR REPLACE VIEW `project`.`some`.`table_view` AS 
 SELECT 
     CAST(JSON_VALUE(data, '$.IntCol1') as INT64) as int_col1,
- FROM some.table""",
+ FROM `project`.`some`.`table`""",
         ),
         (
             th.PropertiesList(
@@ -340,9 +340,9 @@ SELECT
                     ),
                 ),
             ).to_dict(),
-            "my.neighbor.totoro",
+            BigQueryTable(name="totoro", dataset="neighbor", project="my", jsonschema={}, ingestion_strategy=IngestionStrategy.FIXED),
             {},
-            """CREATE OR REPLACE VIEW my.neighbor.totoro_view AS 
+            """CREATE OR REPLACE VIEW `my`.`neighbor`.`totoro_view` AS 
 SELECT 
     JSON_VALUE(data, '$.id') as id,
     CAST(JSON_VALUE(data, '$.companyId') as INT64) as companyId,
@@ -516,7 +516,7 @@ SELECT
         ) as employment
       ) as payroll
     ) as humanReadable,
- FROM my.neighbor.totoro""",
+ FROM `my`.`neighbor`.`totoro`""",
         ),
     ],
     ids=[
@@ -525,7 +525,7 @@ SELECT
         "generate_convoluted_view",
     ],
 )
-def test_schema_translator_views(schema: dict, table: str, transforms: dict, expected: str):
+def test_schema_translator_views(schema: dict, table: BigQueryTable, transforms: dict, expected: str):
     assert (
         SchemaTranslator(
             schema,

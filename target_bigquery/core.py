@@ -100,6 +100,10 @@ class BigQueryTable:
             return self.schema_translator.translated_schema_transformed
         return self.schema_translator.translated_schema
 
+    def get_escaped_name(self, suffix: str = '') -> str:
+        """Returns the table name as as escaped SQL string."""
+        return f"`{self.project}`.`{self.dataset}`.`{self.name}{suffix}`"
+
     def get_resolved_schema(self, apply_transforms: bool = False) -> List[bigquery.SchemaField]:
         """Returns the schema for this table after factoring in the ingestion strategy."""
         if self.ingestion_strategy is IngestionStrategy.FIXED:
@@ -453,7 +457,7 @@ class BaseBigQuerySink(BatchSink):
         if self.generate_view:
             self.client.query(
                 self.table.schema_translator.generate_view_statement(
-                    str(self.table),
+                    self.table,
                 )
             ).result()
 
@@ -489,7 +493,7 @@ class BaseBigQuerySink(BatchSink):
                     f"QUALIFY ROW_NUMBER() OVER (PARTITION BY {', '.join(self.key_properties)} "
                     f"ORDER BY COALESCE({', '.join(date_columns)}) DESC) = 1"
                 )
-                ctas_tmp = f"CREATE OR REPLACE TEMP TABLE {tmp} AS {dedupe_query}"
+                ctas_tmp = f"CREATE OR REPLACE TEMP TABLE `{tmp}` AS {dedupe_query}"
             merge_clause = (
                 f"MERGE `{self.merge_target}` AS target USING `{tmp or self.table}` AS source ON "
                 + " AND ".join(f"target.`{f}` = source.`{f}`" for f in self.key_properties)
@@ -505,7 +509,7 @@ class BaseBigQuerySink(BatchSink):
                 f"{ctas_tmp}; {merge_clause} "
                 f"WHEN MATCHED THEN {update_clause} "
                 f"WHEN NOT MATCHED THEN {insert_clause}; "
-                f"DROP TABLE IF EXISTS {self.table};"
+                f"DROP TABLE IF EXISTS {self.table.get_escaped_name()};"
             ).result()
             self.table = self.merge_target
             self.merge_target = None
@@ -514,10 +518,10 @@ class BaseBigQuerySink(BatchSink):
             # Do it in a transaction to avoid partial writes.
             target = self.overwrite_target.as_table()
             self.client.query(
-                f"DROP TABLE IF EXISTS {self.overwrite_target}; "
-                f"CREATE TABLE {self.overwrite_target} LIKE {self.table} AS "
-                f"SELECT * FROM {self.table};"
-                f"DROP TABLE IF EXISTS {self.table};"
+                f"DROP TABLE IF EXISTS {self.overwrite_target.get_escaped_name()}; "
+                f"CREATE TABLE {self.overwrite_target} LIKE {self.table.get_escaped_name()} AS "
+                f"SELECT * FROM {self.table.get_escaped_name()};"
+                f"DROP TABLE IF EXISTS {self.table.get_escaped_name()};"
             ).result()
             self.table = self.merge_target
             self.merge_target = None
@@ -660,7 +664,7 @@ class SchemaTranslator:
                 output[k] = self.translate_record(v)
         return output
 
-    def generate_view_statement(self, table_name: str) -> str:
+    def generate_view_statement(self, table_name: BigQueryTable) -> str:
         """Generate a CREATE VIEW statement for the SchemaTranslator `schema`."""
         projection = ""
         for field_ in self.translated_schema[:]:
@@ -670,7 +674,7 @@ class SchemaTranslator:
                 projection += indent(self._bigquery_field_to_projection(field_), " " * 4)
 
         return (
-            f"CREATE OR REPLACE VIEW {table_name}_view AS \nSELECT \n{projection} FROM {table_name}"
+            f"CREATE OR REPLACE VIEW {table_name.get_escaped_name('_view')} AS \nSELECT \n{projection} FROM {table_name.get_escaped_name()}"
         )
 
     def _jsonschema_property_to_bigquery_column(
