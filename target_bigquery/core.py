@@ -603,6 +603,14 @@ def storage_client_factory(
         )
     return bigquery_storage_v1.BigQueryWriteClient()
 
+@dataclass
+class _FieldProjection:
+    projection: str
+    alias: str
+
+    def as_sql(self) -> str:
+        """Return the SQL representation of this projection"""
+        return f'{self.projection} as {self.alias.lstrip()},\n'
 
 # This class translates a JSON schema into a BigQuery schema.
 # It also uses the translated schema to generate a CREATE VIEW statement.
@@ -667,7 +675,7 @@ class SchemaTranslator:
             if field_.mode == "REPEATED":
                 projection += indent(self._wrap_json_array(field_, path="$", depth=1), " " * 4)
             else:
-                projection += indent(self._bigquery_field_to_projection(field_), " " * 4)
+                projection += indent(self._bigquery_field_to_projection(field_).as_sql(), " " * 4)
 
         return (
             f"CREATE OR REPLACE VIEW {table_name}_view AS \nSELECT \n{projection} FROM {table_name}"
@@ -713,18 +721,18 @@ class SchemaTranslator:
 
     def _bigquery_field_to_projection(
         self, field: SchemaField, path: str = "$", depth: int = 0, base: str = "data"
-    ) -> str:
+    ) -> _FieldProjection:
         """Translate a BigQuery schema field into a SQL projection."""
         # Pass-through _sdc columns into the projection as-is
         if field.name.startswith("_sdc_"):
-            return f"{field.name},\n"
+            return _FieldProjection(f"{field.name},\n", field.name)
 
         scalar = f"{base}.{field.name}"
         from_base = f"{path}.{field.name}" if base == "data" else "$"
 
         # Records are handled recursively
         if field.field_type.upper() == "RECORD":
-            return (
+            return _FieldProjection(
                 (" " * depth * 2)
                 + "STRUCT(\n{}\n".format(
                     "".join(
@@ -732,7 +740,7 @@ class SchemaTranslator:
                             (
                                 self._bigquery_field_to_projection(
                                     f, path=from_base, depth=depth + 1, base=base
-                                )
+                                ).as_sql()
                                 if not f.mode == "REPEATED"
                                 else self._wrap_json_array(
                                     f, path=from_base, depth=depth, base=base
@@ -743,40 +751,43 @@ class SchemaTranslator:
                     ).rstrip(",\n"),
                 )
                 + (" " * depth * 2)
-                + f") as {transform_column_name(field.name, **self.transforms)},\n"
+                + ")", f"{transform_column_name(field.name, **self.transforms)}"
             )
         # Nullable fields require a JSON_VALUE call which creates a 2-stage cast
         elif field.is_nullable:
-            return (" " * depth * 2) + self._wrap_nullable_json_value(field, path=path, base=base)
+            _field = self._wrap_nullable_json_value(field, path=path, base=base)
+            return _FieldProjection((" " * depth * 2) + _field.projection, _field.alias)
         # These are not nullable so if the type is known, we can do a 1-stage extract & cast
         elif field.field_type.upper() == "STRING":
-            return (
+            return _FieldProjection((
                 " " * depth * 2
-            ) + f"STRING({scalar}) as {transform_column_name(field.name, **self.transforms)},\n"
+            ) + f"STRING({scalar})", f"{transform_column_name(field.name, **self.transforms)}")
         elif field.field_type.upper() == "INTEGER":
-            return (
+            return _FieldProjection((
                 " " * depth * 2
-            ) + f"INT64({scalar}) as {transform_column_name(field.name, **self.transforms)},\n"
+            ) + f"INT64({scalar})", f"{transform_column_name(field.name, **self.transforms)}")
         elif field.field_type.upper() == "FLOAT":
-            return (
+            return _FieldProjection(
                 (" " * depth * 2)
-                + f"FLOAT64({scalar}) as {transform_column_name(field.name, **self.transforms)},\n"
+                + f"FLOAT64({scalar})", f"{transform_column_name(field.name, **self.transforms)}"
             )
         elif field.field_type.upper() == "BOOLEAN":
-            return (
+            return _FieldProjection((
                 " " * depth * 2
-            ) + f"BOOL({scalar}) as {transform_column_name(field.name, **self.transforms)},\n"
+            ) + f"BOOL({scalar})", f"{transform_column_name(field.name, **self.transforms)}")
         # Fallback to a 2-stage extract & cast
         else:
-            return (" " * depth * 2) + self._wrap_nullable_json_value(field, path, base)
+            _field =  self._wrap_nullable_json_value(field, path, base)
+            return _FieldProjection((" " * depth * 2) + _field.projection, _field.alias)
 
     def _wrap_json_array(
         self, field: SchemaField, path: str, depth: int = 0, base: str = "data"
     ) -> str:
         """Translate a BigQuery schema field into a SQL projection for a repeated field."""
-        v = self._bigquery_field_to_projection(
+        _v = self._bigquery_field_to_projection(
             field, path="$", depth=depth, base=f"{field.name}__rows"
-        ).rstrip(", \n")
+        )
+        v = _v.as_sql().rstrip(", \n")
         return (" " * depth * 2) + indent(
             dedent(
                 f"""
@@ -785,6 +796,7 @@ class SchemaTranslator:
             FROM UNNEST(
                 JSON_QUERY_ARRAY({base}, '{path}.{field.name}')
             ) AS {field.name}__rows
+            WHERE {_v.projection} IS NOT NULL
         """
                 + (" " * depth * 2)
                 + f") AS {field.name},\n"
@@ -794,21 +806,21 @@ class SchemaTranslator:
 
     def _wrap_nullable_json_value(
         self, field: SchemaField, path: str = "$", base: str = "data"
-    ) -> str:
+    ) -> _FieldProjection:
         """Translate a BigQuery schema field into a SQL projection for a nullable field."""
         typ = field.field_type.upper()
         if typ == "STRING":
-            return (
-                f"JSON_VALUE({base}, '{path}.{field.name}') as"
-                f" {transform_column_name(field.name, **self.transforms)},\n"
+            return _FieldProjection(
+                f"JSON_VALUE({base}, '{path}.{field.name}')",
+                f" {transform_column_name(field.name, **self.transforms)}"
             )
         if typ == "FLOAT":
             typ = "FLOAT64"
         if typ in ("INT", "INTEGER"):
             typ = "INT64"
-        return (
-            f"CAST(JSON_VALUE({base}, '{path}.{field.name}') as {typ}) as"
-            f" {transform_column_name(field.name, **self.transforms)},\n"
+        return _FieldProjection(
+            f"CAST(JSON_VALUE({base}, '{path}.{field.name}') as {typ})",
+            f" {transform_column_name(field.name, **self.transforms)}"
         )
 
 

@@ -381,12 +381,14 @@ SELECT
           FROM UNNEST(
               JSON_QUERY_ARRAY(data, '$.work.customColumns.column_1644862416222')
           ) AS column_1644862416222__rows
+          WHERE   STRING(column_1644862416222__rows.column_1644862416222) IS NOT NULL
         ) AS column_1644862416222,
         ARRAY(
           SELECT   STRING(column_1644861659664__rows.column_1644861659664) as column_1644861659664
           FROM UNNEST(
               JSON_QUERY_ARRAY(data, '$.work.customColumns.column_1644861659664')
           ) AS column_1644861659664__rows
+          WHERE   STRING(column_1644861659664__rows.column_1644861659664) IS NOT NULL
         ) AS column_1644861659664
       ) as customColumns,
       STRUCT(
