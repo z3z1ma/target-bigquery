@@ -729,7 +729,7 @@ class SchemaTranslator:
         """Translate a BigQuery schema field into a SQL projection."""
         # Pass-through _sdc columns into the projection as-is
         if field.name.startswith("_sdc_"):
-            return _FieldProjection(f"{field.name},\n", field.name)
+            return _FieldProjection(field.name, field.name)
 
         scalar = f"{base}.{field.name}"
         from_base = f"{path}.{field.name}" if base == "data" else "$"
