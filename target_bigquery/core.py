@@ -578,9 +578,13 @@ def augmented_syspath(new_paths: Optional[Iterable[str]] = None):
 def bigquery_client_factory(creds: BigQueryCredentials) -> bigquery.Client:
     """Get a BigQuery client."""
     if creds.path:
-        return bigquery.Client.from_service_account_json(creds.path)
+        return bigquery.Client.from_service_account_json(creds.path,
+            project=creds.project
+        )
     elif creds.json:
-        return bigquery.Client.from_service_account_info(json.loads(creds.json))
+        return bigquery.Client.from_service_account_info(
+            json.loads(creds.json), project=creds.project
+        )
     return bigquery.Client(project=creds.project)
 
 
@@ -588,9 +592,11 @@ def bigquery_client_factory(creds: BigQueryCredentials) -> bigquery.Client:
 def gcs_client_factory(creds: BigQueryCredentials) -> storage.Client:
     """Get a GCS client."""
     if creds.path:
-        return storage.Client.from_service_account_json(creds.path)
+        return storage.Client.from_service_account_json(creds.path, project=creds.project)
     elif creds.json:
-        return storage.Client.from_service_account_info(json.loads(creds.json))
+        return storage.Client.from_service_account_info(
+            json.loads(creds.json), project=creds.project
+        )
     return storage.Client(project=creds.project)
 
 
