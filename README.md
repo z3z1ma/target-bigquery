@@ -46,6 +46,30 @@ pipx install z3-target-bigquery
 target-bigquery --version
 ```
 
+## Usage Notes
+
+### Denormalization
+
+So denormalized is a loaded term, so lets clarify here what we mean by it:
+
+> In the context of JSON objects, denormalization refers to the process of flattening a hierarchical or nested JSON object into a simpler, more "denormalized" structure that can be easier to work with for certain use cases.
+
+Denormalized=False (default) means we load all data into a single `JSON` column. This means all access requires an accessor such as `SELECT data.my_column FROM table` instead of `SELECT my_column FROM table`. Hence the term denormalized is relative to the `data` column which is the default for this target. This is a tradeoff between convenience/resilience and performance. This is the default because most _resilient_. IE a load will **never** fail due to a schema change or an invalid schema. You can always denormalize later via `dbt`. However, it is not the most performant and slower to transform. If your tap has a high quality and consistent schema, denormalization is the way to go to get the best performance and start modeling quickly.
+
+Denormalized=True means we unpack the data into a schema which is derived from the tap schema. It does _not_ mean we will flatten the data. There is a separate option for flattening. We will convert arrays to repeated fields and records to structs. All top level keys will end up as columns which is was you might expect from more typical targets.
+
+#### Resolver Versions
+
+There are 2 resolver versions. The config option `schema_resolver_version` lets you select which version you want to use. This versioning exists because we want to support evolving how we resolve schemas whilst not creating breaking changes for long-time users dependent on how a schema is resolved. The default is `1` which behaves very similarly to existing flavors of `target-bigquery`. It works well enough but has plenty of edge cases where it simply cannot resolve valid jsonschemas to a bq schema. The new version `2` is much more robust and will resolve most, if not all schemas due to it falling back to `JSON` when in doubt. You must opt-in to this version by setting `schema_resolver_version: 2` in your config. 
+
+### Overwrite vs Append
+
+Sometimes you want to overwrite a table on every load. This can be achieved by either setting `overwrite: true` which will full refresh ALL tables **or** setting `overwrite: [table1, table2, table_*_other, !table_v1_other]` which will only overwrite the specified tables and supports pattern matching. This is useful if you have a table which is a lookup table and you want to overwrite it on every load. You can also set `overwrite: false` which will append to the table. This is the default behavior.
+
+### Upsert (aka Merge)
+
+If you want to merge data into a table, you can set `merge: true` which will use the `MERGE` statement to upsert data. This supports pattern matching like the above setting. It requires `denormalized: true` takes precedence over `overwrite`. It will only work on tables which have a primary key as defined by the `key_properties` sent by the tap. There is a supporting config option called `dedupe_before_upsert` which will dedupe the data before upserting. This is useful if you are replicating data which has a primary key but is not unique. This occurs when you are replicating data from a source which has a primary key but does not enforce it. This is the case for MongoDB. It can also happen when moving data from a data lake in S3/GCS to a database. This is not the default behavior because it is slower and requires more resources.
+
 ## Features ✨
 
 - Autoscaling self-healing worker pool using either threads (default) or multiprocessing, configurable by the user for the _fastest_ possible data ingestion. Particularly when leveraging colocated compute in GCP.
@@ -124,6 +148,7 @@ First a valid example to give context to the below including a nested key exampl
 | options.storage_write_batch_mode                   |  False   |       None        | By default, we use the default stream (Committed mode) in the [storage_write_api](https://cloud.google.com/bigquery/docs/write-api) load method which results in streaming records which are immediately available and is generally fastest. If this is set to true, we will use the application created streams (pending mode) to transactionally batch data on STATE messages and at end of pipe. |
 | options.process_pool                               |  False   |       None        | By default we use an autoscaling threadpool to write to BigQuery. If set to true, we will use a process pool. |
 | options.max_workers                                |  False   |       None        | By default, each sink type has a preconfigured max worker pool limit. This sets an override for maximum number of workers in the pool. |
+| schema_resolver_version                            |  False   |       1           | The version of the schema resolver to use. Defaults to 1. Version 2 uses JSON as a fallback during denormalization. This only has an effect if denormalized=true |
 | stream_maps                                        |  False   |       None        | Config object for stream maps capability. For more information check out [Stream Maps](https://sdk.meltano.com/en/latest/stream_maps.html). |
 | stream_map_config                                  |  False   |       None        | User-defined config values to be used within map expressions. |
 | flattening_enabled                                 |  False   |       None        | 'True' to enable schema flattening and automatically expand nested properties. |

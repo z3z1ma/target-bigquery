@@ -300,6 +300,16 @@ class TargetBigQuery(Target):
                 " from different extracts."
             ),
         ),
+        th.Property(
+            "schema_resolver_version",
+            th.IntegerType,
+            default=1,
+            description=(
+                "The version of the schema resolver to use. Defaults to 1. Version 2 uses JSON as a"
+                " fallback during denormalization. This only has an effect if denormalized=true"
+            ),
+            allowed_values=[1, 2],
+        ),
     ).to_dict()
 
     def __init__(self, *args, **kwargs) -> None:
