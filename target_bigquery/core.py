@@ -515,7 +515,7 @@ class BaseBigQuerySink(BatchSink):
                 f"target.`{f.name}` = source.`{f.name}`" for f in target.schema
             )
             insert_clause = (
-                f"INSERT ({', '.join(f.name for f in target.schema)}) "
+                f"INSERT ({', '.join(f'`{f.name}`' for f in target.schema)}) "
                 f"VALUES ({', '.join(f'source.`{f.name}`' for f in target.schema)})"
             )
             self.client.query(
