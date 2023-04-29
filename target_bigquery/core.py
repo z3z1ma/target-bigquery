@@ -862,18 +862,18 @@ class SchemaTranslator:
             field, path="$", depth=depth, base=f"{field.name}__rows"
         )
         v = _v.as_sql().rstrip(", \n")
+
         return (" " * depth * 2) + indent(
+            
+
+            # This is a patch to get around the fact that JSON_QUERY_ARRAY doesn't work with
+            # fields that contain a single JSON blob instead of a an array of JSON blobs.
             dedent(
                 f"""
-        ARRAY(
-            SELECT {v}
-            FROM UNNEST(
-                JSON_QUERY_ARRAY({base}, '{path}.{field.name}')
-            ) AS {field.name}__rows
-            WHERE {_v.projection} IS NOT NULL
-        """
+                JSON_QUERY({base}, '{path}.{field.name}')
+                """
                 + (" " * depth * 2)
-                + f") AS {field.name},\n"
+                + f" AS {field.name},\n"
             ).lstrip(),
             " " * depth * 2,
         )
