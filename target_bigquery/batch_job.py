@@ -17,7 +17,7 @@ from io import BytesIO
 from multiprocessing import Process
 from multiprocessing.dummy import Process as _Thread
 from queue import Empty
-from typing import Any, Dict, NamedTuple, Optional, Type, Union
+from typing import Any, Dict, NamedTuple, Optional, Type, Union, List
 
 import orjson
 from google.cloud import bigquery
@@ -36,7 +36,7 @@ class Job(NamedTuple):
     table: str
     data: Union[bytes, memoryview]
     config: Dict[str, Any]
-    attempt: int = 1
+    attempts: List[int]
 
 
 class BatchJobWorker(BaseWorker):
@@ -60,8 +60,8 @@ class BatchJobWorker(BaseWorker):
                     job_config=bigquery.LoadJobConfig(**job.config),
                 ).result()
             except Exception as exc:
-                job.attempt += 1
-                if job.attempt > 3:
+                job.attempts[0] += 1
+                if job.attempts[0] > 3:
                     # TODO: add a metric for this + a DLQ & wrap exception type
                     self.error_notifier.send((exc, self.serialize_exception(exc)))
                     raise
@@ -122,6 +122,7 @@ class BigQueryBatchJobSink(BaseBigQuerySink):
                 ),
                 table=self.table.as_ref(),
                 config=self.job_config,
+                attempts=[1]
             ),
         )
         self.increment_jobs_enqueued()
