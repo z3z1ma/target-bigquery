@@ -500,9 +500,9 @@ class BaseBigQuerySink(BatchSink):
             if self._is_dedupe_before_upsert_candidate():
                 # We can't use MERGE with a non-unique key, so we need to dedupe the temp table into
                 # a _SESSION scoped intermediate table.
-                tmp = f"{target.name}__tmp"
+                tmp = f"{self.merge_target.name}__tmp"
                 dedupe_query = (
-                    f"SELECT * FROM {self.table} "
+                    f"SELECT * FROM {self.table.get_escaped_name()} "
                     f"QUALIFY ROW_NUMBER() OVER (PARTITION BY {', '.join(self.key_properties)} "
                     f"ORDER BY COALESCE({', '.join(date_columns)}) DESC) = 1"
                 )
@@ -531,10 +531,11 @@ class BaseBigQuerySink(BatchSink):
             # Do it in a transaction to avoid partial writes.
             target = self.overwrite_target.as_table()
             self.client.query(
-                f"DROP TABLE IF EXISTS {self.overwrite_target.get_escaped_name()}; "
-                f"CREATE TABLE {self.overwrite_target} LIKE {self.table.get_escaped_name()} AS "
-                f"SELECT * FROM {self.table.get_escaped_name()};"
-                f"DROP TABLE IF EXISTS {self.table.get_escaped_name()};"
+                f"DROP TABLE IF EXISTS {self.overwrite_target.get_escaped_name()}; CREATE TABLE"
+                f" {self.overwrite_target.get_escaped_name()} LIKE"
+                f" {self.table.get_escaped_name()} AS SELECT * FROM"
+                f" {self.table.get_escaped_name()};DROP TABLE IF EXISTS"
+                f" {self.table.get_escaped_name()};"
             ).result()
             self.table = self.merge_target
             self.merge_target = None
