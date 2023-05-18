@@ -1,0 +1,196 @@
+{
+    "properties": {
+        "ban_level": {
+            "inclusion": "available",
+            "minimum": -128,
+            "maximum": 127,
+            "type": [
+                "null",
+                "integer"
+            ]
+        },
+        "refresh_token": {
+            "inclusion": "available",
+            "maxLength": 256,
+            "type": [
+                "null",
+                "string"
+            ]
+        },
+        "access_token": {
+            "inclusion": "available",
+            "maxLength": 512,
+            "type": [
+                "null",
+                "string"
+            ]
+        },
+        "id": {
+            "inclusion": "automatic",
+            "maxLength": 36,
+            "type": [
+                "null",
+                "string"
+            ]
+        },
+        "role_id": {
+            "inclusion": "available",
+            "maxLength": 36,
+            "type": [
+                "null",
+                "string"
+            ]
+        },
+        "password": {
+            "inclusion": "available",
+            "maxLength": 256,
+            "type": [
+                "null",
+                "string"
+            ]
+        },
+        "created_at": {
+            "inclusion": "available",
+            "format": "date-time",
+            "type": [
+                "null",
+                "string"
+            ]
+        },
+        "facebook_id": {
+            "inclusion": "available",
+            "maxLength": 256,
+            "type": [
+                "null",
+                "string"
+            ]
+        },
+        "apple_id": {
+            "inclusion": "available",
+            "maxLength": 256,
+            "type": [
+                "null",
+                "string"
+            ]
+        },
+        "is_active": {
+            "inclusion": "available",
+            "type": [
+                "null",
+                "boolean"
+            ]
+        },
+        "updated_at": {
+            "inclusion": "available",
+            "format": "date-time",
+            "type": [
+                "null",
+                "string"
+            ]
+        },
+        "apps_flyer_id": {
+            "inclusion": "available",
+            "maxLength": 255,
+            "type": [
+                "null",
+                "string"
+            ]
+        },
+        "role": {
+            "inclusion": "available",
+            "maxLength": 5,
+            "type": [
+                "null",
+                "string"
+            ]
+        },
+        "social_accounts": {
+            "type": [
+                "string",
+                "null"
+            ]
+        },
+        "google_id": {
+            "inclusion": "available",
+            "maxLength": 256,
+            "type": [
+                "null",
+                "string"
+            ]
+        },
+        "warning_level": {
+            "inclusion": "available",
+            "minimum": -128,
+            "maximum": 127,
+            "type": [
+                "null",
+                "integer"
+            ]
+        },
+        "country_code": {
+            "inclusion": "available",
+            "maxLength": 10,
+            "type": [
+                "null",
+                "string"
+            ]
+        },
+        "mobile_number": {
+            "inclusion": "available",
+            "maxLength": 16,
+            "type": [
+                "null",
+                "string"
+            ]
+        },
+        "email": {
+            "inclusion": "available",
+            "maxLength": 256,
+            "type": [
+                "null",
+                "string"
+            ]
+        },
+        "_sdc_batched_at": {
+            "type": [
+                "null",
+                "string"
+            ],
+            "format": "date-time"
+        },
+        "_sdc_extracted_at": {
+            "type": [
+                "null",
+                "string"
+            ],
+            "format": "date-time"
+        },
+        "_sdc_deleted_at": {
+            "type": [
+                "null",
+                "string"
+            ],
+            "format": "date-time"
+        },
+        "_sdc_received_at": {
+            "type": [
+                "null",
+                "string"
+            ],
+            "format": "date-time"
+        },
+        "_sdc_sequence": {
+            "type": [
+                "null",
+                "integer"
+            ]
+        },
+        "_sdc_table_version": {
+            "type": [
+                "null",
+                "integer"
+            ]
+        }
+    },
+    "type": "object"
+}
