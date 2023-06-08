@@ -532,9 +532,8 @@ class BaseBigQuerySink(BatchSink):
             target = self.overwrite_target.as_table()
             self.client.query(
                 f"DROP TABLE IF EXISTS {self.overwrite_target.get_escaped_name()}; CREATE TABLE"
-                f" {self.overwrite_target.get_escaped_name()} LIKE"
-                f" {self.table.get_escaped_name()} AS SELECT * FROM"
-                f" {self.table.get_escaped_name()};DROP TABLE IF EXISTS"
+                f" {self.overwrite_target.get_escaped_name()} AS SELECT * FROM"
+                f" {self.table.get_escaped_name()}; DROP TABLE IF EXISTS"
                 f" {self.table.get_escaped_name()};"
             ).result()
             self.table = self.merge_target
