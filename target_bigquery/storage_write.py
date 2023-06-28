@@ -13,7 +13,6 @@ Throughput test: 11m 0s @ 1M rows / 150 keys / 1.5GB
 NOTE: This is naive and will vary drastically based on network speed, for example on a GCP VM.
 """
 import os
-from threading import Lock
 from time import sleep
 from multiprocessing import Process
 from multiprocessing.connection import Connection
@@ -55,7 +54,7 @@ MAX_IN_FLIGHT = 15
 """Maximum number of concurrent requests per worker be processed by grpc before awaiting."""
 
 Dispatcher = Callable[[types.AppendRowsRequest], writer.AppendRowsFuture]
-StreamComponents = Tuple[str, writer.AppendRowsStream, Lock, Dispatcher]
+StreamComponents = Tuple[str, writer.AppendRowsStream, Dispatcher]
 
 
 def get_application_stream(client: BigQueryWriteClient, job: "Job") -> StreamComponents:
@@ -65,8 +64,7 @@ def get_application_stream(client: BigQueryWriteClient, job: "Job") -> StreamCom
     write_stream = client.create_write_stream(parent=job.parent, write_stream=write_stream)
     job.template.write_stream = write_stream.name
     append_rows_stream = writer.AppendRowsStream(client, job.template)
-    lock = Lock()
-    rv = (write_stream.name, append_rows_stream, lock)
+    rv = (write_stream.name, append_rows_stream)
     job.stream_notifier.send(rv)
     return *rv, retry(
         append_rows_stream.send,
@@ -82,8 +80,7 @@ def get_default_stream(client: BigQueryWriteClient, job: "Job") -> StreamCompone
         **BigQueryWriteClient.parse_table_path(job.parent), stream="_default"
     )
     append_rows_stream = writer.AppendRowsStream(client, job.template)
-    lock = Lock()
-    rv = (job.template.write_stream, append_rows_stream, lock)
+    rv = (job.template.write_stream, append_rows_stream)
     job.stream_notifier.send(rv)
     return *rv, retry(
         append_rows_stream.send,
@@ -174,11 +171,9 @@ class StorageWriteBatchWorker(BaseWorker):
             if job.parent not in self.cache or self.cache[job.parent][1]._closed:
                 self.cache[job.parent] = self.get_stream_components(client, job)
                 self.offsets[job.parent] = 0
-            write_stream, _, _, dispatch = cast(StreamComponents, self.cache[job.parent])
+            write_stream, _, dispatch = cast(StreamComponents, self.cache[job.parent])
            
             try:
-                if self.cache[job.parent][1]._closed:
-                    raise Exception("Connection closed before locking.")
                 kwargs = {}
                 if write_stream.endswith("_default"):
                     kwargs["offset"] = None
@@ -224,7 +219,7 @@ class StorageWriteBatchWorker(BaseWorker):
 
     def close_cached_streams(self) -> None:
         """Close all cached streams."""
-        for _, stream, _, _ in self.cache.values():
+        for _, stream, _ in self.cache.values():
             try:
                 stream.close()
             except Exception as exc:
@@ -347,18 +342,17 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
         if not self.open_streams:
             return
         self.open_streams = [
-            (name, stream, lock) for name, stream, lock in self.open_streams if not name.endswith("_default")
+            (name, stream) for name, stream in self.open_streams if not name.endswith("_default")
         ]
         if self.open_streams:
             committer = storage_client_factory(self._credentials)
-            for name, stream, _ in self.open_streams:
-                #self.logger.info(f"YO !!!!!!!! : AFTER LOCK INSTANT KILL {name}")
+            for name, stream in self.open_streams:
                 stream.close()
                 committer.finalize_write_stream(name=name)
             write = committer.batch_commit_write_streams(
                 types.BatchCommitWriteStreamsRequest(
                     parent=self.parent,
-                    write_streams=[name for name, _, _ in self.open_streams],
+                    write_streams=[name for name, _ in self.open_streams],
                 )
             )
             self.logger.info(f"Batch commit time: {write.commit_time}")
