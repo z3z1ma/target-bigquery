@@ -9,6 +9,7 @@
 # The above copyright notice and this permission notice shall be included in all copies or
 # substantial portions of the Software.
 """BigQuery target class."""
+import os
 import copy
 import time
 import uuid
@@ -37,15 +38,18 @@ if TYPE_CHECKING:
 # Defaults for target worker pool parameters
 MAX_WORKERS = 15
 """Maximum number of workers to spawn."""
+MAX_JOBS_QUEUED = 30
+"""Maximum number of jobs placed in the global queue to avoid memory overload."""
 WORKER_CAPACITY_FACTOR = 5
 """Jobs enqueued must exceed the number of active workers times this number."""
 WORKER_CREATION_MIN_INTERVAL = 5
 """Minimum time between worker creation attempts."""
 
-
 class TargetBigQuery(Target):
     """Target for BigQuery."""
 
+    _MAX_RECORD_AGE_IN_MINUTES = 5.0
+    
     name = "target-bigquery"
     config_jsonschema = th.PropertiesList(
         th.Property(
@@ -484,6 +488,7 @@ class TargetBigQuery(Target):
 
     def drain_one(self, sink: Sink) -> None:  # type: ignore
         """Drain a sink. Includes a hook to manage the worker pool and notifications."""
+        #self.logger.info(f"Jobs queued : {self.queue.qsize()} | Max nb jobs queued : {os.cpu_count() * 4} | Nb workers : {len(self.workers)} | Max nb workers : {os.cpu_count() * 2}")
         self.resize_worker_pool()
         while self.job_notification.poll():
             ext_id = self.job_notification.recv()
@@ -519,13 +524,15 @@ class TargetBigQuery(Target):
             for worker in self.workers:
                 if worker.is_alive():
                     self.queue.put(None)
-            for worker in self.workers:
+            while len(self.workers):
                 worker.join()
+                worker = self.workers.pop()
             for sink in self._sinks_active.values():
                 sink.clean_up()
         else:
+            for worker in self.workers:
+                worker.join()
             for sink in self._sinks_active.values():
                 sink.pre_state_hook()
-        if state:
-            self._write_state_message(state)
+        self._write_state_message(state)
         self._reset_max_record_age()

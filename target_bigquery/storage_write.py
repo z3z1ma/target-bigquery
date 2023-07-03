@@ -13,6 +13,7 @@ Throughput test: 11m 0s @ 1M rows / 150 keys / 1.5GB
 NOTE: This is naive and will vary drastically based on network speed, for example on a GCP VM.
 """
 import os
+from time import sleep
 from multiprocessing import Process
 from multiprocessing.connection import Connection
 from multiprocessing.dummy import Process as _Thread
@@ -46,10 +47,11 @@ import logging
 from target_bigquery.core import BaseBigQuerySink, BaseWorker, Denormalized, storage_client_factory
 from target_bigquery.proto_gen import proto_schema_factory_v2
 
+logger = logging.getLogger(__name__)
+
 # Stream specific constant
 MAX_IN_FLIGHT = 15
 """Maximum number of concurrent requests per worker be processed by grpc before awaiting."""
-
 
 Dispatcher = Callable[[types.AppendRowsRequest], writer.AppendRowsFuture]
 StreamComponents = Tuple[str, writer.AppendRowsStream, Dispatcher]
@@ -122,14 +124,23 @@ def generate_template(message: Type[Message]):
     return template
 
 
-class Job(NamedTuple):
+class Job():
     parent: str
     template: types.AppendRowsRequest
     stream_notifier: Connection
     data: types.ProtoRows
-    offset: int = 0
     attempts: int = 1
-
+    
+    def __init__(self,
+        parent,
+        template,
+        stream_notifier,
+        data):
+        """Initialize the worker process."""
+        self.parent = parent
+        self.template = template
+        self.stream_notifier = stream_notifier
+        self.data = data
 
 class StorageWriteBatchWorker(BaseWorker):
     """Worker process for the storage write API."""
@@ -141,6 +152,8 @@ class StorageWriteBatchWorker(BaseWorker):
         self.awaiting: List[writer.AppendRowsFuture] = []
         self.cache: Dict[str, StreamComponents] = {}
         self.max_errors_before_recycle = 5
+        self.offsets: Dict[str, int] = {}
+        self.logger=logger
 
     def run(self):
         """Run the worker process."""
@@ -155,19 +168,23 @@ class StorageWriteBatchWorker(BaseWorker):
                 break
             if job is None:
                 break
-            if job.parent not in self.cache:
+            if job.parent not in self.cache or self.cache[job.parent][1]._closed:
                 self.cache[job.parent] = self.get_stream_components(client, job)
+                self.offsets[job.parent] = 0
             write_stream, _, dispatch = cast(StreamComponents, self.cache[job.parent])
+           
             try:
                 kwargs = {}
                 if write_stream.endswith("_default"):
                     kwargs["offset"] = None
                     kwargs["path"] = write_stream
                 else:
-                    kwargs["offset"] = job.offset
+                    kwargs["offset"] = self.offsets[job.parent]
                 self.awaiting.append(dispatch(generate_request(job.data, **kwargs)))
+                
             except Exception as exc:
                 job.attempts += 1
+                self.logger.info(f"job.attempts : {job.attempts}")
                 self.max_errors_before_recycle -= 1
                 if job.attempts > 3:
                     # TODO: add a metric for this + a DLQ & wrap exception type
@@ -186,15 +203,18 @@ class StorageWriteBatchWorker(BaseWorker):
             else:
                 self.log_notifier.send(
                     f"[{self.ext_id}] Sent {len(job.data.serialized_rows)} rows to {write_stream}"
-                    f" with offset {job.offset}."
+                    f" with offset {self.offsets[job.parent]}."
                 )
+                self.offsets[job.parent] += len(job.data.serialized_rows)
                 if len(self.awaiting) > MAX_IN_FLIGHT:
                     self.wait()
             finally:
                 self.queue.task_done()
         # Wait for all in-flight requests to complete after poison pill
+        self.logger.info(f"[{self.ext_id}] : {self.offsets}")
         self.wait(drain=True)
         self.close_cached_streams()
+        self.logger.info("Worker process exiting.")
         self.log_notifier.send("Worker process exiting.")
 
     def close_cached_streams(self) -> None:
@@ -240,6 +260,7 @@ class StorageWriteProcessBatchWorker(StorageWriteBatchWorker, Process):
 
 class BigQueryStorageWriteSink(BaseBigQuerySink):
     MAX_WORKERS = os.cpu_count() * 2
+    MAX_JOBS_QUEUED = MAX_WORKERS * 2
     WORKER_CAPACITY_FACTOR = 10
     WORKER_CREATION_MIN_INTERVAL = 1.0
 
@@ -276,7 +297,6 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
         )
         self.stream_notification, self.stream_notifier = target.pipe_cls(False)
         self.template = generate_template(self.proto_schema)
-        self.offset = 0
 
     @property
     def proto_schema(self) -> Type[Message]:
@@ -300,17 +320,19 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
         )
 
     def process_batch(self, context: Dict[str, Any]) -> None:
+        while self.global_queue.qsize() >= self.MAX_JOBS_QUEUED:
+            self.logger.warn(f"Max jobs enqueued reached ({self.MAX_JOBS_QUEUED})")
+            sleep(1)
+        
         self.global_queue.put(
             Job(
                 parent=self.parent,
                 template=self.template,
                 data=self.proto_rows,
                 stream_notifier=self.stream_notifier,
-                offset=self.offset,
             )
         )
         self.increment_jobs_enqueued()
-        self.offset += len(self.proto_rows.serialized_rows)
 
     def commit_streams(self) -> None:
         while self.stream_notification.poll():
