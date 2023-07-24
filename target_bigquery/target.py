@@ -534,5 +534,6 @@ class TargetBigQuery(Target):
                 worker.join()
             for sink in self._sinks_active.values():
                 sink.pre_state_hook()
-        self._write_state_message(state)
+        if state:
+            self._write_state_message(state)
         self._reset_max_record_age()
