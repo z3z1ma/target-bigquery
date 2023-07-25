@@ -216,18 +216,16 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
         location: str = self.config.get("location", self.default_bucket_options()["location"])
 
         if not hasattr(self, "_gcs_bucket"):
-            try:
-                self._gcs_bucket = self.client.create_bucket(self.as_bucket(), location=location)
-            except Conflict:
-                gcs_bucket = self.client.get_bucket(self.as_bucket())
-                if gcs_bucket.location.lower() != location.lower():
+            self._gcs_bucket = self.client.get_bucket(self.as_bucket())
+            if self._gcs_bucket is not None:
+                if self._gcs_bucket.location.lower() != location.lower():
                     raise Exception(
                         "Location of existing GCS bucket "
-                        f"{self.bucket_name} ({gcs_bucket.location.lower()}) does not match "
+                        f"{self.bucket_name} ({self._gcs_bucket.location.lower()}) does not match "
                         f"specified location: {location}"
                     )
-                else:
-                    self._gcs_bucket = gcs_bucket
+            else:
+                self._gcs_bucket = self.client.create_bucket(self.as_bucket(), location=location)
         else:
             # Wait for eventual consistency
             time.sleep(5)
