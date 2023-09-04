@@ -4,7 +4,13 @@ import pytest
 import singer_sdk.typing as th
 from google.cloud.bigquery import SchemaField
 
-from target_bigquery.core import SchemaTranslator, bigquery_type, transform_column_name, BigQueryTable, IngestionStrategy
+from target_bigquery.core import (
+    BigQueryTable,
+    IngestionStrategy,
+    SchemaTranslator,
+    bigquery_type,
+    transform_column_name,
+)
 from target_bigquery.proto_gen import proto_schema_factory_v2
 
 
@@ -96,7 +102,13 @@ def test_bigquery_type(jsonschema_type: str, jsonschema_format: str, expected: s
     [
         (
             {"type": "object", "properties": {"int_col_1": {"type": "integer"}}},
-            BigQueryTable(name="table", dataset="some", project="project", jsonschema={}, ingestion_strategy=IngestionStrategy.FIXED),
+            BigQueryTable(
+                name="table",
+                dataset="some",
+                project="project",
+                jsonschema={},
+                ingestion_strategy=IngestionStrategy.FIXED,
+            ),
             {},
             """CREATE OR REPLACE VIEW `project`.`some`.`table_view` AS 
 SELECT 
@@ -105,7 +117,13 @@ SELECT
         ),
         (
             {"type": "object", "properties": {"IntCol1": {"type": "integer"}}},
-            BigQueryTable(name="table", dataset="some", project="project", jsonschema={}, ingestion_strategy=IngestionStrategy.FIXED),
+            BigQueryTable(
+                name="table",
+                dataset="some",
+                project="project",
+                jsonschema={},
+                ingestion_strategy=IngestionStrategy.FIXED,
+            ),
             {"snake_case": True},
             """CREATE OR REPLACE VIEW `project`.`some`.`table_view` AS 
 SELECT 
@@ -340,7 +358,13 @@ SELECT
                     ),
                 ),
             ).to_dict(),
-            BigQueryTable(name="totoro", dataset="neighbor", project="my", jsonschema={}, ingestion_strategy=IngestionStrategy.FIXED),
+            BigQueryTable(
+                name="totoro",
+                dataset="neighbor",
+                project="my",
+                jsonschema={},
+                ingestion_strategy=IngestionStrategy.FIXED,
+            ),
             {},
             """CREATE OR REPLACE VIEW `my`.`neighbor`.`totoro_view` AS 
 SELECT 
@@ -527,7 +551,9 @@ SELECT
         "generate_convoluted_view",
     ],
 )
-def test_schema_translator_views(schema: dict, table: BigQueryTable, transforms: dict, expected: str):
+def test_schema_translator_views(
+    schema: dict, table: BigQueryTable, transforms: dict, expected: str
+):
     assert (
         SchemaTranslator(
             schema,

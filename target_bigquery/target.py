@@ -9,8 +9,8 @@
 # The above copyright notice and this permission notice shall be included in all copies or
 # substantial portions of the Software.
 """BigQuery target class."""
-import os
 import copy
+import os
 import time
 import uuid
 from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple, Type, Union
@@ -45,11 +45,12 @@ WORKER_CAPACITY_FACTOR = 5
 WORKER_CREATION_MIN_INTERVAL = 5
 """Minimum time between worker creation attempts."""
 
+
 class TargetBigQuery(Target):
     """Target for BigQuery."""
 
     _MAX_RECORD_AGE_IN_MINUTES = 5.0
-    
+
     name = "target-bigquery"
     config_jsonschema = th.PropertiesList(
         th.Property(
@@ -488,7 +489,7 @@ class TargetBigQuery(Target):
 
     def drain_one(self, sink: Sink) -> None:  # type: ignore
         """Drain a sink. Includes a hook to manage the worker pool and notifications."""
-        #self.logger.info(f"Jobs queued : {self.queue.qsize()} | Max nb jobs queued : {os.cpu_count() * 4} | Nb workers : {len(self.workers)} | Max nb workers : {os.cpu_count() * 2}")
+        # self.logger.info(f"Jobs queued : {self.queue.qsize()} | Max nb jobs queued : {os.cpu_count() * 4} | Nb workers : {len(self.workers)} | Max nb workers : {os.cpu_count() * 2}")
         self.resize_worker_pool()
         while self.job_notification.poll():
             ext_id = self.job_notification.recv()
@@ -512,6 +513,8 @@ class TargetBigQuery(Target):
                 except Exception:
                     self.logger.error("Drain failed.")
                 raise RuntimeError(msg) from e
+            else:
+                self.logger.warning(msg)
         super().drain_one(sink)
 
     def drain_all(self, is_endofpipe: bool = False) -> None:  # type: ignore

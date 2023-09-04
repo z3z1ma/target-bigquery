@@ -13,11 +13,11 @@ Throughput test: 11m 0s @ 1M rows / 150 keys / 1.5GB
 NOTE: This is naive and will vary drastically based on network speed, for example on a GCP VM.
 """
 import os
-from time import sleep
 from multiprocessing import Process
 from multiprocessing.connection import Connection
 from multiprocessing.dummy import Process as _Thread
 from queue import Empty
+from time import sleep
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -124,23 +124,24 @@ def generate_template(message: Type[Message]):
     return template
 
 
-class Job():
-    parent: str
-    template: types.AppendRowsRequest
-    stream_notifier: Connection
-    data: types.ProtoRows
-    attempts: int = 1
-    
-    def __init__(self,
-        parent,
-        template,
-        stream_notifier,
-        data):
-        """Initialize the worker process."""
+class Job:
+    """Encapsulate information required to execute a job
+
+    This is safe and sendable meaning it can cross process boundaries.
+    """
+    def __init__(
+        self,
+        parent: str,
+        template: types.AppendRowsRequest,
+        stream_notifier: Connection,
+        data: types.ProtoRows,
+    ) -> None:
         self.parent = parent
         self.template = template
         self.stream_notifier = stream_notifier
         self.data = data
+        self.attempts = 1
+
 
 class StorageWriteBatchWorker(BaseWorker):
     """Worker process for the storage write API."""
@@ -153,14 +154,16 @@ class StorageWriteBatchWorker(BaseWorker):
         self.cache: Dict[str, StreamComponents] = {}
         self.max_errors_before_recycle = 5
         self.offsets: Dict[str, int] = {}
-        self.logger=logger
+        self.logger = logger
 
     def run(self):
         """Run the worker process."""
         client: BigQueryWriteClient = storage_client_factory(self.credentials)
+        bidi_logger = logging.getLogger("google.api_core.bidi")
         if os.getenv("TARGET_BIGQUERY_DEBUG", "false").lower() == "true":
-            bidi_logger = logging.getLogger("google.api_core.bidi")
             bidi_logger.setLevel(logging.DEBUG)
+        else:
+            bidi_logger.setLevel(logging.INFO)
         while True:
             try:
                 job: Optional[Job] = self.queue.get(timeout=30.0)
@@ -172,7 +175,7 @@ class StorageWriteBatchWorker(BaseWorker):
                 self.cache[job.parent] = self.get_stream_components(client, job)
                 self.offsets[job.parent] = 0
             write_stream, _, dispatch = cast(StreamComponents, self.cache[job.parent])
-           
+
             try:
                 kwargs = {}
                 if write_stream.endswith("_default"):
@@ -181,7 +184,7 @@ class StorageWriteBatchWorker(BaseWorker):
                 else:
                     kwargs["offset"] = self.offsets[job.parent]
                 self.awaiting.append(dispatch(generate_request(job.data, **kwargs)))
-                
+
             except Exception as exc:
                 job.attempts += 1
                 self.logger.info(f"job.attempts : {job.attempts}")
@@ -323,7 +326,7 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
         while self.global_queue.qsize() >= self.MAX_JOBS_QUEUED:
             self.logger.warn(f"Max jobs enqueued reached ({self.MAX_JOBS_QUEUED})")
             sleep(1)
-        
+
         self.global_queue.put(
             Job(
                 parent=self.parent,

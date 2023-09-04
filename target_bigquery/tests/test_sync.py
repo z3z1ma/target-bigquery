@@ -51,19 +51,8 @@ SECONDARY_SINGER_STREAM = """
 
 @pytest.mark.parametrize(
     "method",
-    
-    [
-     "batch_job",
-     "streaming_insert",
-     "storage_write_api",
-     "gcs_stage"
-    ],
-    ids=[
-     "batch_job",
-     "streaming_insert",
-     "storage_write_api",
-     "gcs_stage"
-    ],
+    ["batch_job", "streaming_insert", "storage_write_api", "gcs_stage"],
+    ids=["batch_job", "streaming_insert", "storage_write_api", "gcs_stage"],
 )
 @pytest.mark.parametrize("batch_mode", [False, True], ids=["no_batch_mode", "batch_mode"])
 def test_basic_sync(method, batch_mode):
@@ -86,10 +75,12 @@ def test_basic_sync(method, batch_mode):
 
     singer_input = io.StringIO()
     singer_input.write(
-        "\n".join([
-            BASIC_SINGER_STREAM.replace("{stream_name}", table_name),
-            SECONDARY_SINGER_STREAM.replace("{stream_name}", table_name_2),
-        ])
+        "\n".join(
+            [
+                BASIC_SINGER_STREAM.replace("{stream_name}", table_name),
+                SECONDARY_SINGER_STREAM.replace("{stream_name}", table_name_2),
+            ]
+        )
     )
     singer_input.seek(0)
 
@@ -102,13 +93,13 @@ def test_basic_sync(method, batch_mode):
             **OPTS,
         },
     )
-    
+
     # OVERRIDE CONSTANTS VARIABLES
-    #target.get_sink_class().MAX_WORKERS = 1
-    #target.get_sink_class().MAX_JOBS_QUEUED = 2
-    #target.get_sink_class().WORKER_CAPACITY_FACTOR = 1
-    #target.get_sink_class().WORKER_CREATION_MIN_INTERVAL = 1
-    
+    # target.get_sink_class().MAX_WORKERS = 1
+    # target.get_sink_class().MAX_JOBS_QUEUED = 2
+    # target.get_sink_class().WORKER_CAPACITY_FACTOR = 1
+    # target.get_sink_class().WORKER_CREATION_MIN_INTERVAL = 1
+
     client = bigquery_client_factory(BigQueryCredentials(json=target.config["credentials_json"]))
     try:
         client.query(f"TRUNCATE TABLE {target.config['dataset']}.{table_name}").result()
@@ -159,18 +150,8 @@ def test_basic_sync(method, batch_mode):
 
 @pytest.mark.parametrize(
     "method",
-    [
-     "batch_job",
-     "streaming_insert",
-     "gcs_stage",
-     "storage_write_api"
-    ],
-    ids=[
-     "batch_job",
-     "streaming_insert",
-     "gcs_stage",
-     "storage_write_api"
-    ],
+    ["batch_job", "streaming_insert", "gcs_stage", "storage_write_api"],
+    ids=["batch_job", "streaming_insert", "gcs_stage", "storage_write_api"],
 )
 def test_basic_denorm_sync(method):
     OPTS = {
@@ -199,12 +180,12 @@ def test_basic_denorm_sync(method):
             **OPTS,
         },
     )
-    
+
     # OVERRIDE CONSTANTS VARIABLES
-    #target.get_sink_class().MAX_WORKERS = 5
-    #target.get_sink_class().MAX_JOBS_QUEUED = 10
-    #target.get_sink_class().WORKER_CAPACITY_FACTOR = 2
-    #target.get_sink_class().WORKER_CREATION_MIN_INTERVAL = 1
+    # target.get_sink_class().MAX_WORKERS = 5
+    # target.get_sink_class().MAX_JOBS_QUEUED = 10
+    # target.get_sink_class().WORKER_CAPACITY_FACTOR = 2
+    # target.get_sink_class().WORKER_CREATION_MIN_INTERVAL = 1
 
     client = bigquery_client_factory(BigQueryCredentials(json=target.config["credentials_json"]))
     try:
