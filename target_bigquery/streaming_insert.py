@@ -26,12 +26,17 @@ from tenacity import retry, retry_if_exception_type, stop_after_delay, wait_fixe
 from target_bigquery.core import BaseBigQuerySink, BaseWorker, Denormalized, bigquery_client_factory
 
 
-class Job(NamedTuple):
+class Job:
     """Job to be processed by a worker."""
 
-    table: bigquery.TableReference
-    records: List[Dict[str, Any]]
-    attempt: int = 1
+    def __init__(
+        self,
+        table: bigquery.TableReference,
+        records: List[Dict[str, Any]],
+    ) -> None:
+        self.table = table
+        self.records = records
+        self.attempt = 1
 
 
 class StreamingInsertWorker(BaseWorker):

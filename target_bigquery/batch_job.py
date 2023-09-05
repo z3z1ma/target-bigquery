@@ -32,11 +32,17 @@ from target_bigquery.core import (
 )
 
 
-class Job(NamedTuple):
-    table: str
-    data: Union[bytes, memoryview]
-    config: Dict[str, Any]
-    attempt: int = 1
+class Job:
+    def __init__(
+        self,
+        data: Union[memoryview, bytes],
+        table: str,
+        config: Dict[str, Any],
+    ) -> None:
+        self.data = data
+        self.table = table
+        self.config = config
+        self.attempt = 1
 
 
 class BatchJobWorker(BaseWorker):
@@ -67,6 +73,7 @@ class BatchJobWorker(BaseWorker):
                     raise
                 else:
                     self.queue.put(job)
+                    self.log_notifier.send(self.serialize_exception(exc))
             else:
                 self.job_notifier.send(True)
                 self.log_notifier.send(

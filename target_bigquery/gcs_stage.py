@@ -42,16 +42,24 @@ if TYPE_CHECKING:
     from target_bigquery.target import TargetBigQuery
 
 
-class Job(NamedTuple):
+class Job:
     """Job to be processed by a worker."""
 
-    buffer: Union[memoryview, bytes]
-    batch_id: str
-    table: str
-    dataset: str
-    bucket: str
-    gcs_notifier: Connection
-    attempt: int = 1
+    def __init__(
+        buffer: Union[memoryview, bytes],
+        batch_id: str,
+        table: str,
+        dataset: str,
+        bucket: str,
+        gcs_notifier: Connection,
+    ):
+        self.buffer = buffer
+        self.batch_id = batch_id
+        self.table = table
+        self.dataset = dataset
+        self.bucket = bucket
+        self.gcs_notifier = gcs_notifier
+        self.attempt = 1
 
 
 class GcsStagingWorker(BaseWorker):

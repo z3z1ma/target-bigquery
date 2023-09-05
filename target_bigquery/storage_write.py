@@ -129,6 +129,7 @@ class Job:
 
     This is safe and sendable meaning it can cross process boundaries.
     """
+
     def __init__(
         self,
         parent: str,
