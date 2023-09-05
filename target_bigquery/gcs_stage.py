@@ -46,6 +46,7 @@ class Job:
     """Job to be processed by a worker."""
 
     def __init__(
+        self,
         buffer: Union[memoryview, bytes],
         batch_id: str,
         table: str,
