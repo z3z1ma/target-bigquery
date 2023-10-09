@@ -494,6 +494,13 @@ class BaseBigQuerySink(BatchSink):
 
     def clean_up(self) -> None:
         """Clean up the target table."""
+        # If gcs_stage method was used, self.client is probably
+        # an instance of storage.Client, instead of bigquery.Client
+        bigquery_client = (
+            self.client
+            if isinstance(self.client, bigquery.Client)
+            else bigquery_client_factory(self._credentials)
+        )
         if self.merge_target is not None:
             # We must merge the temp table into the target table.
             target = self.merge_target.as_table()
@@ -520,7 +527,7 @@ class BaseBigQuerySink(BatchSink):
                 f"INSERT ({', '.join(f'`{f.name}`' for f in target.schema)}) "
                 f"VALUES ({', '.join(f'source.`{f.name}`' for f in target.schema)})"
             )
-            self.client.query(
+            bigquery_client.query(
                 f"{ctas_tmp}; {merge_clause} "
                 f"WHEN MATCHED THEN {update_clause} "
                 f"WHEN NOT MATCHED THEN {insert_clause}; "
@@ -532,7 +539,7 @@ class BaseBigQuerySink(BatchSink):
             # We must overwrite the target table with the temp table.
             # Do it in a transaction to avoid partial writes.
             target = self.overwrite_target.as_table()
-            self.client.query(
+            bigquery_client.query(
                 f"DROP TABLE IF EXISTS {self.overwrite_target.get_escaped_name()}; CREATE TABLE"
                 f" {self.overwrite_target.get_escaped_name()} AS SELECT * FROM"
                 f" {self.table.get_escaped_name()}; DROP TABLE IF EXISTS"
