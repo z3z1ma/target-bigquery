@@ -17,6 +17,7 @@ import shutil
 import sys
 import time
 import traceback
+import uuid
 from abc import ABC, abstractmethod
 
 try:
@@ -315,7 +316,7 @@ class BaseBigQuerySink(BatchSink):
             and self._is_upsert_candidate()
         ):
             self.merge_target = copy(self.table)
-            self.table = BigQueryTable(name=f"{self.table_name}__{int(time.time())}", **opts)
+            self.table = BigQueryTable(name=f"{self.table_name}__{uuid.uuid4()}", **opts)
             self.table.create_table(
                 self.client,
                 self.apply_transforms,
@@ -333,7 +334,7 @@ class BaseBigQuerySink(BatchSink):
             time.sleep(2.5)  # Wait for eventual consistency
         elif self._is_overwrite_candidate():
             self.overwrite_target = copy(self.table)
-            self.table = BigQueryTable(name=f"{self.table_name}__{int(time.time())}", **opts)
+            self.table = BigQueryTable(name=f"{self.table_name}__{uuid.uuid4()}", **opts)
             self.table.create_table(
                 self.client,
                 self.apply_transforms,
