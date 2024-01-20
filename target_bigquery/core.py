@@ -458,7 +458,7 @@ class BaseBigQuerySink(BatchSink):
         kwargs = {"table": {}, "dataset": {}}
         # Table opts
         if key_properties and self.config.get("cluster_on_key_properties", False):
-            kwargs["table"]["clustering_fields"] = key_properties[:4]
+            kwargs["table"]["clustering_fields"] = tuple(key_properties[:4])
         partition_grain: str = self.config.get("partition_granularity")
         if partition_grain:
             kwargs["table"]["time_partitioning"] = TimePartitioning(
