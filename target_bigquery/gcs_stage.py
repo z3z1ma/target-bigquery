@@ -143,7 +143,6 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
         self.client = gcs_client_factory(self._credentials)
         self.create_bucket_if_not_exists()
         self.buffer = Compressor()
-        self.buffer = Compressor()
         self.gcs_notification, self.gcs_notifier = target.pipe_cls(False)
         self.uris: List[str] = []
         self.increment_jobs_enqueued = target.increment_jobs_enqueued
