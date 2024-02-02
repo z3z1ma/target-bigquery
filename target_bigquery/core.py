@@ -515,7 +515,7 @@ class BaseBigQuerySink(BatchSink):
                 tmp = f"{self.merge_target.name}__tmp"
                 dedupe_query = (
                     f"SELECT * FROM {self.table.get_escaped_name()} "
-                    f"QUALIFY ROW_NUMBER() OVER (PARTITION BY {', '.join(self.key_properties)} "
+                    f"QUALIFY ROW_NUMBER() OVER (PARTITION BY {', '.join(f'`{p}`' for p in self.key_properties)} " 
                     f"ORDER BY COALESCE({', '.join(date_columns)}) DESC) = 1"
                 )
                 ctas_tmp = f"CREATE OR REPLACE TEMP TABLE `{tmp}` AS {dedupe_query}"
