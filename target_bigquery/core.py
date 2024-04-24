@@ -39,7 +39,7 @@ from tempfile import TemporaryFile
 from textwrap import dedent, indent
 from typing import IO, TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Tuple, Type, Union
 
-from google.api_core.exceptions import Conflict
+from google.api_core.exceptions import Conflict, Forbidden
 from google.cloud import bigquery, bigquery_storage_v1, storage
 from google.cloud.bigquery import SchemaField
 from google.cloud.bigquery.table import TimePartitioning, TimePartitioningType
@@ -171,7 +171,7 @@ class BigQueryTable:
                 self._dataset = client.create_dataset(
                     self.as_dataset(**kwargs["dataset"]), exists_ok=False
                 )
-            except Conflict:
+            except (Conflict, Forbidden):
                 dataset = client.get_dataset(self.as_dataset(**kwargs["dataset"]))
                 if dataset.location != kwargs["dataset"]["location"]:
                     raise Exception(
