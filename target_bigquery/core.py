@@ -806,9 +806,15 @@ class SchemaTranslator:
         self, name: str, schema_property: dict, mode: str = "NULLABLE"
     ) -> SchemaField:
         """Translate a JSON schema record into a BigQuery schema."""
+        properties = list(schema_property.get("properties", {}).items())
+        
+        # If no properties defined, store as JSON instead of RECORD
+        if len(properties) == 0:
+            return SchemaField(name, "JSON", mode)
+        
         fields = [
             self._jsonschema_property_to_bigquery_column(col, t)
-            for col, t in schema_property.get("properties", {}).items()
+            for col, t in properties
         ]
         return SchemaField(name, "RECORD", mode, fields=fields)
 
