@@ -169,16 +169,15 @@ class BigQueryTable:
         try:
             self._dataset = client.get_dataset(self.as_dataset(**kwargs["dataset"]))
         except NotFound:
-            try:
-                dataset = client.create_dataset(self.as_dataset(**kwargs["dataset"]))
-            except (Conflict, Forbidden):
-                if dataset.location != kwargs["dataset"]["location"]:
-                    raise Exception(
-                        f"Location of existing dataset {dataset.dataset_id} ({dataset.location}) "
-                        f"does not match specified location: {kwargs['dataset']['location']}"
-                    )
-                else:
-                    self._dataset = dataset
+            dataset = client.create_dataset(self.as_dataset(**kwargs["dataset"]))
+        except (Conflict, Forbidden):
+            if dataset.location != kwargs["dataset"]["location"]:
+                raise Exception(
+                    f"Location of existing dataset {dataset.dataset_id} ({dataset.location}) "
+                    f"does not match specified location: {kwargs['dataset']['location']}"
+                )
+        else:
+            self._dataset = dataset
         try:
             self._table = client.get_table(self.as_ref())
         except NotFound:
