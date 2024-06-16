@@ -315,8 +315,7 @@ class BaseBigQuerySink(BatchSink):
         ):
             self.merge_target = copy(self.table)
             self.table = BigQueryTable(
-                name=f"{self.table_name}__{time.strftime('%Y%m%d%H%M%S')}__{uuid.uuid4()}", **opts
-            )
+                name=f"{self.table_name}__{time.strftime('%Y%m%d%H%M%S')}__{uuid.uuid4()}", **opts)
             self.table.create_table(
                 self.client,
                 self.apply_transforms,
@@ -335,8 +334,7 @@ class BaseBigQuerySink(BatchSink):
         elif self._is_overwrite_candidate():
             self.overwrite_target = copy(self.table)
             self.table = BigQueryTable(
-                name=f"{self.table_name}__{time.strftime('%Y%m%d%H%M%S')}__{uuid.uuid4()}", **opts
-            )
+                name=f"{self.table_name}__{time.strftime('%Y%m%d%H%M%S')}__{uuid.uuid4()}", **opts)
             self.table.create_table(
                 self.client,
                 self.apply_transforms,
@@ -812,7 +810,10 @@ class SchemaTranslator:
         if len(properties) == 0:
             return SchemaField(name, "JSON", mode)
 
-        fields = [self._jsonschema_property_to_bigquery_column(col, t) for col, t in properties]
+        fields = [
+                self._jsonschema_property_to_bigquery_column(col, t)
+                for col, t in properties
+                ]
         return SchemaField(name, "RECORD", mode, fields=fields)
 
     def _bigquery_field_to_projection(
