@@ -63,6 +63,7 @@ class BatchJobWorker(BaseWorker):
                     BytesIO(job.data),
                     job.table,
                     num_retries=3,
+                    timeout=self.config.get("timeout", 600),
                     job_config=bigquery.LoadJobConfig(**job.config),
                 ).result()
             except Exception as exc:
