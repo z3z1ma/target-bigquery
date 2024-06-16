@@ -167,7 +167,7 @@ class BigQueryTable:
         table in a single method call. It is idempotent and will not create
         a new table if one already exists."""
         try:
-            self._dataset = client.get_dataset(self.as_dataset(**kwargs["dataset"]))
+            dataset = client.get_dataset(self.as_dataset(**kwargs["dataset"]))
         except NotFound:
             dataset = client.create_dataset(self.as_dataset(**kwargs["dataset"]))
         except (Conflict, Forbidden):
@@ -176,7 +176,7 @@ class BigQueryTable:
                     f"Location of existing dataset {dataset.dataset_id} ({dataset.location}) "
                     f"does not match specified location: {kwargs['dataset']['location']}"
                 )
-        else:
+        finally:
             self._dataset = dataset
         try:
             self._table = client.get_table(self.as_ref())
