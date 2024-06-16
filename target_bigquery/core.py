@@ -167,14 +167,11 @@ class BigQueryTable:
         table in a single method call. It is idempotent and will not create
         a new table if one already exists."""
         try:
-            dataset = client.get_dataset(self.as_dataset(**kwargs["dataset"]))
+            self._dataset = client.get_dataset(self.as_dataset(**kwargs["dataset"]))
         except NotFound:
             try:
-                self._dataset = client.create_dataset(
-                    self.as_dataset(**kwargs["dataset"]), exists_ok=False
-                )
+                dataset = client.create_dataset(self.as_dataset(**kwargs["dataset"]))
             except (Conflict, Forbidden):
-                dataset = client.get_dataset(self.as_dataset(**kwargs["dataset"]))
                 if dataset.location != kwargs["dataset"]["location"]:
                     raise Exception(
                         f"Location of existing dataset {dataset.dataset_id} ({dataset.location}) "
@@ -183,20 +180,17 @@ class BigQueryTable:
                 else:
                     self._dataset = dataset
         try:
-            table = client.get_table(self.as_ref())
+            self._table = client.get_table(self.as_ref())
         except NotFound:
-            try:
-                self._table = client.create_table(
-                    self.as_table(
-                        apply_transforms and self.ingestion_strategy != IngestionStrategy.FIXED,
-                        **kwargs["table"],
-                    )
+            self._table = client.create_table(
+                self.as_table(
+                    apply_transforms and self.ingestion_strategy != IngestionStrategy.FIXED,
+                    **kwargs["table"],
                 )
-            except Conflict:
-                self._table = client.get_table(self.as_ref())
-            else:
-                # Wait for eventual consistency
-                time.sleep(5)
+            )
+        else:
+            # Wait for eventual consistency
+            time.sleep(5)
         return self._dataset, self._table
 
     def default_table_options(self) -> Dict[str, Any]:
