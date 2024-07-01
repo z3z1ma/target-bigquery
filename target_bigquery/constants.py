@@ -67,6 +67,4 @@ SDC_FIELDS = [
     "_sdc_table_version",
 ]
 
-DEFAULT_BUCKET_PATH = (
-    "gs://{bucket}/target_bigquery/{dataset}/{table}/extracted_date={date}/{batch_id}.jsonl.gz"
-)
+DEFAULT_BUCKET_PATH = "gs://{bucket}/target_bigquery/{dataset}/{table}/extracted_date={date}/{batch_id}.jsonl.gz"

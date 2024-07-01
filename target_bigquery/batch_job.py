@@ -8,16 +8,15 @@
 #
 # The above copyright notice and this permission notice shall be included in all copies or
 # substantial portions of the Software.
-"""BigQuery Batch Job Sink.
-Throughput test: 6m 25s @ 1M rows / 150 keys / 1.5GB
-NOTE: This is naive and will vary drastically based on network speed, for example on a GCP VM.
-"""
+"""BigQuery Batch Job Sink."""
+
 import os
 from io import BytesIO
+from mmap import mmap
 from multiprocessing import Process
 from multiprocessing.dummy import Process as _Thread
 from queue import Empty
-from typing import Any, Dict, NamedTuple, Optional, Type, Union
+from typing import Any, Dict, Optional, Type, Union, cast
 
 import orjson
 from google.cloud import bigquery
@@ -35,13 +34,15 @@ from target_bigquery.core import (
 class Job:
     def __init__(
         self,
-        data: Union[memoryview, bytes],
-        table: str,
+        data: Union[memoryview, bytes, mmap],
+        table: bigquery.TableReference,
         config: Dict[str, Any],
+        timeout: Optional[float] = 600.0,
     ) -> None:
         self.data = data
         self.table = table
         self.config = config
+        self.timeout = timeout
         self.attempt = 1
 
 
@@ -63,7 +64,7 @@ class BatchJobWorker(BaseWorker):
                     BytesIO(job.data),
                     job.table,
                     num_retries=3,
-                    timeout=self.config.get("timeout", 600),
+                    timeout=job.timeout,
                     job_config=bigquery.LoadJobConfig(**job.config),
                 ).result()
             except Exception as exc:
@@ -81,7 +82,7 @@ class BatchJobWorker(BaseWorker):
                     f"[{self.ext_id}] Loaded {len(job.data)} bytes into {job.table}."
                 )
             finally:
-                self.queue.task_done()
+                self.queue.task_done()  # type: ignore
 
 
 class BatchJobThreadWorker(BatchJobWorker, _Thread):
@@ -93,7 +94,7 @@ class BatchJobProcessWorker(BatchJobWorker, Process):
 
 
 class BigQueryBatchJobSink(BaseBigQuerySink):
-    MAX_WORKERS = os.cpu_count() * 2
+    MAX_WORKERS = (os.cpu_count() or 1) * 2
     WORKER_CAPACITY_FACTOR = 1
     WORKER_CREATION_MIN_INTERVAL = 10.0
 
@@ -114,7 +115,7 @@ class BigQueryBatchJobSink(BaseBigQuerySink):
         worker_executor_cls: Type[Process], config: Dict[str, Any]
     ) -> Type[Union[BatchJobThreadWorker, BatchJobProcessWorker]]:
         Worker = type("Worker", (BatchJobWorker, worker_executor_cls), {})
-        return Worker
+        return cast(Type[BatchJobThreadWorker], Worker)
 
     def process_record(self, record: Dict[str, Any], context: Dict[str, Any]) -> None:
         self.buffer.write(orjson.dumps(record, option=orjson.OPT_APPEND_NEWLINE))

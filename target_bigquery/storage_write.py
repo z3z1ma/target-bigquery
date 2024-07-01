@@ -8,10 +8,8 @@
 #
 # The above copyright notice and this permission notice shall be included in all copies or
 # substantial portions of the Software.
-"""BigQuery Storage Write Sink.
-Throughput test: 11m 0s @ 1M rows / 150 keys / 1.5GB
-NOTE: This is naive and will vary drastically based on network speed, for example on a GCP VM.
-"""
+"""BigQuery Storage Write Sink."""
+
 import os
 from multiprocessing import Process
 from multiprocessing.connection import Connection
@@ -24,7 +22,6 @@ from typing import (
     Callable,
     Dict,
     List,
-    NamedTuple,
     Optional,
     Set,
     Tuple,
@@ -35,8 +32,8 @@ from typing import (
 
 import orjson
 from google.cloud.bigquery_storage_v1 import BigQueryWriteClient, types, writer
-from google.protobuf import json_format
-from proto import Message
+from google.protobuf import json_format, message
+from proto import Field
 from tenacity import retry, stop_after_attempt, wait_fixed
 
 if TYPE_CHECKING:
@@ -44,7 +41,12 @@ if TYPE_CHECKING:
 
 import logging
 
-from target_bigquery.core import BaseBigQuerySink, BaseWorker, Denormalized, storage_client_factory
+from target_bigquery.core import (
+    BaseBigQuerySink,
+    BaseWorker,
+    Denormalized,
+    storage_client_factory,
+)
 from target_bigquery.proto_gen import proto_schema_factory_v2
 
 logger = logging.getLogger(__name__)
@@ -54,40 +56,38 @@ MAX_IN_FLIGHT = 15
 """Maximum number of concurrent requests per worker be processed by grpc before awaiting."""
 
 Dispatcher = Callable[[types.AppendRowsRequest], writer.AppendRowsFuture]
-StreamComponents = Tuple[str, writer.AppendRowsStream, Dispatcher]
+StreamComponents = Tuple[Field, writer.AppendRowsStream, Dispatcher]
 
 
 def get_application_stream(client: BigQueryWriteClient, job: "Job") -> StreamComponents:
     """Get an application created stream for the parent. This stream must be finalized and committed."""
     write_stream = types.WriteStream()
-    write_stream.type_ = types.WriteStream.Type.PENDING
+    write_stream.type_ = types.WriteStream.Type.PENDING  # type: ignore
     write_stream = client.create_write_stream(parent=job.parent, write_stream=write_stream)
     job.template.write_stream = write_stream.name
     append_rows_stream = writer.AppendRowsStream(client, job.template)
     rv = (write_stream.name, append_rows_stream)
     job.stream_notifier.send(rv)
     return *rv, retry(
-        append_rows_stream.send,
         wait=wait_fixed(2),
         stop=stop_after_attempt(5),
         reraise=True,
-    )
+    )(append_rows_stream.send)
 
 
 def get_default_stream(client: BigQueryWriteClient, job: "Job") -> StreamComponents:
     """Get the default storage write API stream for the parent."""
-    job.template.write_stream = BigQueryWriteClient.write_stream_path(
+    job.template.write_stream = BigQueryWriteClient.write_stream_path(  # type: ignore
         **BigQueryWriteClient.parse_table_path(job.parent), stream="_default"
     )
     append_rows_stream = writer.AppendRowsStream(client, job.template)
     rv = (job.template.write_stream, append_rows_stream)
     job.stream_notifier.send(rv)
     return *rv, retry(
-        append_rows_stream.send,
         wait=wait_fixed(2),
         stop=stop_after_attempt(5),
         reraise=True,
-    )
+    )(append_rows_stream.send)
 
 
 def generate_request(
@@ -98,16 +98,16 @@ def generate_request(
     """Generate a request for the storage write API from a payload."""
     request = types.AppendRowsRequest()
     if offset is not None:
-        request.offset = int(offset)
+        request.offset = int(offset)  # type: ignore
     if path is not None:
-        request.write_stream = path
+        request.write_stream = path  # type: ignore
     proto_data = types.AppendRowsRequest.ProtoData()
-    proto_data.rows = payload
-    request.proto_rows = proto_data
+    proto_data.rows = payload  # type: ignore
+    request.proto_rows = proto_data  # type: ignore
     return request
 
 
-def generate_template(message: Type[Message]):
+def generate_template(message: Type[message.Message]):
     """Generate a template for the storage write API from a proto message class."""
     from google.protobuf import descriptor_pb2
 
@@ -115,12 +115,12 @@ def generate_template(message: Type[Message]):
         types.AppendRowsRequest(),
         types.ProtoSchema(),
         descriptor_pb2.DescriptorProto(),
-        types.AppendRowsRequest.ProtoData(),
+        types.AppendRowsRequest.ProtoData(),  # type: ignore
     )
     message.DESCRIPTOR.CopyToProto(proto_descriptor)
-    proto_schema.proto_descriptor = proto_descriptor
-    proto_data.writer_schema = proto_schema
-    template.proto_rows = proto_data
+    proto_schema.proto_descriptor = proto_descriptor  # type: ignore
+    proto_data.writer_schema = proto_schema  # type: ignore
+    template.proto_rows = proto_data  # type: ignore
     return template
 
 
@@ -179,7 +179,7 @@ class StorageWriteBatchWorker(BaseWorker):
 
             try:
                 kwargs = {}
-                if write_stream.endswith("_default"):
+                if write_stream.endswith("_default"):  # type: ignore
                     kwargs["offset"] = None
                     kwargs["path"] = write_stream
                 else:
@@ -206,14 +206,14 @@ class StorageWriteBatchWorker(BaseWorker):
                     raise
             else:
                 self.log_notifier.send(
-                    f"[{self.ext_id}] Sent {len(job.data.serialized_rows)} rows to {write_stream}"
+                    f"[{self.ext_id}] Sent {len(job.data.serialized_rows)} rows to {write_stream}"  # type: ignore
                     f" with offset {self.offsets[job.parent]}."
                 )
-                self.offsets[job.parent] += len(job.data.serialized_rows)
+                self.offsets[job.parent] += len(job.data.serialized_rows)  # type: ignore
                 if len(self.awaiting) > MAX_IN_FLIGHT:
                     self.wait()
             finally:
-                self.queue.task_done()
+                self.queue.task_done()  # type: ignore
         # Wait for all in-flight requests to complete after poison pill
         self.logger.info(f"[{self.ext_id}] : {self.offsets}")
         self.wait(drain=True)
@@ -263,15 +263,13 @@ class StorageWriteProcessBatchWorker(StorageWriteBatchWorker, Process):
 
 
 class BigQueryStorageWriteSink(BaseBigQuerySink):
-    MAX_WORKERS = os.cpu_count() * 2
+    MAX_WORKERS = (os.cpu_count() or 1) * 2
     MAX_JOBS_QUEUED = MAX_WORKERS * 2
     WORKER_CAPACITY_FACTOR = 10
     WORKER_CREATION_MIN_INTERVAL = 1.0
 
     @staticmethod
-    def worker_cls_factory(
-        worker_executor_cls: Type[Process], config: Dict[str, Any]
-    ) -> Type[
+    def worker_cls_factory(worker_executor_cls: Type[Process], config: Dict[str, Any]) -> Type[
         Union[
             StorageWriteThreadStreamWorker,
             StorageWriteProcessStreamWorker,
@@ -283,7 +281,7 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
             Worker = type("Worker", (StorageWriteBatchWorker, worker_executor_cls), {})
         else:
             Worker = type("Worker", (StorageWriteStreamWorker, worker_executor_cls), {})
-        return Worker
+        return cast(Type[StorageWriteThreadStreamWorker], Worker)
 
     def __init__(
         self,
@@ -303,12 +301,12 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
         self.template = generate_template(self.proto_schema)
 
     @property
-    def proto_schema(self) -> Type[Message]:
+    def proto_schema(self) -> Type[message.Message]:
         if not hasattr(self, "_proto_schema"):
             self._proto_schema = proto_schema_factory_v2(
                 self.table.get_resolved_schema(self.apply_transforms)
             )
-        return self._proto_schema
+        return cast(Type[message.Message], self._proto_schema)
 
     def start_batch(self, context: Dict[str, Any]) -> None:
         self.proto_rows = types.ProtoRows()
@@ -319,7 +317,7 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
         return record
 
     def process_record(self, record: Dict[str, Any], context: Dict[str, Any]) -> None:
-        self.proto_rows.serialized_rows.append(
+        self.proto_rows.serialized_rows.append(  # type: ignore
             json_format.ParseDict(record, self.proto_schema()).SerializeToString()
         )
 
@@ -346,7 +344,9 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
         if not self.open_streams:
             return
         self.open_streams = [
-            (name, stream) for name, stream in self.open_streams if not name.endswith("_default")
+            (name, stream)
+            for name, stream in self.open_streams
+            if not name.endswith("_default")  # type: ignore
         ]
         if self.open_streams:
             committer = storage_client_factory(self._credentials)

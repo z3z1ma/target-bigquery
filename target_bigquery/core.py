@@ -37,9 +37,21 @@ from pathlib import Path
 from subprocess import PIPE, Popen
 from tempfile import TemporaryFile
 from textwrap import dedent, indent
-from typing import IO, TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Tuple, Type, Union
+from typing import (
+    IO,
+    TYPE_CHECKING,
+    Any,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Tuple,
+    Type,
+    Union,
+    cast,
+)
 
-from google.api_core.exceptions import Conflict, Forbidden, NotFound
+from google.api_core.exceptions import NotFound
 from google.cloud import bigquery, bigquery_storage_v1, storage
 from google.cloud.bigquery import SchemaField
 from google.cloud.bigquery.table import TimePartitioning, TimePartitioningType
@@ -123,6 +135,8 @@ class BigQueryTable:
             return DEFAULT_SCHEMA
         elif self.ingestion_strategy is IngestionStrategy.DENORMALIZED:
             return self.get_schema(apply_transforms)
+        else:
+            raise ValueError(f"Invalid ingestion strategy: {self.ingestion_strategy}")
 
     def __str__(self) -> str:
         return f"{self.project}.{self.dataset}.{self.name}"
@@ -166,30 +180,23 @@ class BigQueryTable:
         This is a convenience method that wraps the creation of a dataset and
         table in a single method call. It is idempotent and will not create
         a new table if one already exists."""
-        try:
-            dataset = client.get_dataset(self.as_dataset(**kwargs["dataset"]))
-        except NotFound:
-            dataset = client.create_dataset(self.as_dataset(**kwargs["dataset"]))
-        except (Conflict, Forbidden):
-            if dataset.location != kwargs["dataset"]["location"]:
-                raise Exception(
-                    f"Location of existing dataset {dataset.dataset_id} ({dataset.location}) "
-                    f"does not match specified location: {kwargs['dataset']['location']}"
+        if not hasattr(self, "_dataset"):
+            try:
+                self._dataset = client.get_dataset(self.as_dataset_ref())
+            except NotFound:
+                self._dataset = client.create_dataset(self.as_dataset(**kwargs["dataset"]))
+        if not hasattr(self, "_table"):
+            try:
+                self._table = client.get_table(self.as_ref())
+            except NotFound:
+                self._table = client.create_table(
+                    self.as_table(
+                        apply_transforms and self.ingestion_strategy != IngestionStrategy.FIXED,
+                        **kwargs["table"],
+                    )
                 )
-        finally:
-            self._dataset = dataset
-        try:
-            self._table = client.get_table(self.as_ref())
-        except NotFound:
-            self._table = client.create_table(
-                self.as_table(
-                    apply_transforms and self.ingestion_strategy != IngestionStrategy.FIXED,
-                    **kwargs["table"],
-                )
-            )
-        else:
-            # Wait for eventual consistency
-            time.sleep(5)
+                # Wait for eventual consistency (for the sake of GRPC's default stream)
+                time.sleep(5)
         return self._dataset, self._table
 
     def default_table_options(self) -> Dict[str, Any]:
@@ -314,7 +321,9 @@ class BaseBigQuerySink(BatchSink):
         ):
             self.merge_target = copy(self.table)
             self.table = BigQueryTable(
-                name=f"{self.table_name}__{time.strftime('%Y%m%d%H%M%S')}__{uuid.uuid4()}", **opts)
+                name=f"{self.table_name}__{time.strftime('%Y%m%d%H%M%S')}__{uuid.uuid4()}",
+                **opts,
+            )
             self.table.create_table(
                 self.client,
                 self.apply_transforms,
@@ -324,7 +333,8 @@ class BaseBigQuerySink(BatchSink):
                     },
                     "dataset": {
                         "location": self.config.get(
-                            "location", BigQueryTable.default_dataset_options()["location"]
+                            "location",
+                            BigQueryTable.default_dataset_options()["location"],
                         )
                     },
                 },
@@ -333,7 +343,9 @@ class BaseBigQuerySink(BatchSink):
         elif self._is_overwrite_candidate():
             self.overwrite_target = copy(self.table)
             self.table = BigQueryTable(
-                name=f"{self.table_name}__{time.strftime('%Y%m%d%H%M%S')}__{uuid.uuid4()}", **opts)
+                name=f"{self.table_name}__{time.strftime('%Y%m%d%H%M%S')}__{uuid.uuid4()}",
+                **opts,
+            )
             self.table.create_table(
                 self.client,
                 self.apply_transforms,
@@ -343,7 +355,8 @@ class BaseBigQuerySink(BatchSink):
                     },
                     "dataset": {
                         "location": self.config.get(
-                            "location", BigQueryTable.default_dataset_options()["location"]
+                            "location",
+                            BigQueryTable.default_dataset_options()["location"],
                         )
                     },
                 },
@@ -456,7 +469,7 @@ class BaseBigQuerySink(BatchSink):
         # Table opts
         if key_properties and self.config.get("cluster_on_key_properties", False):
             kwargs["table"]["clustering_fields"] = tuple(key_properties[:4])
-        partition_grain: str = self.config.get("partition_granularity")
+        partition_grain: Optional[str] = self.config.get("partition_granularity")
         if partition_grain:
             kwargs["table"]["time_partitioning"] = TimePartitioning(
                 type_=PARTITION_STRATEGY[partition_grain.upper()],
@@ -545,7 +558,7 @@ class BaseBigQuerySink(BatchSink):
                 f" {self.table.get_escaped_name()}; DROP TABLE IF EXISTS"
                 f" {self.table.get_escaped_name()};"
             ).result()
-            self.table = self.merge_target
+            self.table = cast(BigQueryTable, self.merge_target)
             self.merge_target = None
 
 
@@ -561,7 +574,7 @@ class Denormalized:
         wait=wait_fixed(1),
         reraise=True,
     )
-    def update_schema(self: BaseBigQuerySink) -> None:
+    def update_schema(self: BaseBigQuerySink) -> None:  # type: ignore
         """Update the target schema."""
         table = self.table.as_table()
         current_schema = table.schema[:]
@@ -578,7 +591,9 @@ class Denormalized:
             )
 
     def preprocess_record(
-        self: BaseBigQuerySink, record: Dict[str, Any], context: Dict[str, Any]
+        self: BaseBigQuerySink,  # type: ignore
+        record: Dict[str, Any],
+        context: Dict[str, Any],
     ) -> Dict[str, Any]:
         """Preprocess a record before writing it to the sink."""
         return self.table.schema_translator.translate_record(record)
@@ -626,7 +641,7 @@ def storage_client_factory(
 ) -> bigquery_storage_v1.BigQueryWriteClient:
     """Get a BigQuery Storage Write client."""
     if creds.path:
-        return bigquery_storage_v1.BigQueryWriteClient.from_service_account_file(creds.path)
+        return bigquery_storage_v1.BigQueryWriteClient.from_service_account_file(str(creds.path))
     elif creds.json:
         return bigquery_storage_v1.BigQueryWriteClient.from_service_account_info(
             json.loads(creds.json)
@@ -798,6 +813,8 @@ class SchemaTranslator:
                     return SchemaField(name, result_type, "NULLABLE")
             except Exception:
                 return SchemaField(name, "JSON", "NULLABLE")
+        else:
+            raise ValueError(f"Invalid resolver version: {self.resolver_version}")
 
     def _translate_record_to_bigquery_schema(
         self, name: str, schema_property: dict, mode: str = "NULLABLE"
@@ -809,10 +826,7 @@ class SchemaTranslator:
         if len(properties) == 0:
             return SchemaField(name, "JSON", mode)
 
-        fields = [
-                self._jsonschema_property_to_bigquery_column(col, t)
-                for col, t in properties
-                ]
+        fields = [self._jsonschema_property_to_bigquery_column(col, t) for col, t in properties]
         return SchemaField(name, "RECORD", mode, fields=fields)
 
     def _bigquery_field_to_projection(
@@ -950,7 +964,7 @@ class Compressor:
     def flush(self) -> None:
         """Flush the compressor buffer."""
         self._gzip.flush()
-        self._buffer.flush()
+        self.buffer.flush()
 
     def close(self) -> None:
         """Close the compressor and wait for the gzip process to finish."""
@@ -959,8 +973,8 @@ class Compressor:
         self._gzip.close()
         if self._compressor is not None:
             self._compressor.wait()
-        self._buffer.flush()
-        self._buffer.seek(0)
+        self.buffer.flush()
+        self.buffer.seek(0)
         self._closed = True
 
     def getvalue(self) -> bytes:
@@ -968,21 +982,21 @@ class Compressor:
         if not self._closed:
             self.close()
         if self._compressor is not None:
-            return self._buffer.read()
-        return self._buffer.getvalue()
+            return self.buffer.read()
+        return self.buffer.getvalue()  # type: ignore
 
     def getbuffer(self) -> Union[memoryview, mmap.mmap]:
         """Return the compressed buffer as a memoryview or mmap."""
         if not self._closed:
             self.close()
         if self._compressor is not None:
-            return mmap.mmap(self._buffer.fileno(), 0, access=mmap.ACCESS_READ)
-        return self._buffer.getbuffer()
+            return mmap.mmap(self.buffer.fileno(), 0, access=mmap.ACCESS_READ)
+        return self.buffer.getbuffer()  # type: ignore
 
     @property
     def buffer(self) -> IO[bytes]:
         """Return the compressed buffer as a file-like object."""
-        return self._buffer
+        return cast(IO[bytes], self._buffer)
 
     def __del__(self) -> None:
         """Close the compressor and wait for the gzip process to finish. Dereference the buffer."""
@@ -991,7 +1005,7 @@ class Compressor:
         # close the buffer, ignore error if we have an incremented rc due to memoryview
         # the gc will take care of the rest when the worker dereferences the buffer
         try:
-            self._buffer.close()
+            self.buffer.close()
         except BufferError:
             pass
         if self._compressor is not None and self._compressor.poll() is None:

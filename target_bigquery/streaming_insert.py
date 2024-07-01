@@ -8,22 +8,25 @@
 #
 # The above copyright notice and this permission notice shall be included in all copies or
 # substantial portions of the Software.
-"""BigQuery Streaming Insert Sink.
-Throughput test: ...slower than all other methods, no test results available.
-NOTE: This is naive and will vary drastically based on network speed, for example on a GCP VM.
-"""
+"""BigQuery Streaming Insert Sink."""
+
 import os
 from multiprocessing import Process
 from multiprocessing.dummy import Process as _Thread
 from queue import Empty
-from typing import Any, Dict, List, NamedTuple, Optional, Type, Union
+from typing import Any, Dict, List, Optional, Type, Union, cast
 
 import orjson
 from google.api_core.exceptions import GatewayTimeout, NotFound
 from google.cloud import _http, bigquery
 from tenacity import retry, retry_if_exception_type, stop_after_delay, wait_fixed
 
-from target_bigquery.core import BaseBigQuerySink, BaseWorker, Denormalized, bigquery_client_factory
+from target_bigquery.core import (
+    BaseBigQuerySink,
+    BaseWorker,
+    Denormalized,
+    bigquery_client_factory,
+)
 
 
 class Job:
@@ -56,14 +59,13 @@ class StreamingInsertWorker(BaseWorker):
                 break
             try:
                 _ = retry(
-                    client.insert_rows_json,
                     retry=retry_if_exception_type(
                         (ConnectionError, TimeoutError, NotFound, GatewayTimeout)
                     ),
                     wait=wait_fixed(1),
                     stop=stop_after_delay(10),
                     reraise=True,
-                )(table=job.table, json_rows=job.records)
+                )(client.insert_rows_json)(table=job.table, json_rows=job.records)
             except Exception as exc:
                 job.attempt += 1
                 if job.attempt > 3:
@@ -78,7 +80,7 @@ class StreamingInsertWorker(BaseWorker):
                     f"[{self.ext_id}] Inserted {len(job.records)} records into {job.table}"
                 )
             finally:
-                self.queue.task_done()
+                self.queue.task_done()  # type: ignore
 
 
 class StreamingInsertThreadWorker(StreamingInsertWorker, _Thread):
@@ -90,16 +92,19 @@ class StreamingInsertProcessWorker(StreamingInsertWorker, Process):
 
 
 class BigQueryStreamingInsertSink(BaseBigQuerySink):
-    MAX_WORKERS = os.cpu_count() * 2
+    MAX_WORKERS = (os.cpu_count() or 1) * 2
     WORKER_CAPACITY_FACTOR = 10
     WORKER_CREATION_MIN_INTERVAL = 1.0
 
     @staticmethod
-    def worker_cls_factory(
-        worker_executor_cls: Type[Process], config: Dict[str, Any]
-    ) -> Type[Union[StreamingInsertThreadWorker, StreamingInsertProcessWorker,]]:
+    def worker_cls_factory(worker_executor_cls: Type[Process], config: Dict[str, Any]) -> Type[
+        Union[
+            StreamingInsertThreadWorker,
+            StreamingInsertProcessWorker,
+        ]
+    ]:
         Worker = type("Worker", (StreamingInsertWorker, worker_executor_cls), {})
-        return Worker
+        return cast(Type[StreamingInsertThreadWorker], Worker)
 
     def preprocess_record(self, record: dict, context: dict) -> dict:
         record = super().preprocess_record(record, context)

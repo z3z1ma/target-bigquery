@@ -10,7 +10,7 @@
 # substantial portions of the Software.
 import hashlib
 import os
-from typing import Any, Dict, List, Optional, Type, cast
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Type, cast
 
 import proto
 from google.cloud.bigquery import SchemaField
@@ -43,13 +43,13 @@ def generate_field_v2(base: SchemaField, i: int = 1, pool: Optional[Any] = None)
         label = descriptor_pb2.FieldDescriptorProto.LABEL_OPTIONAL
 
     if typ.upper() == "RECORD":
-        proto_cls = proto_schema_factory_v2(base.fields, pool)
+        proto_cls = proto_schema_factory_v2(list(base.fields), pool)
         props = dict(
             name=name,
             number=i,
             label=label,
             type=descriptor_pb2.FieldDescriptorProto.TYPE_MESSAGE,
-            type_name=proto_cls.DESCRIPTOR.full_name,
+            type_name=proto_cls.DESCRIPTOR.full_name,  # type: ignore
             json_name=name,
         )
     else:
@@ -91,10 +91,10 @@ def proto_schema_factory_v2(
         factory.pool.Add(file_proto)
         proto_descriptor = factory.pool.FindMessageTypeByName(clsname)
         proto_cls = factory.GetPrototype(proto_descriptor)
-    return proto_cls
+    return proto_cls  # type: ignore
 
 
-def generate_field(base: SchemaField, i: int = 1) -> proto.Field:
+def generate_field(base: SchemaField, i: int = 1) -> Tuple[proto.Field, str]:
     """Not intended for production use.
     Generate a proto.Field from a SchemaField."""
     kwargs = {}
@@ -119,7 +119,7 @@ def generate_field(base: SchemaField, i: int = 1) -> proto.Field:
     return (f, name)
 
 
-def proto_schema_factory(bigquery_schema: List[SchemaField]) -> Type[proto.Message]:
+def proto_schema_factory(bigquery_schema: Iterable[SchemaField]) -> Type[proto.Message]:
     """Not intended for production use.
     Generate a proto.Message from a BigQuery schema."""
     return type(

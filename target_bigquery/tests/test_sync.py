@@ -1,4 +1,5 @@
 """Tests standard target features using the built-in SDK tests library."""
+
 import datetime
 import io
 import os
@@ -54,7 +55,9 @@ SECONDARY_SINGER_STREAM = """
     ["batch_job", "streaming_insert", "storage_write_api", "gcs_stage"],
     ids=["batch_job", "streaming_insert", "storage_write_api", "gcs_stage"],
 )
-@pytest.mark.parametrize("batch_mode", [False, True], ids=["no_batch_mode", "batch_mode"])
+@pytest.mark.parametrize(
+    "batch_mode", [False, True], ids=["no_batch_mode", "batch_mode"]
+)
 def test_basic_sync(method, batch_mode):
     OPTS = {
         "method": method,
@@ -100,13 +103,17 @@ def test_basic_sync(method, batch_mode):
     # target.get_sink_class().WORKER_CAPACITY_FACTOR = 1
     # target.get_sink_class().WORKER_CREATION_MIN_INTERVAL = 1
 
-    client = bigquery_client_factory(BigQueryCredentials(json=target.config["credentials_json"]))
+    client = bigquery_client_factory(
+        BigQueryCredentials(json=target.config["credentials_json"])
+    )
     try:
         client.query(f"TRUNCATE TABLE {target.config['dataset']}.{table_name}").result()
     except NotFound:
         pass
     try:
-        client.query(f"TRUNCATE TABLE {target.config['dataset']}.{table_name_2}").result()
+        client.query(
+            f"TRUNCATE TABLE {target.config['dataset']}.{table_name_2}"
+        ).result()
     except NotFound:
         pass
 
@@ -187,7 +194,9 @@ def test_basic_denorm_sync(method):
     # target.get_sink_class().WORKER_CAPACITY_FACTOR = 2
     # target.get_sink_class().WORKER_CREATION_MIN_INTERVAL = 1
 
-    client = bigquery_client_factory(BigQueryCredentials(json=target.config["credentials_json"]))
+    client = bigquery_client_factory(
+        BigQueryCredentials(json=target.config["credentials_json"])
+    )
     try:
         client.query(f"TRUNCATE TABLE {target.config['dataset']}.{table_name}").result()
     except NotFound:

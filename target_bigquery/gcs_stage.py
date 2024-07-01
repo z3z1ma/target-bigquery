@@ -8,23 +8,22 @@
 #
 # The above copyright notice and this permission notice shall be included in all copies or
 # substantial portions of the Software.
-"""BigQuery GCS Staging Sink.
-Throughput test: 6m 30s @ 1M rows / 150 keys / 1.5GB
-NOTE: This is naive and will vary drastically based on network speed, for example on a GCP VM.
-"""
+"""BigQuery GCS Staging Sink."""
+
 import os
 import shutil
 import time
 from io import BytesIO
+from mmap import mmap
 from multiprocessing import Process
 from multiprocessing.connection import Connection
 from multiprocessing.dummy import Process as _Thread
 from queue import Empty
-from typing import TYPE_CHECKING, Any, Dict, List, NamedTuple, Optional, Type, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type, Union, cast
 
 import orjson
-from google.api_core.exceptions import Conflict
 from google.cloud import bigquery, storage
+from google.cloud.storage.blob import BlobWriter
 
 from target_bigquery.constants import DEFAULT_BUCKET_PATH
 from target_bigquery.core import (
@@ -47,7 +46,7 @@ class Job:
 
     def __init__(
         self,
-        buffer: Union[memoryview, bytes],
+        buffer: Union[memoryview, bytes, mmap],
         batch_id: str,
         table: str,
         dataset: str,
@@ -94,7 +93,7 @@ class GcsStagingWorker(BaseWorker):
                     chunk_size=1024 * 1024 * 10,
                     timeout=300,
                 ) as fh:
-                    shutil.copyfileobj(BytesIO(job.buffer), fh)
+                    shutil.copyfileobj(BytesIO(job.buffer), cast(BlobWriter, fh))
                 job.gcs_notifier.send(path)
             except Exception as exc:
                 job.attempt += 1
@@ -110,7 +109,7 @@ class GcsStagingWorker(BaseWorker):
                     f"[{self.ext_id}] Successfully uploaded {len(job.buffer)} bytes to {path}"
                 )
             finally:
-                self.queue.task_done()
+                self.queue.task_done()  # type: ignore
 
 
 class GcsStagingThreadWorker(GcsStagingWorker, _Thread):
@@ -122,7 +121,7 @@ class GcsStagingProcessWorker(GcsStagingWorker, Process):
 
 
 class BigQueryGcsStagingSink(BaseBigQuerySink):
-    MAX_WORKERS = os.cpu_count() * 2
+    MAX_WORKERS = (os.cpu_count() or 1) * 2
     WORKER_CAPACITY_FACTOR = 1
     WORKER_CREATION_MIN_INTERVAL = 10.0
 
@@ -148,11 +147,14 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
         self.increment_jobs_enqueued = target.increment_jobs_enqueued
 
     @staticmethod
-    def worker_cls_factory(
-        worker_executor_cls: Type[Process], config: Dict[str, Any]
-    ) -> Type[Union[GcsStagingThreadWorker, GcsStagingProcessWorker,]]:
+    def worker_cls_factory(worker_executor_cls: Type[Process], config: Dict[str, Any]) -> Type[
+        Union[
+            GcsStagingThreadWorker,
+            GcsStagingProcessWorker,
+        ]
+    ]:
         Worker = type("Worker", (GcsStagingWorker, worker_executor_cls), {})
-        return Worker
+        return cast(Type[GcsStagingThreadWorker], Worker)
 
     @property
     def job_config(self) -> Dict[str, Any]:
@@ -218,7 +220,7 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
         This is idempotent and will not create
         a new GCS bucket if one already exists."""
         kwargs = {}
-        storage_class: str = self.config.get("storage_class")
+        storage_class: Optional[str] = self.config.get("storage_class")
         if storage_class:
             kwargs["storage_class"] = storage_class
         location: str = self.config.get("location", self.default_bucket_options()["location"])

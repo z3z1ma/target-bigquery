@@ -9,19 +9,42 @@
 # The above copyright notice and this permission notice shall be included in all copies or
 # substantial portions of the Software.
 """BigQuery target class."""
+
+from __future__ import annotations
+
 import copy
-import os
 import time
 import uuid
-from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple, Type, Union
+from typing import (
+    TYPE_CHECKING,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    Type,
+    Union,
+    cast,
+)
 
 from singer_sdk import Sink
 from singer_sdk import typing as th
 from singer_sdk.target_base import Target
 
-from target_bigquery.batch_job import BigQueryBatchJobDenormalizedSink, BigQueryBatchJobSink
-from target_bigquery.core import BaseBigQuerySink, BaseWorker, BigQueryCredentials, ParType
-from target_bigquery.gcs_stage import BigQueryGcsStagingDenormalizedSink, BigQueryGcsStagingSink
+from target_bigquery.batch_job import (
+    BigQueryBatchJobDenormalizedSink,
+    BigQueryBatchJobSink,
+)
+from target_bigquery.core import (
+    BaseBigQuerySink,
+    BaseWorker,
+    BigQueryCredentials,
+    ParType,
+)
+from target_bigquery.gcs_stage import (
+    BigQueryGcsStagingDenormalizedSink,
+    BigQueryGcsStagingSink,
+)
 from target_bigquery.storage_write import (
     BigQueryStorageWriteDenormalizedSink,
     BigQueryStorageWriteSink,
@@ -337,9 +360,12 @@ class TargetBigQuery(Target):
         )
 
         def worker_factory():
-            return self.get_sink_class().worker_cls_factory(
-                self.proc_cls,
-                self.config,
+            return cast(
+                Type[BaseWorker],
+                self.get_sink_class().worker_cls_factory(
+                    self.proc_cls,
+                    dict(self.config),
+                ),
             )(
                 ext_id=uuid.uuid4().hex,
                 queue=self.queue,
@@ -363,9 +389,7 @@ class TargetBigQuery(Target):
     # We woulod approach this by adding a new ParType enum and interpreting the
     # the Process, Pipe, and Queue classes as protocols which can be duck-typed.
 
-    def get_parallelization_components(
-        self, default=ParType.THREAD
-    ) -> Tuple[
+    def get_parallelization_components(self, default=ParType.THREAD) -> Tuple[
         Type["Process"],
         Callable[[bool], Tuple["Connection", "Connection"]],
         Callable[[], "Queue"],
@@ -381,7 +405,7 @@ class TargetBigQuery(Target):
             from multiprocessing.dummy import Pipe, Process, Queue
 
             self.logger.info("Using thread-based parallelism")
-            return Process, Pipe, Queue, ParType.THREAD
+            return Process, Pipe, Queue, ParType.THREAD  # type: ignore
         else:
             from multiprocessing import Pipe, Process, Queue
 
@@ -423,15 +447,17 @@ class TargetBigQuery(Target):
         workers_to_cull = []
         worker_spawned = False
         for i, worker in enumerate(self.workers):
-            if not worker.is_alive():
+            if not cast("Process", worker).is_alive():
                 workers_to_cull.append(i)
         for i in reversed(workers_to_cull):
             worker = self.workers.pop(i)
-            worker.join()  # Wait for the worker to terminate. This should be a no-op.
-            self.logger.info("Culling terminated worker %s", worker.ext_id)
+            cast(
+                "Process", worker
+            ).join()  # Wait for the worker to terminate. This should be a no-op.
+            self.logger.info("Culling terminated worker %s", worker.ext_id)  # type: ignore
         while self.add_worker_predicate or not self.workers:
             worker = self.worker_factory()
-            worker.start()
+            cast("Process", worker).start()
             self.workers.append(worker)
             worker_spawned = True
             self.logger.info("Adding worker %s", worker.ext_id)
@@ -444,8 +470,9 @@ class TargetBigQuery(Target):
     def get_sink_class(self, stream_name: Optional[str] = None) -> Type[BaseBigQuerySink]:
         """Returns the sink class to use for a given stream based on user config."""
         _ = stream_name
-        method, denormalized = self.config.get("method", "storage_write_api"), self.config.get(
-            "denormalized", False
+        method, denormalized = (
+            self.config.get("method", "storage_write_api"),
+            self.config.get("denormalized", False),
         )
         if method == "batch_job":
             if denormalized:
@@ -525,17 +552,17 @@ class TargetBigQuery(Target):
         self._drain_all(list(self._sinks_active.values()), self.max_parallelism)
         if is_endofpipe:
             for worker in self.workers:
-                if worker.is_alive():
+                if cast("Process", worker).is_alive():
                     self.queue.put(None)
             while len(self.workers):
-                worker.join()
+                cast("Process", worker).join()
                 worker = self.workers.pop()
-            for sink in self._sinks_active.values():
+            for sink in self._sinks_active.values():  # type: ignore
                 sink.clean_up()
         else:
             for worker in self.workers:
-                worker.join()
-            for sink in self._sinks_active.values():
+                cast("Process", worker).join()
+            for sink in self._sinks_active.values():  # type: ignore
                 sink.pre_state_hook()
         if state:
             self._write_state_message(state)
