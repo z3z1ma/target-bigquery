@@ -389,7 +389,9 @@ class TargetBigQuery(Target):
     # We woulod approach this by adding a new ParType enum and interpreting the
     # the Process, Pipe, and Queue classes as protocols which can be duck-typed.
 
-    def get_parallelization_components(self, default=ParType.THREAD) -> Tuple[
+    def get_parallelization_components(
+        self, default=ParType.THREAD
+    ) -> Tuple[
         Type["Process"],
         Callable[[bool], Tuple["Connection", "Connection"]],
         Callable[[], "Queue"],
@@ -422,7 +424,9 @@ class TargetBigQuery(Target):
         """Predicate determining when it is valid to add a worker to the pool."""
         return (
             self._jobs_enqueued
-            > getattr(self.get_sink_class(), "WORKER_CAPACITY_FACTOR", WORKER_CAPACITY_FACTOR)
+            > getattr(
+                self.get_sink_class(), "WORKER_CAPACITY_FACTOR", WORKER_CAPACITY_FACTOR
+            )
             * (len(self.workers) + 1)
             and len(self.workers)
             < self.config.get("options", {}).get(
@@ -467,7 +471,9 @@ class TargetBigQuery(Target):
 
     # SDK overrides to inject our worker management logic and sink selection.
 
-    def get_sink_class(self, stream_name: Optional[str] = None) -> Type[BaseBigQuerySink]:
+    def get_sink_class(
+        self, stream_name: Optional[str] = None
+    ) -> Type[BaseBigQuerySink]:
         """Returns the sink class to use for a given stream based on user config."""
         _ = stream_name
         method, denormalized = (

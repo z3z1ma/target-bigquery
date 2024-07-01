@@ -97,7 +97,9 @@ class BigQueryStreamingInsertSink(BaseBigQuerySink):
     WORKER_CREATION_MIN_INTERVAL = 1.0
 
     @staticmethod
-    def worker_cls_factory(worker_executor_cls: Type[Process], config: Dict[str, Any]) -> Type[
+    def worker_cls_factory(
+        worker_executor_cls: Type[Process], config: Dict[str, Any]
+    ) -> Type[
         Union[
             StreamingInsertThreadWorker,
             StreamingInsertProcessWorker,
@@ -119,10 +121,14 @@ class BigQueryStreamingInsertSink(BaseBigQuerySink):
         self.records_to_drain.append(record)
 
     def process_batch(self, context: Dict[str, Any]) -> None:
-        self.global_queue.put(Job(table=self.table.as_ref(), records=self.records_to_drain.copy()))
+        self.global_queue.put(
+            Job(table=self.table.as_ref(), records=self.records_to_drain.copy())
+        )
         self.increment_jobs_enqueued()
         self.records_to_drain = []
 
 
-class BigQueryStreamingInsertDenormalizedSink(Denormalized, BigQueryStreamingInsertSink):
+class BigQueryStreamingInsertDenormalizedSink(
+    Denormalized, BigQueryStreamingInsertSink
+):
     pass

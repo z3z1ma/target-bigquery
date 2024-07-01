@@ -54,7 +54,9 @@ SECONDARY_SINGER_STREAM = """
     ["batch_job", "streaming_insert", "storage_write_api", "gcs_stage"],
     ids=["batch_job", "streaming_insert", "storage_write_api", "gcs_stage"],
 )
-@pytest.mark.parametrize("batch_mode", [False, True], ids=["no_batch_mode", "batch_mode"])
+@pytest.mark.parametrize(
+    "batch_mode", [False, True], ids=["no_batch_mode", "batch_mode"]
+)
 def test_basic_sync(method, batch_mode):
     OPTS = {
         "method": method,
@@ -106,7 +108,9 @@ def test_basic_sync(method, batch_mode):
     # target.get_sink_class().WORKER_CAPACITY_FACTOR = 1
     # target.get_sink_class().WORKER_CREATION_MIN_INTERVAL = 1
 
-    client = bigquery_client_factory(BigQueryCredentials(json=target.config["credentials_json"]))
+    client = bigquery_client_factory(
+        BigQueryCredentials(json=target.config["credentials_json"])
+    )
     stdout, stderr = target_sync_test(target, singer_input)
     del stdout, stderr
     time.sleep(5)  # wait for the eventual consistency seen in LoadJob sinks
@@ -151,7 +155,9 @@ def test_basic_denorm_sync(method):
 
     singer_input = io.StringIO()
     singer_input.write(
-        BASIC_SINGER_STREAM.replace("{stream_name}", table_name).replace("{load_id}", load_id)
+        BASIC_SINGER_STREAM.replace("{stream_name}", table_name).replace(
+            "{load_id}", load_id
+        )
     )
     singer_input.seek(0)
 
@@ -171,7 +177,9 @@ def test_basic_denorm_sync(method):
     # target.get_sink_class().WORKER_CAPACITY_FACTOR = 2
     # target.get_sink_class().WORKER_CREATION_MIN_INTERVAL = 1
 
-    client = bigquery_client_factory(BigQueryCredentials(json=target.config["credentials_json"]))
+    client = bigquery_client_factory(
+        BigQueryCredentials(json=target.config["credentials_json"])
+    )
     stdout, stderr = target_sync_test(target, singer_input)
     del stdout, stderr
     time.sleep(10)  # wait for the eventual consistency seen in LoadJobs sinks
