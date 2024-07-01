@@ -567,3 +567,9 @@ class TargetBigQuery(Target):
         if state:
             self._write_state_message(state)
         self._reset_max_record_age()
+
+    def _validate_config(
+        self, raise_errors: bool = True, warnings_as_errors: bool = False
+    ) -> Tuple[List[str], List[str]]:
+        """Don't throw on config validation since our JSON schema doesn't seem to play well with meltano for whatever reason"""
+        return super()._validate_config(False, False)
