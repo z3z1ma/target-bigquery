@@ -23,6 +23,7 @@ from target_bigquery.proto_gen import proto_schema_factory_v2
         ("ALLCAPS", {"snake_case": True}, "allcaps"),
         ("ALL_CAPS", {"snake_case": True}, "all_caps"),
         ("SalesforceThing__c", {"snake_case": True}, "salesforce_thing__c"),
+        ("column.with.period", {"replace_period_with_under": True}, "column_with_period"),
         ("TestColumn", {"lower": True}, "testcolumn"),
         ("TestColumn", {}, "TestColumn"),
         ("`TestColumn`", {}, "`TestColumn`"),
@@ -63,6 +64,7 @@ from target_bigquery.proto_gen import proto_schema_factory_v2
         "snake_case_all_caps",
         "snake_case_all_caps_with_underscore",
         "snake_case_double_underscore",
+        "replace_period_with_underscore",
         "lowercase",
         "no_rules_supplied",
         "no_rules_supplied_quoted_string",
@@ -110,8 +112,8 @@ def test_bigquery_type(jsonschema_type: str, jsonschema_format: str, expected: s
                 ingestion_strategy=IngestionStrategy.FIXED,
             ),
             {},
-            """CREATE OR REPLACE VIEW `project`.`some`.`table_view` AS 
-SELECT 
+            """CREATE OR REPLACE VIEW `project`.`some`.`table_view` AS
+SELECT
     CAST(JSON_VALUE(data, '$.int_col_1') as INT64) as int_col_1,
  FROM `project`.`some`.`table`""",
         ),
@@ -125,8 +127,8 @@ SELECT
                 ingestion_strategy=IngestionStrategy.FIXED,
             ),
             {"snake_case": True},
-            """CREATE OR REPLACE VIEW `project`.`some`.`table_view` AS 
-SELECT 
+            """CREATE OR REPLACE VIEW `project`.`some`.`table_view` AS
+SELECT
     CAST(JSON_VALUE(data, '$.IntCol1') as INT64) as int_col1,
  FROM `project`.`some`.`table`""",
         ),
@@ -394,8 +396,8 @@ SELECT
                 ingestion_strategy=IngestionStrategy.FIXED,
             ),
             {},
-            """CREATE OR REPLACE VIEW `my`.`neighbor`.`totoro_view` AS 
-SELECT 
+            """CREATE OR REPLACE VIEW `my`.`neighbor`.`totoro_view` AS
+SELECT
     JSON_VALUE(data, '$.id') as id,
     CAST(JSON_VALUE(data, '$.companyId') as INT64) as companyId,
     JSON_VALUE(data, '$.email') as email,

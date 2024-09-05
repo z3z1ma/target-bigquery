@@ -216,6 +216,12 @@ class TargetBigQuery(Target):
                     default=False,
                     description="Convert columns to snake case",
                 ),
+                th.Property(
+                    "replace_period_with_underscore",
+                    th.BooleanType,
+                    default=False,
+                    description="Convert periods to underscores",
+                ),
             ),
             description=(
                 "Accepts a JSON object of options with boolean values to enable them. The available"

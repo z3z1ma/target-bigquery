@@ -1088,6 +1088,7 @@ def transform_column_name(
     lower: bool = False,
     add_underscore_when_invalid: bool = False,
     snake_case: bool = False,
+    replace_period_with_underscore: bool = False,
 ) -> str:
     """Transform a column name to a valid BigQuery column name."""
     if snake_case and not lower:
@@ -1103,4 +1104,6 @@ def transform_column_name(
             name = "_{}".format(name)
     if quote or was_quoted:
         name = "`{}`".format(name)
+    if replace_period_with_underscore:
+        name = name.replace(".", "_")
     return name
