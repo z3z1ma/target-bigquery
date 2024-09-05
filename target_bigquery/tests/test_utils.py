@@ -23,7 +23,7 @@ from target_bigquery.proto_gen import proto_schema_factory_v2
         ("ALLCAPS", {"snake_case": True}, "allcaps"),
         ("ALL_CAPS", {"snake_case": True}, "all_caps"),
         ("SalesforceThing__c", {"snake_case": True}, "salesforce_thing__c"),
-        ("column.with.period", {"replace_period_with_under": True}, "column_with_period"),
+        ("column.with.period", {"replace_period_with_underscore": True}, "column_with_period"),
         ("TestColumn", {"lower": True}, "testcolumn"),
         ("TestColumn", {}, "TestColumn"),
         ("`TestColumn`", {}, "`TestColumn`"),
