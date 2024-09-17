@@ -751,8 +751,8 @@ class SchemaTranslator:
                 )
 
         return (
-            f"CREATE OR REPLACE VIEW {table_name.get_escaped_name('_view')} AS \nSELECT"
-            f" \n{projection} FROM {table_name.get_escaped_name()}"
+            f"CREATE OR REPLACE VIEW {table_name.get_escaped_name('_view')} AS\nSELECT"
+            f"\n{projection} FROM {table_name.get_escaped_name()}"
         )
 
     def _jsonschema_property_to_bigquery_column(
@@ -1084,8 +1084,12 @@ def transform_column_name(
     add_underscore_when_invalid: bool = False,
     snake_case: bool = False,
     replace_period_with_underscore: bool = False,
+    **kwargs
 ) -> str:
-    """Transform a column name to a valid BigQuery column name."""
+    """Transform a column name to a valid BigQuery column name.
+    kwargs is here to handle unspecified column tranforms, this can become an issue if config is added in main
+    branch but code is versioned to run on an old commit.
+    """
     if snake_case and not lower:
         lower = True
     was_quoted = name.startswith("`") and name.endswith("`")
