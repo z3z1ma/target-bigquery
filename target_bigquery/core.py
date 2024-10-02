@@ -516,7 +516,7 @@ class BaseBigQuerySink(BatchSink):
 
     def merge_table(self, bigquery_client:bigquery.Client) -> None:
         target = self.merge_target.as_table()
-        date_columns = ["_sdc_extracted_at", "_sdc_received_at"]
+        ordering_columns = ["_sdc_extracted_at", "_sdc_received_at"]
         tmp, ctas_tmp = None, "SELECT 1 AS _no_op"
         if self._is_dedupe_before_upsert_candidate():
             # We can't use MERGE with a non-unique key, so we need to dedupe the temp table into
@@ -525,7 +525,7 @@ class BaseBigQuerySink(BatchSink):
             dedupe_query = (
                 f"SELECT * FROM {self.table.get_escaped_name()} "
                 f"QUALIFY ROW_NUMBER() OVER (PARTITION BY {', '.join(f'`{p}`' for p in self.key_properties)} "
-                f"ORDER BY COALESCE({', '.join(date_columns)}) DESC) = 1"
+                f"ORDER BY {', '.join(f'{c} DESC' for c in ordering_columns)}) = 1"
             )
             ctas_tmp = f"CREATE OR REPLACE TEMP TABLE `{tmp}` AS {dedupe_query}"
         merge_clause = (
