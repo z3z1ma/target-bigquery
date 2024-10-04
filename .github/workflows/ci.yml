@@ -7,7 +7,7 @@ on:
       - "**.py"
       - "poetry.lock"
   push:
-    branches: [main]
+    branches: [main, bugfix/fix_update_schema_to_read_current_schema_in_target_table]
     paths:
       - "**.py"
       - "poetry.lock"

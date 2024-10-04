@@ -588,7 +588,7 @@ class Denormalized:
         reraise=True,
     )
     def update_schema(self: BaseBigQuerySink) -> None:  # type: ignore
-        """Update the target schema."""
+        """Update the target schema. """
         table = self.table.as_table()
         resolved_schema = self.table.get_resolved_schema(self.apply_transforms)
         current_schema = self.table.get_current_schema()[:]
