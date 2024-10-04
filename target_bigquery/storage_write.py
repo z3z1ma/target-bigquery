@@ -53,7 +53,7 @@ logger = logging.getLogger(__name__)
 
 # Stream specific constant
 MAX_IN_FLIGHT = 15
-"""Maximum number of concurrent requests per worker be processed by grpc before awaiting."""
+"""Maximum number of concurrent requests per worker be processed by grpc before awaiting. """
 
 Dispatcher = Callable[[types.AppendRowsRequest], writer.AppendRowsFuture]
 StreamComponents = Tuple[Field, writer.AppendRowsStream, Dispatcher]
