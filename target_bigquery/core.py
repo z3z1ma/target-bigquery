@@ -204,6 +204,9 @@ class BigQueryTable:
                 time.sleep(5)
         return self._dataset, self._table
 
+    def get_current_schema(self) -> List[bigquery.SchemaField]:
+        return self._table.schema
+
     def default_table_options(self) -> Dict[str, Any]:
         """Returns the default table options for this table."""
         schema_dump = json.dumps(self.jsonschema)
@@ -587,10 +590,11 @@ class Denormalized:
     def update_schema(self: BaseBigQuerySink) -> None:  # type: ignore
         """Update the target schema."""
         table = self.table.as_table()
-        current_schema = table.schema[:]
-        mut_schema = table.schema[:]
-        for expected_field in self.table.get_resolved_schema(self.apply_transforms):
-            if not any(field.name == expected_field.name for field in current_schema):
+        resolved_schema = self.table.get_resolved_schema(self.apply_transforms)
+        current_schema = self.table.get_current_schema()[:]
+        mut_schema = current_schema[:]
+        for expected_field in resolved_schema:
+            if not any(field.name == expected_field.name for field in mut_schema):
                 mut_schema.append(expected_field)
         if len(mut_schema) > len(current_schema):
             table.schema = mut_schema
