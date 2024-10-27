@@ -20,6 +20,7 @@ from typing import Any, Dict, Optional, Type, Union, cast
 
 import orjson
 from google.cloud import bigquery
+from google.cloud.exceptions import NotFound
 
 from target_bigquery.core import (
     BaseBigQuerySink,
@@ -135,6 +136,7 @@ class BigQueryBatchJobSink(BaseBigQuerySink):
         )
         self.increment_jobs_enqueued()
         self.buffer = Compressor()
+        raise NotFound(f"Table {self.table} not found.")
 
 
 class BigQueryBatchJobDenormalizedSink(Denormalized, BigQueryBatchJobSink):
