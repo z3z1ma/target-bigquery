@@ -467,10 +467,13 @@ class BaseBigQuerySink(BatchSink):
         if key_properties and self.config.get("cluster_on_key_properties", False):
             kwargs["table"]["clustering_fields"] = tuple(key_properties[:4])
         partition_grain: Optional[str] = self.config.get("partition_granularity")
+        partition_expiration_days: Optional[int] = self.config.get("partition_expiration_days")
+        expiration_ms: Optional[int] = partition_expiration_days * 24 * 60 * 60 * 1000 if partition_expiration_days is not None else None
         if partition_grain:
             kwargs["table"]["time_partitioning"] = TimePartitioning(
                 type_=PARTITION_STRATEGY[partition_grain.upper()],
                 field="_sdc_batched_at",
+                expiration_ms=expiration_ms,
             )
         # Dataset opts
         location: str = self.config.get(

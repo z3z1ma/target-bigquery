@@ -181,6 +181,11 @@ class TargetBigQuery(Target):
             description="The granularity of the partitioning strategy. Defaults to month.",
         ),
         th.Property(
+            "partition_expiration_days",
+            th.IntegerType,
+            description="If set for date- or timestamp-type partitions, the partition will expire that many days after the date it represents.",
+        ),
+        th.Property(
             "cluster_on_key_properties",
             th.BooleanType,
             default=False,
