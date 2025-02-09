@@ -183,6 +183,7 @@ class TargetBigQuery(Target):
         th.Property(
             "partition_expiration_days",
             th.IntegerType,
+            required=False,
             description="If set for date- or timestamp-type partitions, the partition will expire that many days after the date it represents.",
         ),
         th.Property(
