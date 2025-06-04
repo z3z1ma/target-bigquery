@@ -14,7 +14,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple, Type, cast
 
 import proto
 from google.cloud.bigquery import SchemaField
-from google.protobuf import descriptor_pb2, message_factory
+from google.protobuf import descriptor_pb2, descriptor_pool, message_factory
 
 MAP = {
     # Limited scope of types as these are the only primitive types we can infer
@@ -77,10 +77,14 @@ def proto_schema_factory_v2(
     clsname = (
         f"net.proto2.python.public.target_bigquery.AnonymousProto_{fhash.hexdigest()}"
     )
-    factory = message_factory.MessageFactory(pool=pool)
+    
+    # Use the pool directly if provided, otherwise use the default pool
+    if pool is None:
+        pool = descriptor_pool.Default()
+    
     try:
-        proto_descriptor = factory.pool.FindMessageTypeByName(clsname)
-        proto_cls = factory.GetPrototype(proto_descriptor)
+        proto_descriptor = pool.FindMessageTypeByName(clsname)
+        proto_cls = message_factory.GetMessageClass(proto_descriptor)
     except KeyError:
         package, name = clsname.rsplit(".", 1)
         file_proto = descriptor_pb2.FileDescriptorProto()
@@ -90,11 +94,11 @@ def proto_schema_factory_v2(
         desc_proto.name = name
         for i, f in enumerate(bigquery_schema):
             field_proto = desc_proto.field.add()
-            for k, v in generate_field_v2(f, i + 1, factory.pool).items():
+            for k, v in generate_field_v2(f, i + 1, pool).items():
                 setattr(field_proto, k, v)
-        factory.pool.Add(file_proto)
-        proto_descriptor = factory.pool.FindMessageTypeByName(clsname)
-        proto_cls = factory.GetPrototype(proto_descriptor)
+        pool.Add(file_proto)
+        proto_descriptor = pool.FindMessageTypeByName(clsname)
+        proto_cls = message_factory.GetMessageClass(proto_descriptor)
     return proto_cls  # type: ignore
 
 
