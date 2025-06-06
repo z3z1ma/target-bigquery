@@ -27,6 +27,7 @@ from typing import (
     cast,
 )
 
+import orjson
 from singer_sdk import Sink
 from singer_sdk import typing as th
 from singer_sdk.target_base import Target
@@ -590,4 +591,9 @@ class TargetBigQuery(Target):
         self, raise_errors: bool = True, warnings_as_errors: bool = False
     ) -> Tuple[List[str], List[str]]:
         """Don't throw on config validation since our JSON schema doesn't seem to play well with meltano for whatever reason"""
-        return super()._validate_config(False, False)
+        return super()._validate_config(raise_errors=False)
+
+    # orjson does not support decimal.Decimal, so just override deserialization
+    # behaviour to use orjson directly
+    def deserialize_json(self, line):
+        return orjson.loads(line)
