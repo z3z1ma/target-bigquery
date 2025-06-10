@@ -32,7 +32,7 @@ packages = [
 [tool.poetry.dependencies]
 python = "<3.12,>=3.8"
 requests = ">=2.25.1"
-singer-sdk = ">=0.22.0,<0.23.0"
+singer-sdk = ">=0.42.1,<0.43"
 google-cloud-bigquery = { version = ">=3.4.1,<4", extras = ["bqstorage"] }
 orjson = ">=3.7.2,<4"
 tenacity = ">=8.0.1,<9"
