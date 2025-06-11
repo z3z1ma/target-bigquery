@@ -38,6 +38,97 @@ plugins:
     - batch
     - stream-maps
     - record-flattening
+    settings:
+    - name: credentials_path
+      kind: string
+    - name: credentials_json
+      kind: string
+    - name: project
+      kind: string
+    - name: dataset
+      kind: string
+    - name: location
+      kind: string
+      value: US
+    - name: batch_size
+      kind: integer
+      value: 500
+    - name: fail_fast
+      kind: boolean
+      value: true
+    - name: timeout
+      kind: integer
+      value: 600
+    - name: denormalized
+      kind: boolean
+      value: false
+    - name: method
+      kind: options
+      options:
+      - label: Storage Write API
+        value: storage_write_api
+      - label: Batch Job
+        value: batch_job
+      - label: GCS Stage
+        value: gcs_stage
+      - label: Streaming Insert
+        value: streaming_insert
+      value: storage_write_api
+    - name: generate_view
+      kind: boolean
+      value: false
+    - name: bucket
+      kind: string
+    - name: partition_granularity
+      kind: options
+      options:
+      - label: Year
+        value: year
+      - label: Month
+        value: month
+      - label: Day
+        value: day
+      - label: Hour
+        value: hour
+      value: month
+    - name: partition_expiration_days
+      kind: integer
+    - name: cluster_on_key_properties
+      kind: boolean
+      value: false
+    - name: column_name_transforms.lower
+      kind: boolean
+      value: false
+    - name: column_name_transforms.quote
+      kind: boolean
+      value: false
+    - name: column_name_transforms.add_underscore_when_invalid
+      kind: boolean
+      value: false
+    - name: column_name_transforms.snake_case
+      kind: boolean
+      value: false
+    - name: column_name_transforms.replace_period_with_underscore
+      kind: boolean
+      value: false
+    - name: options.storage_write_batch_mode
+      kind: boolean
+      value: false
+    - name: options.process_pool
+      kind: boolean
+      value: false
+    - name: options.max_workers
+      kind: integer
+      value: false
+    - name: upsert
+      value: false
+    - name: overwrite
+      value: false
+    - name: dedupe_before_upsert
+      value: false
+    - name: schema_resolver_version
+      kind: integer
+      value: 1
     config:
       project: ${BQ_PROJECT}
       method: storage_write_api
