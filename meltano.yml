@@ -37,7 +37,7 @@ plugins:
     - about
     - batch
     - stream-maps
-    - record-flattening
+    - schema-flattening
     settings:
     - name: credentials_path
       kind: string
