@@ -318,7 +318,12 @@ class BaseBigQuerySink(BatchSink):
             ),
         }
         self.table = BigQueryTable(name=self.table_name, **self.table_opts)
-        self.create_target(key_properties=key_properties)
+
+        # apply transformations to key properties
+        for i, k in enumerate(self.key_properties):
+            self.key_properties[i] = transform_column_name(k, **self.table.transforms)
+
+        self.create_target()
         self.update_schema()
         self.merge_target: Optional[BigQueryTable] = None
         self.overwrite_target: Optional[BigQueryTable] = None
@@ -326,7 +331,7 @@ class BaseBigQuerySink(BatchSink):
         # If the stream is marked for one of these strategies, we create a temporary table instead
         # and merge or overwrite the target table with the temporary table after the ingest.
         if (
-            key_properties
+            self.key_properties
             and self.ingestion_strategy is IngestionStrategy.DENORMALIZED
             and self._is_upsert_candidate()
         ):
@@ -460,12 +465,12 @@ class BaseBigQuerySink(BatchSink):
         wait=wait_fixed(1),
         reraise=True,
     )
-    def create_target(self, key_properties: Optional[List[str]] = None) -> None:
+    def create_target(self) -> None:
         """Create the table in BigQuery."""
         kwargs = {"table": {}, "dataset": {}}
         # Table opts
-        if key_properties and self.config.get("cluster_on_key_properties", False):
-            kwargs["table"]["clustering_fields"] = tuple(key_properties[:4])
+        if self.key_properties and self.config.get("cluster_on_key_properties", False):
+            kwargs["table"]["clustering_fields"] = tuple(self.key_properties[:4])
         partition_grain: Optional[str] = self.config.get("partition_granularity")
         partition_expiration_days: Optional[int] = self.config.get("partition_expiration_days")
         expiration_ms: Optional[int] = partition_expiration_days * 24 * 60 * 60 * 1000 if partition_expiration_days is not None else None
