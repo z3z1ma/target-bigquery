@@ -591,3 +591,7 @@ class TargetBigQuery(Target):
     ) -> Tuple[List[str], List[str]]:
         """Don't throw on config validation since our JSON schema doesn't seem to play well with meltano for whatever reason"""
         return super()._validate_config(False, False)
+
+
+if __name__ == "__main__":
+    TargetBigQuery.cli()

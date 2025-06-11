@@ -138,6 +138,8 @@ dmypy.json
 # Test plugins
 plugins/
 output/
+input/*
+!input/tap-carbon-intensity.jsonl
 
 # IDE
 .idea/
