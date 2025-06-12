@@ -154,6 +154,9 @@ class BigQueryTable:
     @cache
     def as_table(self, apply_transforms: bool = False, **kwargs) -> bigquery.Table:
         """Returns a Table instance for this table."""
+        if hasattr(self, "_table"):
+            return self._table
+
         table = bigquery.Table(
             self.as_ref(),
             schema=self.get_resolved_schema(apply_transforms),
