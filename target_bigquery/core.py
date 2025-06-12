@@ -151,9 +151,11 @@ class BigQueryTable:
         """Returns a DatasetReference for this table."""
         return bigquery.DatasetReference(self.project, self.dataset)
 
-    @cache
     def as_table(self, apply_transforms: bool = False, **kwargs) -> bigquery.Table:
         """Returns a Table instance for this table."""
+        if hasattr(self, "_table"):
+            return self._table
+
         table = bigquery.Table(
             self.as_ref(),
             schema=self.get_resolved_schema(apply_transforms),
@@ -176,7 +178,7 @@ class BigQueryTable:
         client: bigquery.Client,
         apply_transforms: bool = False,
         **kwargs,
-    ) -> Tuple[bigquery.Dataset, bigquery.Table]:
+    ) -> bool:
         """Creates a dataset and table for this table.
 
         This is a convenience method that wraps the creation of a dataset and
@@ -202,7 +204,12 @@ class BigQueryTable:
                 )
                 # Wait for eventual consistency (for the sake of GRPC's default stream)
                 time.sleep(5)
-        return self._dataset, self._table
+
+                # the table was created
+                return True
+
+        # the table already exists
+        return False
 
     def default_table_options(self) -> Dict[str, Any]:
         """Returns the default table options for this table."""
@@ -318,8 +325,11 @@ class BaseBigQuerySink(BatchSink):
             ),
         }
         self.table = BigQueryTable(name=self.table_name, **self.table_opts)
-        self.create_target(key_properties=key_properties)
-        self.update_schema()
+
+        created = self.create_target(key_properties=key_properties)
+        if not created:
+            self.update_schema()
+
         self.merge_target: Optional[BigQueryTable] = None
         self.overwrite_target: Optional[BigQueryTable] = None
         # In absence of dedupe or overwrite candidacy, we append to the target table directly
@@ -460,7 +470,7 @@ class BaseBigQuerySink(BatchSink):
         wait=wait_fixed(1),
         reraise=True,
     )
-    def create_target(self, key_properties: Optional[List[str]] = None) -> None:
+    def create_target(self, key_properties: Optional[List[str]] = None) -> bool:
         """Create the table in BigQuery."""
         kwargs = {"table": {}, "dataset": {}}
         # Table opts
@@ -481,13 +491,15 @@ class BaseBigQuerySink(BatchSink):
         )
         kwargs["dataset"]["location"] = location
         # Create the table
-        self.table.create_table(self.client, self.apply_transforms, **kwargs)
+        is_created = self.table.create_table(self.client, self.apply_transforms, **kwargs)
         if self.generate_view:
             self.client.query(
                 self.table.schema_translator.generate_view_statement(
                     self.table,
                 )
             ).result()
+
+        return is_created
 
     def update_schema(self) -> None:
         """Update the target schema in BigQuery."""
