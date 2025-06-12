@@ -589,7 +589,7 @@ class Denormalized:
     )
     def update_schema(self: BaseBigQuerySink) -> None:  # type: ignore
         """Update the target schema."""
-        table = self.table.as_table()
+        table = self.table.as_table(self.apply_transforms)
         current_schema = table.schema[:]
         mut_schema = table.schema[:]
         for expected_field in self.table.get_resolved_schema(self.apply_transforms):
