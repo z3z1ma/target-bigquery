@@ -151,7 +151,6 @@ class BigQueryTable:
         """Returns a DatasetReference for this table."""
         return bigquery.DatasetReference(self.project, self.dataset)
 
-    @cache
     def as_table(self, apply_transforms: bool = False, **kwargs) -> bigquery.Table:
         """Returns a Table instance for this table."""
         if hasattr(self, "_table"):
