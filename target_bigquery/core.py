@@ -719,6 +719,15 @@ class SchemaTranslator:
                 )
                 for name, contents in self.schema.get("properties", {}).items()
             ]
+
+        field_name_count = {}
+        for f in self._translated_schema_transformed:
+            field_name = f.name
+            count = field_name_count.get(field_name, 0)
+            if count:
+                f._properties["name"] += f"_{count}"
+            field_name_count[field_name] = count + 1
+
         return self._translated_schema_transformed
 
     def translate_record(self, record: dict) -> dict:
