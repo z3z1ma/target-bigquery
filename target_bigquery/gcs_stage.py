@@ -161,7 +161,7 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
     @property
     def job_config(self) -> Dict[str, Any]:
         return {
-            "schema": self.table.get_resolved_schema(),
+            "schema": self.table.get_resolved_schema(self.apply_transforms),
             "source_format": bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
             "write_disposition": bigquery.WriteDisposition.WRITE_APPEND,
         }
@@ -256,7 +256,7 @@ class BigQueryGcsStagingDenormalizedSink(Denormalized, BigQueryGcsStagingSink):
     @property
     def job_config(self) -> Dict[str, Any]:
         return {
-            "schema": self.table.get_resolved_schema(),
+            "schema": self.table.get_resolved_schema(self.apply_transforms),
             "source_format": bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
             "write_disposition": bigquery.WriteDisposition.WRITE_APPEND,
             "schema_update_options": [
