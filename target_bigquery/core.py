@@ -574,6 +574,7 @@ class BaseBigQuerySink(BatchSink):
             self.table = cast(BigQueryTable, self.merge_target)
             self.overwrite_target = None
 
+        super().clean_up()
 
 class Denormalized:
     """This class provides common overrides for denormalized sinks and should be subclassed
