@@ -1,0 +1,19 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "target-bigquery",
+            "type": "debugpy",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "module": "target_bigquery.target",
+            "justMyCode": false,
+            "args": [
+                "--input",
+                "input/tap-carbon-intensity.jsonl",
+                "--config",
+                ".secrets/config.json",
+            ],
+        },
+    ]
+}
