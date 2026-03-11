@@ -574,14 +574,13 @@ class BaseBigQuerySink(BatchSink):
             self.table = self.merge_target
             self.merge_target = None
         elif self.overwrite_target is not None:
-            # We must overwrite the target table with the temp table.
-            # Do it in a transaction to avoid partial writes.
-            target = self.overwrite_target.as_table()
+            # Atomically replace the target table with the temp table, then clean up the temp.
             bigquery_client.query(
-                f"DROP TABLE IF EXISTS {self.overwrite_target.get_escaped_name()}; CREATE TABLE"
-                f" {self.overwrite_target.get_escaped_name()} AS SELECT * FROM"
-                f" {self.table.get_escaped_name()}; DROP TABLE IF EXISTS"
-                f" {self.table.get_escaped_name()};"
+                f"CREATE OR REPLACE TABLE {self.overwrite_target.get_escaped_name()}"
+                f" AS SELECT * FROM {self.table.get_escaped_name()};"
+            ).result()
+            bigquery_client.query(
+                f"DROP TABLE IF EXISTS {self.table.get_escaped_name()};"
             ).result()
             self.table = cast(BigQueryTable, self.merge_target)
             self.overwrite_target = None
