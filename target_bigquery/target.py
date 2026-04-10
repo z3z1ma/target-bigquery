@@ -311,11 +311,28 @@ class TargetBigQuery(Target):
             description=(
                 "Determines if the target table should be overwritten on load. Defaults to false. A"
                 " value of true will write to a temporary table and then overwrite the target table"
-                " inside a transaction (so it is safe). A value of false will write to the target"
-                " table directly (append). A value of an array of strings will evaluate the strings"
-                " in order using fnmatch. At the end of the array, the value of the last match will"
-                " be used. If not matched, the default value is false. This is mutually exclusive"
-                " with the `upsert` option. If both are set, `upsert` will take precedence."
+                " using the method specified by `overwrite_strategy`. A value of false will write"
+                " to the target table directly (append). A value of an array of strings will"
+                " evaluate the strings in order using fnmatch. At the end of the array, the value"
+                " of the last match will be used. If not matched, the default value is false. This"
+                " is mutually exclusive with the `upsert` option. If both are set, `upsert` will"
+                " take precedence."
+            ),
+        ),
+        th.Property(
+            "overwrite_strategy",
+            th.CustomType(
+                {
+                    "type": "string",
+                    "enum": ["replace", "truncate"],
+                }
+            ),
+            default="replace",
+            description=(
+                "Controls how `overwrite` mode works. When `replace` (default) is used, the"
+                " target table is replaced. When `truncate` is used, the target table is"
+                " truncated and new data is inserted, preserving metadata. Both methods write"
+                " atomically."
             ),
         ),
         th.Property(

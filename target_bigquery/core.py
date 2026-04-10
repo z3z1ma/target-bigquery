@@ -563,6 +563,22 @@ class BaseBigQuerySink(BatchSink):
             f"DROP TABLE IF EXISTS {self.table.get_escaped_name()};"
         ).result()
 
+    def overwrite_by_replace(self, bigquery_client: bigquery.Client) -> None:
+        bigquery_client.query(
+            f"CREATE OR REPLACE TABLE {self.overwrite_target.get_escaped_name()}"
+            f" AS SELECT * FROM {self.table.get_escaped_name()};"
+        ).result()
+
+    def overwrite_by_truncate_insert(self, bigquery_client: bigquery.Client) -> None:
+        # Wrapped in a transaction so the truncate rolls back if the insert fails.
+        bigquery_client.query(
+            f"BEGIN TRANSACTION;"
+            f" TRUNCATE TABLE {self.overwrite_target.get_escaped_name()};"
+            f" INSERT INTO {self.overwrite_target.get_escaped_name()}"
+            f" SELECT * FROM {self.table.get_escaped_name()};"
+            f" COMMIT TRANSACTION;"
+        ).result()
+
     def clean_up(self) -> None:
         """Clean up the target table."""
         # If gcs_stage method was used, self.client is probably
@@ -574,11 +590,16 @@ class BaseBigQuerySink(BatchSink):
             self.table = self.merge_target
             self.merge_target = None
         elif self.overwrite_target is not None:
-            # Atomically replace the target table with the temp table, then clean up the temp.
-            bigquery_client.query(
-                f"CREATE OR REPLACE TABLE {self.overwrite_target.get_escaped_name()}"
-                f" AS SELECT * FROM {self.table.get_escaped_name()};"
-            ).result()
+            if self.config["overwrite_strategy"] == "truncate":
+                try:
+                    bigquery_client.get_table(self.overwrite_target.as_ref())
+                except NotFound:
+                    self.overwrite_by_replace(bigquery_client)
+                else:
+                    self.overwrite_by_truncate_insert(bigquery_client)
+            else:
+                self.overwrite_by_replace(bigquery_client)
+
             bigquery_client.query(
                 f"DROP TABLE IF EXISTS {self.table.get_escaped_name()};"
             ).result()
