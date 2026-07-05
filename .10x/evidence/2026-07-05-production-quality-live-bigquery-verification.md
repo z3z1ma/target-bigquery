@@ -9,20 +9,22 @@ Relates-To: .10x/tickets/2026-07-05-quality-procedure-completion-audit.md, .10x/
 
 The corrected service-account key path at `~/Documents/regal-scholar-336206-47839b5c155a.json` is readable. The key contents were not printed or committed.
 
-Local quality gates and the live-compatible BigQuery integration subset pass after the production hardening slice.
+Local quality gates, security scans, CodeQL, and the live-compatible BigQuery integration subset pass after the production hardening slices through pushed commit `ceeafca`.
 
 ## Procedure
 
 - `uv lock --check && git diff --check`
 - `uv run --no-sync ruff format --check . && uv run --no-sync ruff check . && uv run --no-sync --with ty ty check && uv run --no-sync mypy . && uv run --no-sync --with tach tach check`
 - `uv run --no-sync pytest -q -n auto --timeout=300`
-- `uv run --no-sync coverage run --branch -m pytest -q --timeout=300 && uv run --no-sync coverage report --show-missing && uv run --no-sync coverage json -o /tmp/target-bigquery-ai-quality/coverage.json`
-- `uv run --no-sync --with radon radon cc target_bigquery -s -a -j > /tmp/target-bigquery-ai-quality/radon-cc.json && uv run --no-sync --with complexipy complexipy . && uv run --no-sync vulture target_bigquery --min-confidence 80 && uv run --no-sync deptry . && uv run --no-sync pydoclint target_bigquery`
-- `uv audit --frozen && semgrep p/default && semgrep p/security-audit`
-- `osv-scanner scan source -r . --format json --output /tmp/target-bigquery-ai-quality/osv.json`
-- `gitleaks git --report-format json --report-path /tmp/target-bigquery-ai-quality/gitleaks-git.json`
-- `gitleaks dir . --report-format json --report-path /tmp/target-bigquery-ai-quality/gitleaks-dir.json`
-- CodeQL database creation and analysis to `/tmp/target-bigquery-ai-quality/codeql.sarif`
+- `uv run --no-sync coverage run --branch -m pytest -q --timeout=300 && uv run --no-sync coverage report --show-missing && uv run --no-sync coverage json -o /tmp/target-bigquery-ai-quality/coverage-final.json`
+- `uv run --no-sync --with radon radon cc target_bigquery -s -a -j > /tmp/target-bigquery-ai-quality/radon-cc-final.json && uv run --no-sync --with complexipy complexipy . && uv run --no-sync vulture target_bigquery --min-confidence 80 && uv run --no-sync deptry . && uv run --no-sync pydoclint target_bigquery`
+- `uv audit --frozen`
+- `uv run --with semgrep semgrep scan --config p/default --json --output /tmp/target-bigquery-ai-quality/semgrep-final.json`
+- `uv run --with semgrep semgrep scan --config p/security-audit --json --output /tmp/target-bigquery-ai-quality/semgrep-security-final.json`
+- `osv-scanner scan source -r . --format json --output-file /tmp/target-bigquery-ai-quality/osv-final.json`
+- `gitleaks git --report-format json --report-path /tmp/target-bigquery-ai-quality/gitleaks-git-final.json`
+- `gitleaks dir . --report-format json --report-path /tmp/target-bigquery-ai-quality/gitleaks-dir-final.json`
+- CodeQL database creation and analysis to `/tmp/target-bigquery-ai-quality/codeql-final.sarif`
 - `uv run --no-sync pytest target_bigquery/tests/test_core_pure.py::test_schema_translation_benchmark --benchmark-json=/tmp/target-bigquery-ai-quality/benchmark.json`
 - `uv run --no-sync --with scalene scalene run --cpu-only -o /tmp/target-bigquery-ai-quality/scalene.json .venv/bin/pytest --- -q target_bigquery/tests/test_benchmarks.py::test_schema_translation_benchmark --timeout=60 --benchmark-disable`
 - `uv run --no-sync --with memray memray run -q -f -o /tmp/target-bigquery-ai-quality/memray.bin -m pytest -q target_bigquery/tests/test_benchmarks.py::test_schema_translation_benchmark --timeout=60 --benchmark-disable && uv run --no-sync --with memray memray summary /tmp/target-bigquery-ai-quality/memray.bin > /tmp/target-bigquery-ai-quality/memray-summary.txt`
@@ -36,22 +38,22 @@ Local quality gates and the live-compatible BigQuery integration subset pass aft
 
 - Lock/diff: exit 0.
 - Ruff format/check, ty, mypy, Tach: exit 0.
-- Local pytest: exit 0, `127 passed, 13 skipped in 5.17s`.
-- Coverage: exit 0, 70% line coverage, `1468/2007` lines, `218/398` branches.
+- Local pytest: exit 0, `152 passed, 13 skipped in 5.56s`.
+- Coverage: exit 0, 82% line coverage, `2122/2490` statements.
 - Radon/Complexipy/Vulture/Deptry/pydoclint: exit 0.
-  - Radon measured 317 blocks, average complexity 2.55, max complexity 23 at `target_bigquery/core.py::merge_table`.
+  - Radon measured 405 blocks, average complexity 2.55, max rank D.
 - uv audit: exit 0, no vulnerabilities in the locked environment.
 - OSV: exit 0, 0 vulnerabilities.
 - Gitleaks git and directory scans: exit 0, 0 findings.
 - Semgrep default and security-audit scans: exit 0, 0 findings.
 - CodeQL: exit 0, 0 SARIF results.
-- jscpd: exit 0, 1.7342987034854354% duplication.
+- jscpd: exit 0, 1.5846814130075932% duplication, 10 exact clones.
 - Benchmark: exit 0, `test_schema_translation_benchmark` mean 67.922 microseconds.
 - Scalene: exit 0, one benchmark test passed, JSON profile saved to `/tmp/target-bigquery-ai-quality/scalene.json`.
 - Memray: exit 0, one benchmark test passed, binary profile saved to `/tmp/target-bigquery-ai-quality/memray.bin`, summary saved to `/tmp/target-bigquery-ai-quality/memray-summary.txt`.
-- Live-compatible BigQuery subset: exit 0, `22 passed, 6 deselected in 299.40s`.
-  - Created and deleted dataset `regal-scholar-336206.target_bigquery_codex_20260705015722`.
-  - Cleanup confirmed the throwaway GCS bucket name was not found, as expected for the excluded GCS variants.
+- Live-compatible BigQuery subset: exit 0, `22 passed, 6 deselected in 282.01s`.
+  - Created and deleted dataset `regal-scholar-336206.target_bigquery_live_1783244907`.
+- GitHub refresh after pushed commits: open issues `[]`, open pull requests `[]`.
 
 ## External Limits Observed
 
@@ -64,6 +66,7 @@ Local quality gates and the live-compatible BigQuery integration subset pass aft
 - The uv packaging conversion remains intact.
 - The production hardening slice is compatible with the locked dependency set and static tooling.
 - Batch load, Storage Write API, upsert, overwrite, generated-view-independent fixed-schema paths, denormalized paths, and standard Singer SDK target behavior pass against live BigQuery when not blocked by GCS billing or legacy streaming tier restrictions.
+- Legacy streaming insert row-error returns are now treated as worker errors and covered by unit regression tests in pushed commit `ceeafca`.
 - No secret material was printed into the command output summarized here or added to the repository.
 
 ## Limits

@@ -1,14 +1,14 @@
 Status: recorded
 Created: 2026-07-05
 Updated: 2026-07-05
-Target: production hardening working tree before commit
-Verdict: concerns
+Target: production hardening pushed through commit ceeafca
+Verdict: pass
 
 # Production Quality Burn-Down Review
 
 ## Target
 
-Uncommitted working tree covering production hardening for BigQuery correctness, selector semantics, JSON compatibility, worker fail-fast behavior, GCS client usage, Storage Write finalization, README/config documentation, and regression tests.
+Pushed `main` through commit `ceeafca`, covering production hardening for BigQuery correctness, selector semantics, JSON compatibility, worker fail-fast behavior, GCS client usage, Storage Write finalization, generated-view/config behavior, Storage Write nested proto handling, legacy streaming row-error handling, README/config documentation, and regression tests.
 
 ## Assumptions Tested
 
@@ -23,17 +23,16 @@ Uncommitted working tree covering production hardening for BigQuery correctness,
 
 ## Findings
 
-- Significant: `merge_table` remains the highest-complexity block at Radon complexity 23. The current refactor keeps behavior local and tested, and the tool gate exits zero, but future merge changes should consider extracting schema-intersection and SQL-clause construction helpers.
-- Significant: GCS staging live coverage remains externally blocked by the project billing account state. Source-backed GCS fixes are covered by unit tests, but live GCS staging should not be represented as verified.
-- Significant: Legacy streaming insert live coverage remains externally blocked by the BigQuery free tier. CI now skips only that variant; source normalization is unit-tested, but live legacy streaming is not verified in this project.
-- Minor: GitHub issue and PR burn-down has source-backed fixes for many correctness issues, but GitHub closure actions must wait until this commit is pushed.
+- Minor: `merge_table` remains the highest-complexity block family; Radon/Complexipy exit zero, merge behavior has regression coverage, and further extraction should wait for the next functional change to avoid speculative churn.
+- Minor: GCS staging live coverage remains externally blocked by the project billing account state. Source-backed GCS behavior is covered by unit tests, but live GCS staging should not be represented as verified.
+- Minor: Legacy streaming insert live coverage remains externally blocked by the BigQuery free tier. CI now skips only that variant; returned row errors are unit-tested as worker failures, but live legacy streaming is not verified in this project.
+- Minor: GitHub issue and PR burn-down is complete as of the final refresh: open issues `[]`, open pull requests `[]`.
 
 ## Verdict
 
-Concerns raised, with no source-code blocker for committing this slice. The remaining concerns are either external live-service constraints or GitHub write actions that depend on the pushed commit.
+Pass. No source-code blocker remains. The only residual limits are external live-service constraints recorded in `.10x/evidence/2026-07-05-production-quality-live-bigquery-verification.md`.
 
 ## Residual Risk
 
-- Live GCS staging behavior must be rechecked under a project with enabled billing before closing GCS-only claims.
-- Legacy streaming insert must be rechecked under a project tier that permits streaming inserts before closing live legacy-streaming claims.
-- Open GitHub issues/PRs still require post-push mapping and closure/comment actions.
+- Live GCS staging behavior must be rechecked under a project with enabled billing before making GCS-live claims.
+- Legacy streaming insert must be rechecked under a project tier that permits streaming inserts before making live legacy-streaming claims.

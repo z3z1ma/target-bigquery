@@ -1,4 +1,4 @@
-Status: active
+Status: done
 Created: 2026-07-05
 Updated: 2026-07-05
 Depends-On: .10x/specs/github-issue-pr-burn-down.md, .10x/research/2026-07-05-github-issue-pr-burn-down-context.md
@@ -43,12 +43,12 @@ Burn down the 18 open issues and 10 open PRs observed on 2026-07-05 by fixing, s
 - 2026-07-05: Generated-view/config slice addresses #34, #39, #40, #104, and the remaining table-name portion of #108 with local and live BigQuery evidence in `.10x/evidence/2026-07-05-generated-view-config-verification.md`.
 - 2026-07-05: Install/protobuf/stream-map slice addresses #111, #113, and #124 with isolated pip install, protobuf 6 generation, console-script, and alias-routing evidence in `.10x/evidence/2026-07-05-install-protobuf-stream-map-verification.md`.
 - 2026-07-05: Storage Write nested slice fixes #71 and strengthens #76 evidence with live nested default-stream verification in `.10x/evidence/2026-07-05-storage-write-nested-verification.md`.
+- 2026-07-05: Closed all remaining open GitHub issues and PRs with pushed-evidence comments. Refresh commands returned zero open issues and zero open PRs; evidence is recorded in `.10x/evidence/2026-07-05-github-zero-open-verification.md`.
+- 2026-07-05: Final pushed source/test slice `ceeafca` added legacy streaming row-error handling and hill-climbed coverage/duplication metrics without reopening GitHub issues or pull requests.
 
 ## Blockers
 
-- GCS staging live verification is blocked by disabled project billing.
-- Legacy streaming insert live verification is blocked by the project free-tier streaming restriction.
-- GitHub issue/PR closure commands must wait until the production hardening commit is pushed.
+- None for GitHub burn-down closure. GCS staging and legacy streaming live-verification limits are recorded as external limits in `.10x/evidence/2026-07-05-production-quality-live-bigquery-verification.md`.
 
 ## Evidence Expectations
 
