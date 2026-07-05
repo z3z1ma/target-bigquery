@@ -39,6 +39,7 @@ Burn down the 18 open issues and 10 open PRs observed on 2026-07-05 by fixing, s
 - 2026-07-05: Synthesis recorded in `.10x/research/2026-07-05-github-issue-pr-burn-down-context.md`.
 - 2026-07-05: Production hardening slice addresses source-backed portions of #93, #99, #101, #103, #107, #108, #110, #118, #125, and #127 with regression tests.
 - 2026-07-05: Live-compatible BigQuery subset passed against project `regal-scholar-336206`; GCS staging and legacy streaming remain externally blocked as recorded in `.10x/evidence/2026-07-05-production-quality-live-bigquery-verification.md`.
+- 2026-07-05: New dependabot GitHub Actions PRs #129, #130, and #131 were absorbed by updating `.github/workflows/ci.yml` action SHAs on `main`; evidence is recorded in `.10x/evidence/2026-07-05-github-actions-pin-refresh.md`.
 
 ## Blockers
 
