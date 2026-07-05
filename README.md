@@ -195,9 +195,11 @@ tap-carbon-intensity | target-bigquery --config /path/to/target-bigquery-config.
 
 ### Initialize your Development Environment
 
+This project supports Python 3.10 and newer.
+
 ```bash
 pipx install uv
-uv sync --extra dev
+uv sync
 ```
 
 ### Create and Run Tests

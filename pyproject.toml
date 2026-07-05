@@ -7,7 +7,7 @@ name = "z3-target-bigquery"
 version = "0.7.2"
 description = "z3-target-bigquery is a Singer target for BigQuery. It supports storage write, GCS, streaming, and batch load methods. Built with the Meltano SDK."
 readme = "README.md"
-requires-python = ">=3.8,<3.12"
+requires-python = ">=3.10"
 license = "MIT"
 authors = [{ name = "Alex Butler", email = "butler.alex2010@gmail.com" }]
 keywords = ["ELT", "BigQuery"]
@@ -17,36 +17,36 @@ classifiers = [
   "Intended Audience :: Developers",
   "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
-  "Programming Language :: Python :: 3.8",
-  "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
   "Topic :: Software Development :: Libraries :: Python Modules",
   "Typing :: Typed",
 ]
 dependencies = [
-  "google-cloud-bigquery[bqstorage]>=3.4.1,<4",
-  "google-cloud-storage>=2.7.0,<3",
-  "grpcio-status>=1.51.1,<2",
-  "grpcio-tools>=1.51.1,<1.72",
-  "orjson>=3.7.2,<4",
-  "proto-plus>=1.22,<2",
-  "protobuf>=4.21,<6",
-  "setuptools>=67,<81",
-  "singer-sdk>=0.22.0,<0.23.0",
-  "tenacity>=8.0.1,<9",
+  "google-cloud-bigquery[bqstorage]>=3.42.1,<4",
+  "google-cloud-storage>=3.12,<4",
+  "orjson>=3.11.9,<4",
+  "proto-plus>=1.28,<2",
+  "protobuf>=6.33.6,<7",
+  "singer-sdk>=0.54.5,<0.55",
+  "tenacity>=8.0.1,<10",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
   "coverage>=7.6",
+  "deptry>=0.23",
   "mypy>=1.10",
-  "pytest>=7.4",
+  "pydoclint>=0.7",
+  "pytest>=9.0.3",
   "pytest-randomly>=3.15",
   "pytest-timeout>=2.3",
   "pytest-xdist>=3.5",
   "ruff>=0.14",
+  "types-protobuf>=6.30",
   "tox>=4.20",
+  "vulture>=2.14",
 ]
 
 [project.urls]
@@ -60,20 +60,44 @@ target-bigquery = "target_bigquery.target:TargetBigQuery.cli"
 packages = ["target_bigquery"]
 exclude = ["target_bigquery/tests"]
 
+[tool.uv]
+exclude-newer = "7 days"
+constraint-dependencies = [
+  "cryptography>=48.0.1",
+  "pyopenssl>=26.0.0",
+  "python-dotenv>=1.2.2",
+]
+
 [tool.ruff]
 line-length = 100
-target-version = "py38"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
 ignore = [
   # Long generated SQL and JSONL fixtures are clearer when kept as literal expected strings.
   "E501",
-  # Keep the first uv migration focused; existing type aliases still target Python 3.8.
-  "UP006",
-  "UP007",
-  "UP045",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["target_bigquery/tests"]
+
+[tool.deptry.per_rule_ignores]
+DEP004 = ["pytest"]
+
+[tool.mypy]
+python_version = "3.10"
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+module = [
+  "google.cloud.storage",
+  "google.cloud.storage.*",
+  "proto",
+  "proto.*",
+]
+ignore_missing_imports = true
+
+[tool.vulture]
+paths = ["target_bigquery"]
+min_confidence = 80

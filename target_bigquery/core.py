@@ -25,6 +25,7 @@ try:
 except ImportError:
     from functools import lru_cache as cache
 
+from collections.abc import Iterable, Sequence
 from contextlib import contextmanager, suppress
 from copy import copy
 from dataclasses import dataclass, field
@@ -39,28 +40,19 @@ from tempfile import TemporaryFile
 from textwrap import dedent, indent
 from typing import (
     IO,
-    TYPE_CHECKING,
     Any,
-    Dict,
-    Iterable,
-    List,
-    Optional,
-    Type,
-    Union,
     cast,
 )
 
+import google.cloud.storage as storage
 from google.api_core.exceptions import NotFound
-from google.cloud import bigquery, bigquery_storage_v1, storage
+from google.cloud import bigquery, bigquery_storage_v1
 from google.cloud.bigquery import SchemaField
 from google.cloud.bigquery.table import TimePartitioning, TimePartitioningType
 from singer_sdk.sinks import BatchSink
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_fixed
 
 from target_bigquery.constants import DEFAULT_SCHEMA
-
-if TYPE_CHECKING:
-    from target_bigquery.target import TargetBigQuery
 
 
 class IngestionStrategy(Enum):
@@ -99,11 +91,11 @@ class BigQueryTable:
     """The dataset that this table belongs to."""
     project: str
     """The project that this table belongs to."""
-    jsonschema: Dict[str, Any]
+    jsonschema: dict[str, Any]
     """The jsonschema for this table."""
     ingestion_strategy: IngestionStrategy
     """The ingestion strategy for this table."""
-    transforms: Dict[str, bool] = field(default_factory=dict)
+    transforms: dict[str, bool] = field(default_factory=dict)
     """A dict of transformation rules to apply to the table schema."""
     schema_resolver_version: SchemaResolverVersion = SchemaResolverVersion.V1
 
@@ -118,7 +110,7 @@ class BigQueryTable:
             )
         return self._schema_translator
 
-    def get_schema(self, apply_transforms: bool = False) -> List[bigquery.SchemaField]:
+    def get_schema(self, apply_transforms: bool = False) -> list[bigquery.SchemaField]:
         """Returns the jsonschema to bigquery schema translation for this table."""
         if apply_transforms:
             return self.schema_translator.translated_schema_transformed
@@ -128,7 +120,7 @@ class BigQueryTable:
         """Returns the table name as as escaped SQL string."""
         return f"`{self.project}`.`{self.dataset}`.`{self.name}{suffix}`"
 
-    def get_resolved_schema(self, apply_transforms: bool = False) -> List[bigquery.SchemaField]:
+    def get_resolved_schema(self, apply_transforms: bool = False) -> list[bigquery.SchemaField]:
         """Returns the schema for this table after factoring in the ingestion strategy."""
         if self.ingestion_strategy is IngestionStrategy.FIXED:
             return DEFAULT_SCHEMA
@@ -205,7 +197,7 @@ class BigQueryTable:
         # the table already exists
         return False
 
-    def default_table_options(self) -> Dict[str, Any]:
+    def default_table_options(self) -> dict[str, Any]:
         """Returns the default table options for this table."""
         schema_dump = json.dumps(self.jsonschema)
         return {
@@ -225,24 +217,50 @@ class BigQueryTable:
         }
 
     @staticmethod
-    def default_dataset_options() -> Dict[str, Any]:
+    def default_dataset_options() -> dict[str, Any]:
         """Returns the default dataset options for this dataset."""
         return {"location": "US"}
 
     def __hash__(self) -> int:
         return hash((self.name, self.dataset, self.project, json.dumps(self.jsonschema)))
 
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, BigQueryTable):
+            return NotImplemented
+        return (
+            self.name,
+            self.dataset,
+            self.project,
+            self.jsonschema,
+            self.ingestion_strategy,
+            self.transforms,
+            self.schema_resolver_version,
+        ) == (
+            other.name,
+            other.dataset,
+            other.project,
+            other.jsonschema,
+            other.ingestion_strategy,
+            other.transforms,
+            other.schema_resolver_version,
+        )
+
 
 @dataclass
 class BigQueryCredentials:
     """BigQuery credentials."""
 
-    path: Optional[Union[str, Path]] = None
-    json: Optional[str] = None
-    project: Optional[str] = None
+    path: str | Path | None = None
+    json: str | None = None
+    project: str | None = None
 
     def __hash__(self) -> int:
         return hash((self.path, self.json, self.project))
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, BigQueryCredentials):
+            return NotImplemented
+        return (self.path, self.json, self.project) == (other.path, other.json, other.project)
 
 
 class BaseWorker(ABC):
@@ -258,7 +276,6 @@ class BaseWorker(ABC):
         error_notifier: "Connection",
         log_notifier: "Connection",
     ):
-        """Initialize a worker."""
         super().__init__()
         self.ext_id: str = ext_id
         self.queue: Queue = queue
@@ -289,12 +306,11 @@ class BaseBigQuerySink(BatchSink):
 
     def __init__(
         self,
-        target: "TargetBigQuery",
+        target: Any,
         stream_name: str,
-        schema: Dict[str, Any],
-        key_properties: Optional[List[str]],
+        schema: dict[str, Any],
+        key_properties: Sequence[str] | None,
     ) -> None:
-        """Initialize the sink."""
         super().__init__(target, stream_name, schema, key_properties)
         self._credentials = BigQueryCredentials(
             self.config.get("credentials_path"),
@@ -302,7 +318,7 @@ class BaseBigQuerySink(BatchSink):
             self.config["project"],
         )
         self.client = bigquery_client_factory(self._credentials)
-        self.table_opts = {
+        self.table_opts: dict[str, Any] = {
             "project": self.config["project"],
             "dataset": self.config["dataset"],
             "jsonschema": self.schema,
@@ -318,8 +334,8 @@ class BaseBigQuerySink(BatchSink):
         if not created:
             self.update_schema()
 
-        self.merge_target: Optional[BigQueryTable] = None
-        self.overwrite_target: Optional[BigQueryTable] = None
+        self.merge_target: BigQueryTable | None = None
+        self.overwrite_target: BigQueryTable | None = None
         # In absence of dedupe or overwrite candidacy, we append to the target table directly
         # If the stream is marked for one of these strategies, we create a temporary table instead
         # and merge or overwrite the target table with the temporary table after the ingest.
@@ -435,7 +451,7 @@ class BaseBigQuerySink(BatchSink):
     def _validate_and_parse(self, record: dict) -> dict:
         return record
 
-    def preprocess_record(self, record: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+    def preprocess_record(self, record: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
         """Preprocess a record before writing it to the sink."""
         metadata = {
             k: record.pop(k, None)
@@ -456,15 +472,15 @@ class BaseBigQuerySink(BatchSink):
         wait=wait_fixed(1),
         reraise=True,
     )
-    def create_target(self, key_properties: Optional[List[str]] = None) -> bool:
+    def create_target(self, key_properties: Sequence[str] | None = None) -> bool:
         """Create the table in BigQuery."""
-        kwargs = {"table": {}, "dataset": {}}
+        kwargs: dict[str, dict[str, Any]] = {"table": {}, "dataset": {}}
         # Table opts
         if key_properties and self.config.get("cluster_on_key_properties", False):
             kwargs["table"]["clustering_fields"] = tuple(key_properties[:4])
-        partition_grain: Optional[str] = self.config.get("partition_granularity")
-        partition_expiration_days: Optional[int] = self.config.get("partition_expiration_days")
-        expiration_ms: Optional[int] = (
+        partition_grain: str | None = self.config.get("partition_granularity")
+        partition_expiration_days: int | None = self.config.get("partition_expiration_days")
+        expiration_ms: int | None = (
             partition_expiration_days * 24 * 60 * 60 * 1000
             if partition_expiration_days is not None
             else None
@@ -514,19 +530,23 @@ class BaseBigQuerySink(BatchSink):
     @staticmethod
     @abstractmethod
     def worker_cls_factory(
-        worker_executor_cls: Type["Process"], config: Dict[str, Any]
-    ) -> Union[Type[BaseWorker], Type["Process"]]:
+        worker_executor_cls: type["Process"], config: dict[str, Any]
+    ) -> type[BaseWorker] | type["Process"]:
         """Return a worker class for the given parallelization type."""
         raise NotImplementedError
 
     def merge_table(self, bigquery_client: bigquery.Client) -> None:
-        target = self.merge_target.as_table()
+        merge_target = self.merge_target
+        if merge_target is None:
+            raise RuntimeError("merge_table called without a merge target")
+
+        target = merge_target.as_table()
         ordering_columns = ["_sdc_extracted_at", "_sdc_received_at"]
         tmp, ctas_tmp = None, "SELECT 1 AS _no_op"
         if self._is_dedupe_before_upsert_candidate():
             # We can't use MERGE with a non-unique key, so we need to dedupe the temp table into
             # a _SESSION scoped intermediate table.
-            tmp = f"{self.merge_target.name}__tmp"
+            tmp = f"{merge_target.name}__tmp"
             dedupe_query = (
                 f"SELECT * FROM {self.table.get_escaped_name()} "
                 f"QUALIFY ROW_NUMBER() OVER (PARTITION BY {', '.join(f'`{p}`' for p in self.key_properties)} "
@@ -534,7 +554,7 @@ class BaseBigQuerySink(BatchSink):
             )
             ctas_tmp = f"CREATE OR REPLACE TEMP TABLE `{tmp}` AS {dedupe_query}"
         merge_clause = (
-            f"MERGE `{self.merge_target}` AS target USING `{tmp or self.table}` AS source ON "
+            f"MERGE `{merge_target}` AS target USING `{tmp or self.table}` AS source ON "
             + " AND ".join(f"target.`{f}` = source.`{f}`" for f in self.key_properties)
         )
         update_clause = "UPDATE SET " + ", ".join(
@@ -588,33 +608,35 @@ class Denormalized:
         wait=wait_fixed(1),
         reraise=True,
     )
-    def update_schema(self: BaseBigQuerySink) -> None:  # type: ignore
+    def update_schema(self) -> None:
         """Update the target schema."""
-        table = self.table.as_table()
+        sink = cast(BaseBigQuerySink, self)
+        table = sink.table.as_table()
         current_schema = table.schema[:]
         mut_schema = table.schema[:]
-        for expected_field in self.table.get_resolved_schema(self.apply_transforms):
+        for expected_field in sink.table.get_resolved_schema(sink.apply_transforms):
             if not any(field.name == expected_field.name for field in current_schema):
                 mut_schema.append(expected_field)
         if len(mut_schema) > len(current_schema):
             table.schema = mut_schema
-            self.client.update_table(
+            sink.client.update_table(
                 table,
                 ["schema"],
                 retry=bigquery.DEFAULT_RETRY.with_timeout(15),
             )
 
     def preprocess_record(
-        self: BaseBigQuerySink,  # type: ignore
-        record: Dict[str, Any],
-        context: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        self,
+        record: dict[str, Any],
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
         """Preprocess a record before writing it to the sink."""
-        return self.table.schema_translator.translate_record(record)
+        sink = cast(BaseBigQuerySink, self)
+        return sink.table.schema_translator.translate_record(record)
 
 
 @contextmanager
-def augmented_syspath(new_paths: Optional[Iterable[str]] = None):
+def augmented_syspath(new_paths: Iterable[str] | None = None):
     """Context manager to temporarily add paths to sys.path."""
     original_sys_path = sys.path
     if new_paths is not None:
@@ -668,7 +690,7 @@ class _FieldProjection:
     projection: str
     alias: str
 
-    def as_sql(self) -> str:
+    def to_sql(self) -> str:
         """Return the SQL representation of this projection"""
         return f"{self.projection} as {self.alias.lstrip()},\n"
 
@@ -680,8 +702,8 @@ class SchemaTranslator:
 
     def __init__(
         self,
-        schema: Dict[str, Any],
-        transforms: Dict[str, bool],
+        schema: dict[str, Any],
+        transforms: dict[str, bool],
         resolver_version: SchemaResolverVersion = SchemaResolverVersion.V1,
     ) -> None:
         self.schema = schema
@@ -689,13 +711,13 @@ class SchemaTranslator:
         self.resolver_version = resolver_version
         # Used by fixed schema strategy where we defer transformation
         # to the view statement
-        self._translated_schema = None
+        self._translated_schema: list[SchemaField] | None = None
         # Used by the denormalized strategy where we eagerly transform
         # the target schema
-        self._translated_schema_transformed = None
+        self._translated_schema_transformed: list[SchemaField] | None = None
 
     @property
-    def translated_schema(self) -> List[SchemaField]:
+    def translated_schema(self) -> list[SchemaField]:
         """Translate the schema into a BigQuery schema."""
         if not self._translated_schema:
             self._translated_schema = [
@@ -705,7 +727,7 @@ class SchemaTranslator:
         return self._translated_schema
 
     @property
-    def translated_schema_transformed(self) -> List[SchemaField]:
+    def translated_schema_transformed(self) -> list[SchemaField]:
         """Translate the schema into a BigQuery schema using the SchemaTranslator `transforms`."""
         if not self._translated_schema_transformed:
             self._translated_schema_transformed = [
@@ -715,7 +737,7 @@ class SchemaTranslator:
                 for name, contents in self.schema.get("properties", {}).items()
             ]
 
-        field_name_count = {}
+        field_name_count: dict[str, int] = {}
         for f in self._translated_schema_transformed:
             field_name = f.name
             count = field_name_count.get(field_name, 0)
@@ -751,7 +773,7 @@ class SchemaTranslator:
             if field_.mode == "REPEATED":
                 projection += indent(self._wrap_json_array(field_, path="$", depth=1), " " * 4)
             else:
-                projection += indent(self._bigquery_field_to_projection(field_).as_sql(), " " * 4)
+                projection += indent(self._bigquery_field_to_projection(field_).to_sql(), " " * 4)
 
         return (
             f"CREATE OR REPLACE VIEW {table_name.get_escaped_name('_view')} AS\nSELECT"
@@ -769,73 +791,110 @@ class SchemaTranslator:
         resolved. Most of the time this is fine but for the sake of consistency, we default to v1.
         """
         if self.resolver_version == SchemaResolverVersion.V1:
-            # This is the original resolver, which is used by the denormalized strategy
-            if "anyOf" in schema_property and len(schema_property["anyOf"]) > 0:
-                # I have only seen this used in the wild with tap-salesforce, which
-                # is incidentally an important one so lets handle the anyOf case
-                # by giving the 0th index priority.
-                property_type = schema_property["anyOf"][0].get("type", "string")
-                property_format = schema_property["anyOf"][0].get("format", None)
-            else:
-                property_type = schema_property.get("type", "string")
-                property_format = schema_property.get("format")
-
-            if "array" in property_type:
-                if "items" not in schema_property:
-                    return SchemaField(name, "JSON", "REPEATED")
-                items_schema: dict = schema_property["items"]
-                items_type = bigquery_type(items_schema["type"], items_schema.get("format"))
-                if items_type == "record":
-                    return self._translate_record_to_bigquery_schema(name, items_schema, "REPEATED")
-                return SchemaField(name, items_type, "REPEATED")
-            elif "object" in property_type:
-                return self._translate_record_to_bigquery_schema(name, schema_property)
-            else:
-                result_type = bigquery_type(property_type, property_format)
-                return SchemaField(name, result_type, "NULLABLE")
+            return self._jsonschema_property_to_bigquery_column_v1(name, schema_property)
         elif self.resolver_version == SchemaResolverVersion.V2:
-            # This is the new resolver, which is far more lenient and falls back to JSON
-            # if it doesn't know how to translate a property.
-            try:
-                if "anyOf" in schema_property and len(schema_property["anyOf"]) > 0:
-                    # I have only seen this used in the wild with tap-salesforce, which
-                    # is incidentally an important one so lets handle the anyOf case
-                    # by giving the 0th index priority.
-                    property_type = schema_property["anyOf"][0].get("type", "string")
-                    property_format = schema_property["anyOf"][0].get("format", None)
-                else:
-                    property_type = schema_property["type"]
-                    property_format = schema_property.get("format")
-
-                if "array" in property_type:
-                    if "items" not in schema_property or "type" not in schema_property["items"]:
-                        return SchemaField(name, "JSON", "REPEATED")
-                    items_schema: dict = schema_property["items"]
-                    if "patternProperties" in items_schema:
-                        return SchemaField(name, "JSON", "REPEATED")
-                    items_type = bigquery_type(items_schema["type"], items_schema.get("format"))
-                    if items_type == "record":
-                        return self._translate_record_to_bigquery_schema(
-                            name, items_schema, "REPEATED"
-                        )
-                    return SchemaField(name, items_type, "REPEATED")
-                elif "object" in property_type:
-                    if (
-                        "properties" not in schema_property
-                        or len(schema_property["properties"]) == 0
-                        or "patternProperties" in schema_property
-                    ):
-                        return SchemaField(name, "JSON", "NULLABLE")
-                    return self._translate_record_to_bigquery_schema(name, schema_property)
-                else:
-                    if "patternProperties" in schema_property:
-                        return SchemaField(name, "JSON", "NULLABLE")
-                    result_type = bigquery_type(property_type, property_format)
-                    return SchemaField(name, result_type, "NULLABLE")
-            except Exception:
-                return SchemaField(name, "JSON", "NULLABLE")
+            return self._jsonschema_property_to_bigquery_column_v2(name, schema_property)
         else:
             raise ValueError(f"Invalid resolver version: {self.resolver_version}")
+
+    @staticmethod
+    def _property_type_and_format(
+        schema_property: dict, *, require_type: bool
+    ) -> tuple[str | list[str], str | None]:
+        """Return the JSON Schema type and format using the first anyOf option."""
+        any_of = schema_property.get("anyOf")
+        if any_of:
+            return any_of[0].get("type", "string"), any_of[0].get("format")
+
+        if require_type:
+            return schema_property["type"], schema_property.get("format")
+
+        return schema_property.get("type", "string"), schema_property.get("format")
+
+    def _jsonschema_property_to_bigquery_column_v1(
+        self, name: str, schema_property: dict
+    ) -> SchemaField:
+        """Translate a property using the original strict resolver."""
+        property_type, property_format = self._property_type_and_format(
+            schema_property, require_type=False
+        )
+
+        if "array" in property_type:
+            return self._array_jsonschema_property_to_bigquery_column(
+                name,
+                schema_property,
+                fallback_on_untyped_items=False,
+                fallback_on_pattern_properties=False,
+            )
+
+        if "object" in property_type:
+            return self._translate_record_to_bigquery_schema(name, schema_property)
+
+        result_type = bigquery_type(property_type, property_format)
+        return SchemaField(name, result_type, "NULLABLE")
+
+    def _jsonschema_property_to_bigquery_column_v2(
+        self, name: str, schema_property: dict
+    ) -> SchemaField:
+        """Translate a property using the lenient JSON fallback resolver."""
+        try:
+            property_type, property_format = self._property_type_and_format(
+                schema_property, require_type=True
+            )
+
+            if "array" in property_type:
+                return self._array_jsonschema_property_to_bigquery_column(
+                    name,
+                    schema_property,
+                    fallback_on_untyped_items=True,
+                    fallback_on_pattern_properties=True,
+                )
+
+            if "object" in property_type:
+                if self._v2_object_should_fallback_to_json(schema_property):
+                    return SchemaField(name, "JSON", "NULLABLE")
+                return self._translate_record_to_bigquery_schema(name, schema_property)
+
+            if "patternProperties" in schema_property:
+                return SchemaField(name, "JSON", "NULLABLE")
+
+            result_type = bigquery_type(property_type, property_format)
+            return SchemaField(name, result_type, "NULLABLE")
+        except Exception:
+            return SchemaField(name, "JSON", "NULLABLE")
+
+    def _array_jsonschema_property_to_bigquery_column(
+        self,
+        name: str,
+        schema_property: dict,
+        *,
+        fallback_on_untyped_items: bool,
+        fallback_on_pattern_properties: bool,
+    ) -> SchemaField:
+        """Translate an array property into a repeated BigQuery field."""
+        if "items" not in schema_property:
+            return SchemaField(name, "JSON", "REPEATED")
+
+        items_schema: dict = schema_property["items"]
+        if fallback_on_untyped_items and "type" not in items_schema:
+            return SchemaField(name, "JSON", "REPEATED")
+
+        if fallback_on_pattern_properties and "patternProperties" in items_schema:
+            return SchemaField(name, "JSON", "REPEATED")
+
+        items_type = bigquery_type(items_schema["type"], items_schema.get("format"))
+        if items_type == "record":
+            return self._translate_record_to_bigquery_schema(name, items_schema, "REPEATED")
+        return SchemaField(name, items_type, "REPEATED")
+
+    @staticmethod
+    def _v2_object_should_fallback_to_json(schema_property: dict) -> bool:
+        """Return whether the v2 resolver should keep an object as JSON."""
+        return (
+            "properties" not in schema_property
+            or len(schema_property["properties"]) == 0
+            or "patternProperties" in schema_property
+        )
 
     def _translate_record_to_bigquery_schema(
         self, name: str, schema_property: dict, mode: str = "NULLABLE"
@@ -871,7 +930,7 @@ class SchemaTranslator:
                             (
                                 self._bigquery_field_to_projection(
                                     f, path=from_base, depth=depth + 1, base=base
-                                ).as_sql()
+                                ).to_sql()
                                 if f.mode != "REPEATED"
                                 else self._wrap_json_array(
                                     f, path=from_base, depth=depth, base=base
@@ -922,7 +981,7 @@ class SchemaTranslator:
         _v = self._bigquery_field_to_projection(
             field, path="$", depth=depth, base=f"{field.name}__rows"
         )
-        v = _v.as_sql().rstrip(", \n")
+        v = _v.to_sql().rstrip(", \n")
         return (" " * depth * 2) + indent(
             dedent(
                 f"""
@@ -963,8 +1022,9 @@ class Compressor:
     """Compresses streams of bytes using gzip."""
 
     def __init__(self) -> None:
-        """Initialize the compressor."""
+        self._buffer: IO[bytes] | BytesIO | None
         self._compressor = None
+        self._gzip: IO[bytes] | gzip.GzipFile
         self._closed = False
         if shutil.which("gzip") is not None:
             # The buffer outlives __init__ and is closed explicitly in __del__.
@@ -1007,7 +1067,7 @@ class Compressor:
             return self.buffer.read()
         return self.buffer.getvalue()  # type: ignore
 
-    def getbuffer(self) -> Union[memoryview, mmap.mmap]:
+    def getbuffer(self) -> memoryview | mmap.mmap:
         """Return the compressed buffer as a memoryview or mmap."""
         if not self._closed:
             self.close()
@@ -1022,21 +1082,24 @@ class Compressor:
 
     def __del__(self) -> None:
         """Close the compressor and wait for the gzip process to finish. Dereference the buffer."""
+        self._dispose()
+
+    def _dispose(self) -> None:
+        """Release compressor resources."""
         if not self._closed:
             self.close()
-        # close the buffer, ignore error if we have an incremented rc due to memoryview
-        # the gc will take care of the rest when the worker dereferences the buffer
+        # Ignore incremented ref counts from memoryviews; GC will finish cleanup
+        # once the worker dereferences the buffer.
         with suppress(BufferError):
             self.buffer.close()
         if self._compressor is not None and self._compressor.poll() is None:
             self._compressor.kill()
             self._compressor.wait()
-        # dereference
         self._buffer = None
 
 
 # pylint: disable=no-else-return,too-many-branches,too-many-return-statements
-def bigquery_type(property_type: List[str], property_format: Optional[str] = None) -> str:
+def bigquery_type(property_type: str | list[str], property_format: str | None = None) -> str:
     """Convert a JSON Schema type to a BigQuery type."""
     if property_format == "date-time":
         return "timestamp"

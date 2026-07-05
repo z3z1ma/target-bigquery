@@ -1,4 +1,4 @@
-from typing import List
+from typing import Any, cast
 
 import pytest
 import singer_sdk.typing as th
@@ -586,7 +586,7 @@ def test_schema_translator_views(
     ],
     ids=["basic_schema_translation", "schema_translation_with_transform"],
 )
-def test_schema_translator_tables(schema: dict, transforms: dict, expected: List[SchemaField]):
+def test_schema_translator_tables(schema: dict, transforms: dict, expected: list[SchemaField]):
     assert (
         SchemaTranslator(
             schema,
@@ -692,7 +692,7 @@ def test_schema_translator_tables(schema: dict, transforms: dict, expected: List
     ],
 )
 def test_schema_translator_records(
-    schema: dict, transforms: dict, records: List[dict], expected: List[dict]
+    schema: dict, transforms: dict, records: list[dict], expected: list[dict]
 ):
     assert [
         SchemaTranslator(
@@ -725,7 +725,7 @@ def test_jit_compile_proto():
         "TimeColumn": "00:00:00",
     }
     data = jit()
-    descript = jit.DESCRIPTOR
+    descript = cast(Any, jit).DESCRIPTOR
     for f in descript.fields:
         if f.name in payload:
             setattr(data, f.name, payload[f.name])

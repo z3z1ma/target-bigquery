@@ -1,7 +1,7 @@
 Status: recorded
 Created: 2026-07-05
 Updated: 2026-07-05
-Relates-To: .10x/tickets/2026-07-05-uv-packaging-conversion.md, .10x/specs/repository-quality-modernization.md
+Relates-To: .10x/tickets/done/2026-07-05-uv-packaging-conversion.md, .10x/specs/repository-quality-modernization.md
 
 # uv Packaging Conversion Evidence
 
@@ -54,3 +54,4 @@ The first modernization slice converted the project from Poetry metadata/lock ma
 
 - Live BigQuery integration tests were not run because this workstream does not have live BigQuery access or credentials.
 - Full test suite commands that require `BQ_CREDS`, `BQ_PROJECT`, `BQ_DATASET`, and `GCS_BUCKET` remain CI/live-environment checks.
+- The later dependency-security slice removed the temporary direct `setuptools` runtime dependency after updating away from the vulnerable legacy dependency graph.

@@ -13,16 +13,18 @@
 import os
 import shutil
 import time
+from collections.abc import Sequence
 from io import BytesIO
 from mmap import mmap
 from multiprocessing import Process
 from multiprocessing.connection import Connection
 from multiprocessing.dummy import Process as _Thread
 from queue import Empty
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type, Union, cast
+from typing import Any, cast
 
+import google.cloud.storage as storage
 import orjson
-from google.cloud import bigquery, storage
+from google.cloud import bigquery
 from google.cloud.storage.blob import BlobWriter
 
 from target_bigquery.constants import DEFAULT_BUCKET_PATH
@@ -37,16 +39,13 @@ from target_bigquery.core import (
     gcs_client_factory,
 )
 
-if TYPE_CHECKING:
-    from target_bigquery.target import TargetBigQuery
-
 
 class Job:
     """Job to be processed by a worker."""
 
     def __init__(
         self,
-        buffer: Union[memoryview, bytes, mmap],
+        buffer: memoryview | bytes | mmap,
         batch_id: str,
         table: str,
         dataset: str,
@@ -70,7 +69,7 @@ class GcsStagingWorker(BaseWorker):
         client: storage.Client = gcs_client_factory(self.credentials)
         while True:
             try:
-                job: Optional[Job] = self.queue.get(timeout=30.0)
+                job: Job | None = self.queue.get(timeout=30.0)
             except Empty:
                 break
             if job is None:
@@ -127,10 +126,10 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
 
     def __init__(
         self,
-        target: "TargetBigQuery",
+        target: Any,
         stream_name: str,
-        schema: Dict[str, Any],
-        key_properties: Optional[List[str]],
+        schema: dict[str, Any],
+        key_properties: Sequence[str] | None,
     ) -> None:
         super().__init__(target, stream_name, schema, key_properties)
         self.bucket_name = self.config["bucket"]
@@ -143,33 +142,28 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
         self.create_bucket_if_not_exists()
         self.buffer = Compressor()
         self.gcs_notification, self.gcs_notifier = target.pipe_cls(False)
-        self.uris: List[str] = []
+        self.uris: list[str] = []
         self.increment_jobs_enqueued = target.increment_jobs_enqueued
 
     @staticmethod
     def worker_cls_factory(
-        worker_executor_cls: Type[Process], config: Dict[str, Any]
-    ) -> Type[
-        Union[
-            GcsStagingThreadWorker,
-            GcsStagingProcessWorker,
-        ]
-    ]:
+        worker_executor_cls: type[Process], config: dict[str, Any]
+    ) -> type[GcsStagingThreadWorker | GcsStagingProcessWorker]:
         Worker = type("Worker", (GcsStagingWorker, worker_executor_cls), {})
-        return cast(Type[GcsStagingThreadWorker], Worker)
+        return cast(type[GcsStagingThreadWorker], Worker)
 
     @property
-    def job_config(self) -> Dict[str, Any]:
+    def job_config(self) -> dict[str, Any]:
         return {
             "schema": self.table.get_resolved_schema(self.apply_transforms),
             "source_format": bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
             "write_disposition": bigquery.WriteDisposition.WRITE_APPEND,
         }
 
-    def process_record(self, record: Dict[str, Any], context: Dict[str, Any]) -> None:
+    def process_record(self, record: dict[str, Any], context: dict[str, Any]) -> None:
         self.buffer.write(orjson.dumps(record, option=orjson.OPT_APPEND_NEWLINE))
 
-    def process_batch(self, context: Dict[str, Any]) -> None:
+    def process_batch(self, context: dict[str, Any]) -> None:
         self.buffer.close()
         self.global_queue.put(
             Job(
@@ -222,13 +216,14 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
         This is idempotent and will not create
         a new GCS bucket if one already exists."""
         kwargs = {}
-        storage_class: Optional[str] = self.config.get("storage_class")
+        storage_class: str | None = self.config.get("storage_class")
         if storage_class:
             kwargs["storage_class"] = storage_class
         location: str = self.config.get("location", self.default_bucket_options()["location"])
 
         if not hasattr(self, "_gcs_bucket"):
-            self._gcs_bucket = self.client.get_bucket(self.as_bucket())
+            client = cast(storage.Client, self.client)
+            self._gcs_bucket = client.get_bucket(self.as_bucket())
             if self._gcs_bucket is not None:
                 if self._gcs_bucket.location.lower() != location.lower():
                     raise Exception(
@@ -237,20 +232,20 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
                         f"specified location: {location}"
                     )
             else:
-                self._gcs_bucket = self.client.create_bucket(self.as_bucket(), location=location)
+                self._gcs_bucket = client.create_bucket(self.as_bucket(), location=location)
         else:
             # Wait for eventual consistency
             time.sleep(5)
         return self._gcs_bucket
 
     @staticmethod
-    def default_bucket_options() -> Dict[str, str]:
+    def default_bucket_options() -> dict[str, str]:
         return {"storage_class": "STANDARD", "location": "US"}
 
 
 class BigQueryGcsStagingDenormalizedSink(Denormalized, BigQueryGcsStagingSink):
     @property
-    def job_config(self) -> Dict[str, Any]:
+    def job_config(self) -> dict[str, Any]:
         return {
             "schema": self.table.get_resolved_schema(self.apply_transforms),
             "source_format": bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,

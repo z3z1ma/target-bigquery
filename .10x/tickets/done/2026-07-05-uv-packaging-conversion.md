@@ -1,7 +1,7 @@
-Status: active
+Status: done
 Created: 2026-07-05
 Updated: 2026-07-05
-Parent: .10x/tickets/2026-07-05-repository-modernization-plan.md
+Parent: .10x/tickets/done/2026-07-05-repository-modernization-plan.md
 Depends-On: None
 
 # uv Packaging Conversion
@@ -31,6 +31,7 @@ Convert the repository from Poetry-managed packaging to uv-managed PEP 621 packa
 - 2026-07-05: Clean uv import/CLI checks exposed `ModuleNotFoundError: No module named 'pkg_resources'` through `singer-sdk -> fs`; added explicit `setuptools` runtime dependency.
 - 2026-07-05: CLI `--version` initially reported `[could not be detected]` because the target name differs from the distribution name; added a package-name version lookup override and unit coverage.
 - 2026-07-05: Ruff identified an overwrite cleanup bug where the overwrite branch reassigned `self.table` from `merge_target`; fixed to retain `overwrite_target`.
+- 2026-07-05: Packaging conversion committed and pushed as `fc1d337`; see `.10x/evidence/2026-07-05-uv-packaging-conversion.md`.
 
 ## Blockers
 

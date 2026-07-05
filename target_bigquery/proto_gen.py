@@ -10,7 +10,8 @@
 # substantial portions of the Software.
 import hashlib
 import os
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Type, cast
+from collections.abc import Iterable
+from typing import Any
 
 import proto
 from google.cloud.bigquery import SchemaField
@@ -32,10 +33,10 @@ MAP = {
 }
 
 
-def generate_field_v2(base: SchemaField, i: int = 1, pool: Optional[Any] = None) -> Dict[str, Any]:
+def generate_field_v2(base: SchemaField, i: int = 1, pool: Any | None = None) -> dict[str, Any]:
     """Generate proto2 field properties from a SchemaField."""
     name: str = base.name
-    typ: str = cast(str, base.field_type).upper()
+    typ = base.field_type.upper()
 
     if base.mode == "REPEATED":
         label = descriptor_pb2.FieldDescriptorProto.LABEL_REPEATED
@@ -65,10 +66,10 @@ def generate_field_v2(base: SchemaField, i: int = 1, pool: Optional[Any] = None)
 
 
 def proto_schema_factory_v2(
-    bigquery_schema: List[SchemaField], pool: Optional[Any] = None
-) -> Type[proto.Message]:
+    bigquery_schema: list[SchemaField], pool: Any | None = None
+) -> type[proto.Message]:
     """Generate a proto2 Message from a BigQuery schema."""
-    fhash = hashlib.sha1()
+    fhash = hashlib.sha256()
     for f in bigquery_schema:
         fhash.update(hash(f).to_bytes(8, "big", signed=True))
     fname = f"AnonymousProto_{fhash.hexdigest()}.proto"
@@ -98,12 +99,12 @@ def proto_schema_factory_v2(
     return proto_cls  # type: ignore
 
 
-def generate_field(base: SchemaField, i: int = 1) -> Tuple[proto.Field, str]:
+def generate_field(base: SchemaField, i: int = 1) -> tuple[proto.Field, str]:
     """Not intended for production use.
     Generate a proto.Field from a SchemaField."""
-    kwargs = {}
+    kwargs: dict[str, Any] = {}
     name: str = base.name
-    typ: str = cast(str, base.field_type).upper()
+    typ = base.field_type.upper()
 
     cls = proto.RepeatedField if base.mode == "REPEATED" else proto.Field
 
@@ -120,7 +121,7 @@ def generate_field(base: SchemaField, i: int = 1) -> Tuple[proto.Field, str]:
     return (f, name)
 
 
-def proto_schema_factory(bigquery_schema: Iterable[SchemaField]) -> Type[proto.Message]:
+def proto_schema_factory(bigquery_schema: Iterable[SchemaField]) -> type[proto.Message]:
     """Not intended for production use.
     Generate a proto.Message from a BigQuery schema."""
     return type(

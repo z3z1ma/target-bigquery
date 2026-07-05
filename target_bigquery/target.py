@@ -13,18 +13,14 @@
 from __future__ import annotations
 
 import copy
+import multiprocessing as mp
+import multiprocessing.dummy as mp_dummy
 import time
 import uuid
+from collections.abc import Callable, Sequence
 from importlib import metadata
 from typing import (
-    TYPE_CHECKING,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Tuple,
-    Type,
-    Union,
+    Any,
     cast,
 )
 
@@ -55,10 +51,6 @@ from target_bigquery.streaming_insert import (
     BigQueryStreamingInsertDenormalizedSink,
     BigQueryStreamingInsertSink,
 )
-
-if TYPE_CHECKING:
-    from multiprocessing import Process, Queue
-    from multiprocessing.connection import Connection
 
 # Defaults for target worker pool parameters
 MAX_WORKERS = 15
@@ -376,7 +368,7 @@ class TargetBigQuery(Target):
 
         def worker_factory():
             return cast(
-                Type[BaseWorker],
+                type[BaseWorker],
                 self.get_sink_class().worker_cls_factory(
                     self.proc_cls,
                     dict(self.config),
@@ -391,16 +383,16 @@ class TargetBigQuery(Target):
             )
 
         self.worker_factory = worker_factory
-        self.workers: List[Union[BaseWorker, Process]] = []
-        self.worker_pings: Dict[str, float] = {}
+        self.workers: list[BaseWorker | Any] = []
+        self.worker_pings: dict[str, float] = {}
         self._jobs_enqueued = 0
         self._last_worker_creation = 0.0
 
     @classproperty
-    def plugin_version(cls) -> str:
+    def plugin_version(self) -> str:
         """Get the installed package version."""
         try:
-            return metadata.version(cls.package_name)
+            return metadata.version(self.package_name)
         except metadata.PackageNotFoundError:
             return "[could not be detected]"
 
@@ -414,28 +406,24 @@ class TargetBigQuery(Target):
 
     def get_parallelization_components(
         self, default=ParType.THREAD
-    ) -> Tuple[
-        Type[Process],
-        Callable[[bool], Tuple[Connection, Connection]],
-        Callable[[], Queue],
+    ) -> tuple[
+        type[Any],
+        Callable[[bool], tuple[Any, Any]],
+        Callable[[], Any],
         ParType,
     ]:
         """Get the appropriate Process, Pipe, and Queue classes and the assoc ParTyp enum."""
-        use_procs: Optional[bool] = self.config.get("options", {}).get("process_pool")
+        use_procs: bool | None = self.config.get("options", {}).get("process_pool")
 
         if use_procs is None:
             use_procs = default == ParType.PROCESS
 
         if not use_procs:
-            from multiprocessing.dummy import Pipe, Process, Queue
-
             self.logger.info("Using thread-based parallelism")
-            return Process, Pipe, Queue, ParType.THREAD  # type: ignore
+            return mp_dummy.Process, mp_dummy.Pipe, mp_dummy.Queue, ParType.THREAD
         else:
-            from multiprocessing import Pipe, Process, Queue
-
             self.logger.info("Using process-based parallelism")
-            return Process, Pipe, Queue, ParType.PROCESS
+            return mp.Process, mp.Pipe, mp.Queue, ParType.PROCESS
 
     # Worker management methods, which are used to manage the number of
     # workers in the pool. The ensure_workers method should be called
@@ -470,29 +458,23 @@ class TargetBigQuery(Target):
         if the add_worker_predicate evaluates to True. It will always
         ensure that there is at least one worker in the pool."""
         workers_to_cull = []
-        worker_spawned = False
         for i, worker in enumerate(self.workers):
-            if not cast("Process", worker).is_alive():
+            if not cast(Any, worker).is_alive():
                 workers_to_cull.append(i)
         for i in reversed(workers_to_cull):
             worker = self.workers.pop(i)
-            cast(
-                "Process", worker
-            ).join()  # Wait for the worker to terminate. This should be a no-op.
-            self.logger.info("Culling terminated worker %s", worker.ext_id)  # type: ignore
+            cast(Any, worker).join()  # Wait for termination. This should be a no-op.
+            self.logger.info("Culling terminated worker %s", worker.ext_id)
         while self.add_worker_predicate or not self.workers:
             worker = self.worker_factory()
-            cast("Process", worker).start()
+            cast(Any, worker).start()
             self.workers.append(worker)
-            worker_spawned = True
             self.logger.info("Adding worker %s", worker.ext_id)
             self._last_worker_creation = time.time()
-        if worker_spawned:
-            ...
 
     # SDK overrides to inject our worker management logic and sink selection.
 
-    def get_sink_class(self, stream_name: Optional[str] = None) -> Type[BaseBigQuerySink]:
+    def get_sink_class(self, stream_name: str | None = None) -> type[BaseBigQuerySink]:
         """Returns the sink class to use for a given stream based on user config."""
         _ = stream_name
         method, denormalized = (
@@ -521,9 +503,9 @@ class TargetBigQuery(Target):
         self,
         stream_name: str,
         *,
-        record: Optional[dict] = None,
-        schema: Optional[dict] = None,
-        key_properties: Optional[List[str]] = None,
+        record: dict | None = None,
+        schema: dict | None = None,
+        key_properties: Sequence[str] | None = None,
     ) -> Sink:
         """Get a sink for a stream. If the sink does not exist, create it. This override skips sink recreation
         on schema change. Meaningful mid stream schema changes are not supported and extremely rare to begin
@@ -573,31 +555,45 @@ class TargetBigQuery(Target):
         """Drain all sinks and write state message. If is_endofpipe, execute clean_up() on all sinks.
         Includes an additional hook to allow sinks to do any pre-state message processing."""
         state = copy.deepcopy(self._latest_state)
-        sink: BaseBigQuerySink
         self._drain_all(list(self._sinks_active.values()), self.max_parallelism)
         if is_endofpipe:
-            for worker in self.workers:
-                if cast("Process", worker).is_alive():
-                    self.queue.put(None)
-            while len(self.workers):
-                cast("Process", worker).join()
-                worker = self.workers.pop()
-            for sink in self._sinks_active.values():  # type: ignore
-                sink.clean_up()
+            self._shutdown_workers()
+            self._clean_up_sinks()
         else:
-            for worker in self.workers:
-                cast("Process", worker).join()
-            for sink in self._sinks_active.values():  # type: ignore
-                sink.pre_state_hook()
+            self._join_workers()
+            self._run_pre_state_hooks()
         if state:
             self._write_state_message(state)
         self._reset_max_record_age()
 
-    def _validate_config(
-        self, raise_errors: bool = True, warnings_as_errors: bool = False
-    ) -> Tuple[List[str], List[str]]:
+    def _shutdown_workers(self) -> None:
+        """Send poison pills to live workers, then join and clear the pool."""
+        for worker in self.workers:
+            if cast(Any, worker).is_alive():
+                self.queue.put(None)
+        while self.workers:
+            worker = self.workers.pop()
+            cast(Any, worker).join()
+
+    def _join_workers(self) -> None:
+        """Join workers without clearing the pool."""
+        for worker in self.workers:
+            cast(Any, worker).join()
+
+    def _clean_up_sinks(self) -> None:
+        """Run end-of-pipe cleanup hooks for all active sinks."""
+        for sink in self._sinks_active.values():
+            cast(BaseBigQuerySink, sink).clean_up()
+
+    def _run_pre_state_hooks(self) -> None:
+        """Run pre-state hooks for all active sinks."""
+        for sink in self._sinks_active.values():
+            cast(BaseBigQuerySink, sink).pre_state_hook()
+
+    def _validate_config(self, *, raise_errors: bool = True) -> list[str]:
         """Don't throw on config validation since our JSON schema doesn't seem to play well with meltano for whatever reason"""
-        return super()._validate_config(False, False)
+        del raise_errors
+        return super()._validate_config(raise_errors=False)
 
 
 if __name__ == "__main__":

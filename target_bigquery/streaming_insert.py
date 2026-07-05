@@ -14,7 +14,7 @@ import os
 from multiprocessing import Process
 from multiprocessing.dummy import Process as _Thread
 from queue import Empty
-from typing import Any, Dict, List, Optional, Type, Union, cast
+from typing import Any, cast
 
 import orjson
 from google.api_core.exceptions import GatewayTimeout, NotFound
@@ -35,7 +35,7 @@ class Job:
     def __init__(
         self,
         table: bigquery.TableReference,
-        records: List[Dict[str, Any]],
+        records: list[dict[str, Any]],
     ) -> None:
         self.table = table
         self.records = records
@@ -48,11 +48,11 @@ class StreamingInsertWorker(BaseWorker):
     def run(self) -> None:
         """Run the worker."""
         # A monkey patch since we can't override the default json encoder...
-        _http.json = orjson
+        cast(Any, _http).json = orjson
         client: bigquery.Client = bigquery_client_factory(self.credentials)
         while True:
             try:
-                job: Optional[Job] = self.queue.get(timeout=20.0)
+                job: Job | None = self.queue.get(timeout=20.0)
             except Empty:
                 break
             if job is None:
@@ -98,15 +98,10 @@ class BigQueryStreamingInsertSink(BaseBigQuerySink):
 
     @staticmethod
     def worker_cls_factory(
-        worker_executor_cls: Type[Process], config: Dict[str, Any]
-    ) -> Type[
-        Union[
-            StreamingInsertThreadWorker,
-            StreamingInsertProcessWorker,
-        ]
-    ]:
+        worker_executor_cls: type[Process], config: dict[str, Any]
+    ) -> type[StreamingInsertThreadWorker | StreamingInsertProcessWorker]:
         Worker = type("Worker", (StreamingInsertWorker, worker_executor_cls), {})
-        return cast(Type[StreamingInsertThreadWorker], Worker)
+        return cast(type[StreamingInsertThreadWorker], Worker)
 
     def preprocess_record(self, record: dict, context: dict) -> dict:
         record = super().preprocess_record(record, context)
@@ -117,10 +112,10 @@ class BigQueryStreamingInsertSink(BaseBigQuerySink):
     def max_size(self) -> int:
         return min(super().max_size, 500)
 
-    def process_record(self, record: Dict[str, Any], context: Dict[str, Any]) -> None:
+    def process_record(self, record: dict[str, Any], context: dict[str, Any]) -> None:
         self.records_to_drain.append(record)
 
-    def process_batch(self, context: Dict[str, Any]) -> None:
+    def process_batch(self, context: dict[str, Any]) -> None:
         self.global_queue.put(Job(table=self.table.as_ref(), records=self.records_to_drain.copy()))
         self.increment_jobs_enqueued()
         self.records_to_drain = []

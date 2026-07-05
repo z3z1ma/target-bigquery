@@ -16,7 +16,7 @@ from mmap import mmap
 from multiprocessing import Process
 from multiprocessing.dummy import Process as _Thread
 from queue import Empty
-from typing import Any, Dict, Optional, Type, Union, cast
+from typing import Any, cast
 
 import orjson
 from google.cloud import bigquery
@@ -34,10 +34,10 @@ from target_bigquery.core import (
 class Job:
     def __init__(
         self,
-        data: Union[memoryview, bytes, mmap],
+        data: memoryview | bytes | mmap,
         table: bigquery.TableReference,
-        config: Dict[str, Any],
-        timeout: Optional[float] = 600.0,
+        config: dict[str, Any],
+        timeout: float | None = 600.0,
     ) -> None:
         self.data = data
         self.table = table
@@ -54,7 +54,7 @@ class BatchJobWorker(BaseWorker):
         client: bigquery.Client = bigquery_client_factory(self.credentials)
         while True:
             try:
-                job: Optional[Job] = self.queue.get(timeout=30.0)
+                job: Job | None = self.queue.get(timeout=30.0)
             except Empty:
                 break
             if job is None:
@@ -99,7 +99,7 @@ class BigQueryBatchJobSink(BaseBigQuerySink):
     WORKER_CREATION_MIN_INTERVAL = 10.0
 
     @property
-    def job_config(self) -> Dict[str, Any]:
+    def job_config(self) -> dict[str, Any]:
         return {
             "schema": self.table.get_resolved_schema(self.apply_transforms),
             "source_format": bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
@@ -112,15 +112,15 @@ class BigQueryBatchJobSink(BaseBigQuerySink):
 
     @staticmethod
     def worker_cls_factory(
-        worker_executor_cls: Type[Process], config: Dict[str, Any]
-    ) -> Type[Union[BatchJobThreadWorker, BatchJobProcessWorker]]:
+        worker_executor_cls: type[Process], config: dict[str, Any]
+    ) -> type[BatchJobThreadWorker | BatchJobProcessWorker]:
         Worker = type("Worker", (BatchJobWorker, worker_executor_cls), {})
-        return cast(Type[BatchJobThreadWorker], Worker)
+        return cast(type[BatchJobThreadWorker], Worker)
 
-    def process_record(self, record: Dict[str, Any], context: Dict[str, Any]) -> None:
+    def process_record(self, record: dict[str, Any], context: dict[str, Any]) -> None:
         self.buffer.write(orjson.dumps(record, option=orjson.OPT_APPEND_NEWLINE))
 
-    def process_batch(self, context: Dict[str, Any]) -> None:
+    def process_batch(self, context: dict[str, Any]) -> None:
         self.buffer.close()
         self.global_queue.put(
             Job(
@@ -139,7 +139,7 @@ class BigQueryBatchJobSink(BaseBigQuerySink):
 
 class BigQueryBatchJobDenormalizedSink(Denormalized, BigQueryBatchJobSink):
     @property
-    def job_config(self) -> Dict[str, Any]:
+    def job_config(self) -> dict[str, Any]:
         return {
             "schema": self.table.get_resolved_schema(self.apply_transforms),
             "source_format": bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,

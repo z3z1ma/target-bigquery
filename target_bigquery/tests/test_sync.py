@@ -55,7 +55,7 @@ SECONDARY_SINGER_STREAM = """
     ids=["batch_job", "streaming_insert", "storage_write_api", "gcs_stage"],
 )
 @pytest.mark.parametrize("batch_mode", [False, True], ids=["no_batch_mode", "batch_mode"])
-def test_basic_sync(method, batch_mode):
+def test_basic_sync(method, batch_mode, bigquery_gcs_config: dict[str, str]):
     OPTS = {
         "method": method,
         "denormalized": False,
@@ -92,10 +92,7 @@ def test_basic_sync(method, batch_mode):
 
     target = TargetBigQuery(
         config={
-            "credentials_json": os.environ["BQ_CREDS"],
-            "project": os.environ["BQ_PROJECT"],
-            "dataset": os.environ["BQ_DATASET"],
-            "bucket": os.environ["GCS_BUCKET"],
+            **bigquery_gcs_config,
             **OPTS,
         },
     )
@@ -133,7 +130,7 @@ def test_basic_sync(method, batch_mode):
     ["batch_job", "streaming_insert", "gcs_stage", "storage_write_api"],
     ids=["batch_job", "streaming_insert", "gcs_stage", "storage_write_api"],
 )
-def test_basic_denorm_sync(method):
+def test_basic_denorm_sync(method, bigquery_gcs_config: dict[str, str]):
     OPTS = {
         "method": method,
         "denormalized": True,
@@ -157,10 +154,7 @@ def test_basic_denorm_sync(method):
 
     target = TargetBigQuery(
         config={
-            "credentials_json": os.environ["BQ_CREDS"],
-            "project": os.environ["BQ_PROJECT"],
-            "dataset": os.environ["BQ_DATASET"],
-            "bucket": os.environ["GCS_BUCKET"],
+            **bigquery_gcs_config,
             **OPTS,
         },
     )

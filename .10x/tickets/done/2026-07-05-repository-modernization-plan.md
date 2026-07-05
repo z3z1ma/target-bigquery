@@ -1,4 +1,4 @@
-Status: active
+Status: done
 Created: 2026-07-05
 Updated: 2026-07-05
 
@@ -15,18 +15,20 @@ Coordinate the full repository modernization pass requested on 2026-07-05.
 
 ## Child Work
 
-- `.10x/tickets/2026-07-05-uv-packaging-conversion.md`
-- Additional bounded implementation tickets may be opened as tool evidence identifies concrete, non-speculative work.
+- `.10x/tickets/done/2026-07-05-uv-packaging-conversion.md`
+- `.10x/tickets/done/2026-07-05-dependency-security-modernization.md`
 
 ## Progress and Notes
 
 - 2026-07-05: User authorized implementation, dependency/config mutation, commits, pushes, main branch use, GitHub issue/PR context gathering, and metric hill climbing.
 - 2026-07-05: Local repo is on `main` tracking `origin/main`.
 - 2026-07-05: GitHub context gathered with `gh`: 18 open issues and 10 open PRs.
+- 2026-07-05: uv packaging conversion committed and pushed as `fc1d337`.
+- 2026-07-05: Dependency/security modernization evidence recorded in `.10x/evidence/2026-07-05-dependency-security-modernization.md`; closure review passed.
 
 ## Blockers
 
-None for the packaging conversion. Later source changes must remain tied to source-backed or tool-backed findings.
+None.
 
 ## Evidence Expectations
 
