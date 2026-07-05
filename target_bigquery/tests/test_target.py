@@ -363,7 +363,7 @@ def test_drain_all_fail_fast_checks_worker_errors_after_shutdown():
     target.max_parallelism = 1
     target.error_notification = FakeNotification((RuntimeError("worker failed"), "late failure"))
     target.shutdowns = []
-    object.__setattr__(target, "_drain_all", lambda sinks, parallelism: None)
+    object.__setattr__(target, "_drain_all", lambda _sinks, _parallelism: None)
     object.__setattr__(
         target,
         "_clean_up_sinks",

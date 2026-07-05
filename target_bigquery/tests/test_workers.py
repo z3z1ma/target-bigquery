@@ -1,15 +1,20 @@
 """Tests for worker lifecycle helpers that do not require BigQuery."""
 
+from io import BytesIO
 from multiprocessing import Process
 from queue import Empty
-from types import SimpleNamespace
-from typing import cast
+from types import SimpleNamespace, TracebackType
+from typing import Any, cast
 
 import pytest
+from google.cloud import bigquery
 from google.cloud.bigquery import SchemaField
 from google.cloud.bigquery_storage_v1 import exceptions, types
 
+import target_bigquery.batch_job as batch_job
+import target_bigquery.gcs_stage as gcs_stage
 import target_bigquery.storage_write as storage_write
+import target_bigquery.streaming_insert as streaming_insert
 from target_bigquery.target import TargetBigQuery
 
 
@@ -36,6 +41,25 @@ class FakeWorker:
 class EmptyQueue:
     def get(self, timeout: float) -> object:
         raise Empty
+
+
+class SequencedQueue:
+    def __init__(self, *items: object) -> None:
+        self.items = list(items)
+        self.requeued: list[object] = []
+        self.task_done_count = 0
+
+    def get(self, timeout: float) -> object:
+        if not self.items:
+            raise Empty
+        return self.items.pop(0)
+
+    def put(self, item: object) -> None:
+        self.requeued.append(item)
+        self.items.append(item)
+
+    def task_done(self) -> None:
+        self.task_done_count += 1
 
 
 class FakeNotifier:
@@ -82,6 +106,27 @@ def first_error_message(notifier: FakeNotifier) -> tuple[Exception, str]:
     return cast(tuple[Exception, str], notifier.messages[0])
 
 
+def make_worker(worker_cls: type[Any], job: object) -> Any:
+    worker = object.__new__(worker_cls)
+    worker.ext_id = "worker-a"
+    worker.credentials = object()
+    worker.queue = SequencedQueue(job)
+    worker.job_notifier = FakeNotifier()
+    worker.error_notifier = FakeNotifier()
+    worker.log_notifier = FakeNotifier()
+    return worker
+
+
+def make_storage_dispatch_worker() -> Any:
+    worker: Any = object.__new__(storage_write.StorageWriteBatchWorker)
+    worker.queue = FakeQueue()
+    worker.error_notifier = FakeNotifier()
+    worker.logger = SimpleNamespace(info=lambda message: None)
+    worker.max_errors_before_recycle = 5
+    worker.ext_id = "worker-a"
+    return worker
+
+
 class FakeFuture:
     def __init__(
         self,
@@ -110,6 +155,87 @@ class FakeStream:
             raise self.exc
 
 
+class FakeLoadClient:
+    def __init__(self, *failures: Exception) -> None:
+        self.failures = list(failures)
+        self.calls: list[dict[str, object]] = []
+
+    def load_table_from_file(
+        self,
+        file_obj: BytesIO,
+        table: bigquery.TableReference,
+        *,
+        num_retries: int,
+        timeout: float | None,
+        job_config: bigquery.LoadJobConfig,
+    ) -> SimpleNamespace:
+        self.calls.append(
+            {
+                "data": file_obj.read(),
+                "table": table,
+                "num_retries": num_retries,
+                "timeout": timeout,
+                "job_config": job_config,
+            }
+        )
+        if self.failures:
+            raise self.failures.pop(0)
+        return SimpleNamespace(result=lambda: None)
+
+
+class FakeStreamingClient:
+    def __init__(self, *results: list[dict[str, object]]) -> None:
+        self.results = list(results)
+        self.calls: list[dict[str, object]] = []
+
+    def insert_rows_json(
+        self,
+        *,
+        table: bigquery.TableReference,
+        json_rows: list[dict[str, object]],
+    ) -> list[dict[str, object]]:
+        self.calls.append({"table": table, "json_rows": json_rows})
+        return self.results.pop(0) if self.results else []
+
+
+class FakeBlobWriter(BytesIO):
+    def __enter__(self) -> "FakeBlobWriter":
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        del exc_type, exc_val, exc_tb
+        return None
+
+
+class FakeBlob:
+    def __init__(self) -> None:
+        self.writer = FakeBlobWriter()
+        self.open_calls: list[dict[str, object]] = []
+
+    def open(
+        self,
+        mode: str,
+        *,
+        if_generation_match: int,
+        chunk_size: int,
+        timeout: int,
+    ) -> FakeBlobWriter:
+        self.open_calls.append(
+            {
+                "mode": mode,
+                "if_generation_match": if_generation_match,
+                "chunk_size": chunk_size,
+                "timeout": timeout,
+            }
+        )
+        return self.writer
+
+
 def test_shutdown_workers_joins_each_worker_once():
     target = object.__new__(TargetBigQuery)
     target.queue = FakeQueue()
@@ -132,6 +258,129 @@ def test_receive_job_returns_none_when_queue_is_empty():
     worker.queue = EmptyQueue()
 
     assert worker._receive_job() is None
+
+
+def test_batch_job_worker_requeues_transient_load_failures(monkeypatch):
+    client = FakeLoadClient(RuntimeError("temporary load failure"))
+    monkeypatch.setattr(batch_job, "bigquery_client_factory", lambda credentials: client)
+    table = bigquery.TableReference.from_string("project.dataset.orders")
+    job = batch_job.Job(b'{"id":1}\n', table, {}, timeout=12)
+    worker = make_worker(batch_job.BatchJobWorker, job)
+
+    worker.run()
+
+    assert len(client.calls) == 2
+    assert client.calls[0]["data"] == b'{"id":1}\n'
+    assert client.calls[0]["num_retries"] == 3
+    assert client.calls[0]["timeout"] == 12
+    assert job.attempt == 2
+    assert worker.queue.requeued == [job]
+    assert worker.queue.task_done_count == 2
+    assert worker.job_notifier.messages == [True]
+    assert "temporary load failure" in cast(str, worker.log_notifier.messages[0])
+    assert cast(str, worker.log_notifier.messages[1]).startswith("[worker-a] Loaded")
+    assert worker.error_notifier.messages == []
+
+
+def test_batch_job_worker_reports_terminal_load_failures(monkeypatch):
+    exc = RuntimeError("terminal load failure")
+    client = FakeLoadClient(exc)
+    monkeypatch.setattr(batch_job, "bigquery_client_factory", lambda credentials: client)
+    table = bigquery.TableReference.from_string("project.dataset.orders")
+    job = batch_job.Job(b'{"id":1}\n', table, {})
+    job.attempt = 3
+    worker = make_worker(batch_job.BatchJobWorker, job)
+
+    with pytest.raises(RuntimeError, match="terminal load failure"):
+        worker.run()
+
+    error, message = first_error_message(worker.error_notifier)
+    assert error is exc
+    assert "Worker ID: worker-a" in message
+    assert worker.queue.task_done_count == 1
+
+
+def test_streaming_insert_worker_requeues_returned_row_errors(monkeypatch):
+    client = FakeStreamingClient([{"index": 0, "errors": [{"reason": "invalid"}]}], [])
+    monkeypatch.setattr(
+        streaming_insert,
+        "bigquery_client_factory",
+        lambda credentials: client,
+    )
+    table = bigquery.TableReference.from_string("project.dataset.orders")
+    job = streaming_insert.Job(table, [{"id": 1}])
+    worker = make_worker(streaming_insert.StreamingInsertWorker, job)
+
+    worker.run()
+
+    assert len(client.calls) == 2
+    assert job.attempt == 2
+    assert worker.queue.requeued == [job]
+    assert worker.queue.task_done_count == 2
+    assert worker.job_notifier.messages == [True]
+    assert worker.error_notifier.messages == []
+    assert cast(str, worker.log_notifier.messages[0]).startswith("[worker-a] Inserted")
+
+
+def test_streaming_insert_worker_reports_terminal_row_errors(monkeypatch):
+    client = FakeStreamingClient([{"index": 0, "errors": [{"reason": "invalid"}]}])
+    monkeypatch.setattr(
+        streaming_insert,
+        "bigquery_client_factory",
+        lambda credentials: client,
+    )
+    table = bigquery.TableReference.from_string("project.dataset.orders")
+    job = streaming_insert.Job(table, [{"id": 1}])
+    job.attempt = 3
+    worker = make_worker(streaming_insert.StreamingInsertWorker, job)
+
+    with pytest.raises(RuntimeError, match="returned row errors"):
+        worker.run()
+
+    error, message = first_error_message(worker.error_notifier)
+    assert isinstance(error, RuntimeError)
+    assert "returned row errors" in str(error)
+    assert "Worker ID: worker-a" in message
+    assert worker.queue.task_done_count == 1
+
+
+def test_gcs_staging_worker_uploads_and_notifies_path(monkeypatch):
+    blob = FakeBlob()
+    paths: list[str] = []
+    monkeypatch.setattr(gcs_stage, "gcs_client_factory", lambda credentials: object())
+    monkeypatch.setattr(
+        gcs_stage.storage.Blob,
+        "from_string",
+        staticmethod(lambda path, client: paths.append(path) or blob),
+    )
+    gcs_notifier = FakeNotifier()
+    job = gcs_stage.Job(
+        b"payload",
+        "batch-1",
+        "orders",
+        "analytics",
+        "bucket",
+        cast(Any, gcs_notifier),
+    )
+    worker = make_worker(gcs_stage.GcsStagingWorker, job)
+
+    worker.run()
+
+    assert paths == [cast(str, gcs_notifier.messages[0])]
+    assert paths[0].startswith("gs://bucket/target_bigquery/analytics/orders/")
+    assert paths[0].endswith("/batch-1.jsonl.gz")
+    assert blob.writer.getvalue() == b"payload"
+    assert blob.open_calls == [
+        {
+            "mode": "wb",
+            "if_generation_match": 0,
+            "chunk_size": 1024 * 1024 * 10,
+            "timeout": 300,
+        }
+    ]
+    assert worker.queue.task_done_count == 1
+    assert worker.job_notifier.messages == [True]
+    assert cast(str, worker.log_notifier.messages[0]).startswith("[worker-a] Successfully uploaded")
 
 
 def test_generate_request_for_default_stream_uses_stream_path():
@@ -210,12 +459,7 @@ def test_storage_write_worker_factory_selects_stream_or_batch_worker():
 
 
 def test_handle_dispatch_error_requeues_retryable_job():
-    worker = object.__new__(storage_write.StorageWriteBatchWorker)
-    worker.queue = FakeQueue()
-    worker.error_notifier = FakeNotifier()
-    worker.logger = SimpleNamespace(info=lambda message: None)
-    worker.max_errors_before_recycle = 5
-    worker.ext_id = "worker-a"
+    worker = make_storage_dispatch_worker()
     job = SimpleNamespace(attempts=1)
 
     worker._handle_dispatch_error(job, RuntimeError("transient"))
@@ -227,12 +471,7 @@ def test_handle_dispatch_error_requeues_retryable_job():
 
 
 def test_handle_dispatch_error_sends_terminal_error_after_three_attempts():
-    worker = object.__new__(storage_write.StorageWriteBatchWorker)
-    worker.queue = FakeQueue()
-    worker.error_notifier = FakeNotifier()
-    worker.logger = SimpleNamespace(info=lambda message: None)
-    worker.max_errors_before_recycle = 5
-    worker.ext_id = "worker-a"
+    worker = make_storage_dispatch_worker()
     exc = RuntimeError("terminal")
     job = SimpleNamespace(attempts=3)
 

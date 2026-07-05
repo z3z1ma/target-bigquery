@@ -261,6 +261,7 @@ class StorageWriteBatchWorker(BaseWorker):
             try:
                 stream.close()
             except exceptions.StreamClosedError:
+                # The Storage Write client may already close streams during shutdown.
                 pass
             except Exception as exc:
                 self.error_notifier.send((exc, self.serialize_exception(exc)))

@@ -59,7 +59,7 @@ class StreamingInsertWorker(BaseWorker):
             if job is None:
                 break
             try:
-                _ = retry(
+                errors = retry(
                     retry=retry_if_exception_type(
                         (ConnectionError, TimeoutError, NotFound, GatewayTimeout)
                     ),
@@ -67,6 +67,8 @@ class StreamingInsertWorker(BaseWorker):
                     stop=stop_after_delay(10),
                     reraise=True,
                 )(client.insert_rows_json)(table=job.table, json_rows=job.records)
+                if errors:
+                    raise RuntimeError(f"BigQuery streaming insert returned row errors: {errors}")
             except Exception as exc:
                 job.attempt += 1
                 if job.attempt > 3:

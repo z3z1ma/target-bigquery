@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import gzip
 from decimal import Decimal
+from multiprocessing import Process
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -11,17 +13,32 @@ from google.api_core.exceptions import NotFound
 from google.cloud import bigquery
 from singer_sdk.exceptions import MissingKeyPropertiesError
 
-import target_bigquery.core as core
-from target_bigquery.batch_job import BigQueryBatchJobDenormalizedSink, BigQueryBatchJobSink
+from target_bigquery.batch_job import (
+    BatchJobWorker,
+    BigQueryBatchJobDenormalizedSink,
+    BigQueryBatchJobSink,
+)
 from target_bigquery.constants import DEFAULT_SCHEMA
 from target_bigquery.core import (
     BigQueryTable,
+    Compressor,
     IngestionStrategy,
+    ParType,
     SchemaResolverVersion,
     make_json_compatible,
     selection_matches,
 )
-from target_bigquery.gcs_stage import BigQueryGcsStagingSink
+from target_bigquery.core import (
+    time as core_time,
+)
+from target_bigquery.core import (
+    uuid as core_uuid,
+)
+from target_bigquery.gcs_stage import (
+    BigQueryGcsStagingDenormalizedSink,
+    BigQueryGcsStagingSink,
+)
+from target_bigquery.streaming_insert import BigQueryStreamingInsertSink
 
 
 class FakeBigQueryJob:
@@ -53,6 +70,29 @@ class FakeBigQueryClient:
         return FakeBigQueryJob()
 
 
+class FakeBigQueryUriClient:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def load_table_from_uri(
+        self,
+        uris: list[str],
+        table_ref: bigquery.TableReference,
+        *,
+        timeout: int,
+        job_config: bigquery.LoadJobConfig,
+    ) -> FakeBigQueryJob:
+        self.calls.append(
+            {
+                "uris": uris,
+                "table_ref": table_ref,
+                "timeout": timeout,
+                "job_config": job_config,
+            }
+        )
+        return FakeBigQueryJob()
+
+
 class FakeStorageClient:
     def __init__(self) -> None:
         self.created: list[tuple[SimpleNamespace, str]] = []
@@ -66,11 +106,110 @@ class FakeStorageClient:
         return bucket
 
 
+class FakeExistingBucketClient:
+    def __init__(self, location: str) -> None:
+        self.location = location
+
+    def get_bucket(self, bucket_name: str) -> SimpleNamespace:
+        return SimpleNamespace(name=bucket_name, location=self.location)
+
+
+class FakeJobQueue:
+    def __init__(self) -> None:
+        self.items: list[Any] = []
+
+    def put(self, item: Any) -> None:
+        self.items.append(item)
+
+
+class FakeNotification:
+    def __init__(self, *messages: str) -> None:
+        self.messages = list(messages)
+
+    def poll(self) -> bool:
+        return bool(self.messages)
+
+    def recv(self) -> str:
+        return self.messages.pop(0)
+
+
+class FakeLogger:
+    def __init__(self) -> None:
+        self.messages: list[tuple[str, tuple[Any, ...]]] = []
+
+    def info(self, message: str, *args: Any) -> None:
+        self.messages.append((message, args))
+
+
 def make_sink(config: dict[str, Any], *, stream_name: str = "orders") -> BigQueryBatchJobSink:
     sink = object.__new__(BigQueryBatchJobSink)
     sink._config = config
     sink.stream_name = stream_name
     return sink
+
+
+def make_bigquery_table(
+    *,
+    name: str = "orders",
+    jsonschema: dict[str, Any] | None = None,
+    ingestion_strategy: IngestionStrategy = IngestionStrategy.FIXED,
+    transforms: dict[str, bool] | None = None,
+) -> BigQueryTable:
+    return BigQueryTable(
+        name=name,
+        dataset="analytics",
+        project="project",
+        jsonschema=jsonschema or {"type": "object", "properties": {"id": {"type": "integer"}}},
+        ingestion_strategy=ingestion_strategy,
+        transforms=transforms or {},
+    )
+
+
+def make_denormalized_batch_sink(
+    *,
+    jsonschema: dict[str, Any] | None = None,
+    transforms: dict[str, bool] | None = None,
+) -> BigQueryBatchJobDenormalizedSink:
+    sink = object.__new__(BigQueryBatchJobDenormalizedSink)
+    sink.table = make_bigquery_table(
+        jsonschema=jsonschema or {"type": "object", "properties": {}},
+        ingestion_strategy=IngestionStrategy.DENORMALIZED,
+        transforms=transforms,
+    )
+    return sink
+
+
+def make_merge_sink(
+    source_properties: dict[str, dict[str, Any]],
+) -> BigQueryBatchJobDenormalizedSink:
+    sink = object.__new__(BigQueryBatchJobDenormalizedSink)
+    sink._config = {"dedupe_before_upsert": False}
+    sink.stream_name = "orders"
+    sink._key_properties = ["id"]
+    sink.table = make_bigquery_table(
+        name="orders__tmp",
+        jsonschema={"type": "object", "properties": source_properties},
+        ingestion_strategy=IngestionStrategy.DENORMALIZED,
+    )
+    sink.merge_target = make_bigquery_table(
+        jsonschema={"type": "object", "properties": {}},
+        ingestion_strategy=IngestionStrategy.DENORMALIZED,
+    )
+    return sink
+
+
+def prepare_buffered_sink(
+    sink_cls: type[BigQueryBatchJobSink] | type[BigQueryGcsStagingSink],
+) -> tuple[Any, FakeJobQueue, list[bool]]:
+    queue = FakeJobQueue()
+    increments: list[bool] = []
+    sink = object.__new__(sink_cls)
+    sink.buffer = Compressor()
+    sink.global_queue = queue
+    sink.global_par_typ = ParType.THREAD
+    sink.increment_jobs_enqueued = lambda: increments.append(True)
+    sink.table = make_bigquery_table()
+    return sink, queue, increments
 
 
 @pytest.mark.parametrize(
@@ -163,8 +302,8 @@ def test_temporary_table_name_template_uses_safe_placeholders(monkeypatch):
         {"temporary_table_name_template": "tmp-{table_name}-{timestamp}-{uuid}"},
         stream_name="Orders.Stream",
     )
-    monkeypatch.setattr(core.time, "strftime", lambda _: "20260705020530")
-    monkeypatch.setattr(core.uuid, "uuid4", lambda: SimpleNamespace(hex="abc123"))
+    monkeypatch.setattr(core_time, "strftime", lambda _: "20260705020530")
+    monkeypatch.setattr(core_uuid, "uuid4", lambda: SimpleNamespace(hex="abc123"))
 
     assert sink._temporary_table_name() == "tmp_orders_stream_20260705020530_abc123"
 
@@ -217,14 +356,8 @@ def test_fixed_schema_key_validation_checks_nested_data_json_string():
 
 
 def test_denormalized_preprocess_record_applies_table_column_transforms():
-    sink = object.__new__(BigQueryBatchJobDenormalizedSink)
-    sink.table = BigQueryTable(
-        name="orders",
-        dataset="analytics",
-        project="project",
-        jsonschema={"type": "object", "properties": {}},
-        ingestion_strategy=IngestionStrategy.DENORMALIZED,
-        transforms={"snake_case": True, "replace_period_with_underscore": True},
+    sink = make_denormalized_batch_sink(
+        transforms={"snake_case": True, "replace_period_with_underscore": True}
     )
 
     transformed = sink.preprocess_record(
@@ -236,14 +369,8 @@ def test_denormalized_preprocess_record_applies_table_column_transforms():
 
 
 def test_denormalized_key_properties_apply_column_transforms():
-    sink = object.__new__(BigQueryBatchJobDenormalizedSink)
-    sink.table = BigQueryTable(
-        name="orders",
-        dataset="analytics",
-        project="project",
-        jsonschema={"type": "object", "properties": {}},
-        ingestion_strategy=IngestionStrategy.DENORMALIZED,
-        transforms={"snake_case": True, "replace_period_with_underscore": True},
+    sink = make_denormalized_batch_sink(
+        transforms={"snake_case": True, "replace_period_with_underscore": True}
     )
 
     keys = sink._transformed_key_properties(["OrderID", "Nested.Value"])
@@ -286,6 +413,152 @@ def test_create_target_prefers_explicit_clustering_fields():
         "id",
         "region",
     )
+
+
+def test_batch_job_process_batch_enqueues_compressed_json_job():
+    sink, queue, increments = prepare_buffered_sink(BigQueryBatchJobSink)
+
+    sink.process_record({"id": Decimal("1"), "amount": Decimal("12.5")}, {})
+    sink.process_batch({})
+
+    [job] = queue.items
+    assert gzip.decompress(bytes(job.data)) == b'{"id":1,"amount":12.5}\n'
+    assert job.table == sink.table.as_ref()
+    assert job.config["write_disposition"] == bigquery.WriteDisposition.WRITE_APPEND
+    assert increments == [True]
+
+
+def test_denormalized_batch_job_config_allows_field_addition():
+    sink = object.__new__(BigQueryBatchJobDenormalizedSink)
+    sink.table = make_bigquery_table(ingestion_strategy=IngestionStrategy.DENORMALIZED)
+
+    config = sink.job_config
+
+    assert config["schema_update_options"] == [bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION]
+    assert config["ignore_unknown_values"] is True
+    assert sink.evolve_schema() is None
+
+
+def test_batch_job_worker_factory_composes_executor_class():
+    worker_cls = BigQueryBatchJobSink.worker_cls_factory(Process, {})
+
+    assert issubclass(worker_cls, BatchJobWorker)
+    assert issubclass(worker_cls, Process)
+
+
+def test_streaming_insert_preprocess_serializes_fixed_schema_data_as_json():
+    sink = object.__new__(BigQueryStreamingInsertSink)
+    record = {"id": Decimal("1"), "amount": Decimal("12.5"), "_sdc_sequence": 7}
+
+    transformed = sink.preprocess_record(record, {})
+
+    assert transformed["data"] == '{"id":1,"amount":12.5}'
+    assert transformed["_sdc_sequence"] == 7
+
+
+def test_streaming_insert_process_batch_enqueues_copied_records():
+    queue = FakeJobQueue()
+    increments: list[bool] = []
+    sink = object.__new__(BigQueryStreamingInsertSink)
+    sink._config = {"batch_size": 10_000}
+    sink.records_to_drain = []
+    sink.global_queue = queue
+    sink.increment_jobs_enqueued = lambda: increments.append(True)
+    sink.table = make_bigquery_table()
+
+    assert sink.max_size == 500
+    sink.process_record({"id": Decimal("1")}, {})
+    sink.process_batch({})
+
+    [job] = queue.items
+    assert job.table == sink.table.as_ref()
+    assert job.records == [{"id": 1}]
+    assert sink.records_to_drain == []
+    assert increments == [True]
+
+
+def test_gcs_staging_process_batch_enqueues_compressed_upload_job():
+    sink, queue, increments = prepare_buffered_sink(BigQueryGcsStagingSink)
+    notifier = SimpleNamespace()
+    sink.bucket_name = "bucket"
+    sink.gcs_notifier = notifier
+
+    sink.process_record({"id": Decimal("1")}, {})
+    sink.process_batch({"batch_id": "batch-1"})
+
+    [job] = queue.items
+    assert gzip.decompress(bytes(job.buffer)) == b'{"id":1}\n'
+    assert job.batch_id == "batch-1"
+    assert job.table == "orders"
+    assert job.dataset == "analytics"
+    assert job.bucket == "bucket"
+    assert job.gcs_notifier is notifier
+    assert increments == [True]
+
+
+def test_gcs_staging_clean_up_loads_notified_uris(monkeypatch):
+    client = FakeBigQueryUriClient()
+    cleaned: list[bool] = []
+    monkeypatch.setattr(
+        "target_bigquery.gcs_stage.bigquery_client_factory",
+        lambda credentials: client,
+    )
+    monkeypatch.setattr(
+        "target_bigquery.gcs_stage.BaseBigQuerySink.clean_up",
+        lambda self: cleaned.append(True),
+    )
+    sink = object.__new__(BigQueryGcsStagingSink)
+    sink.gcs_notification = FakeNotification("gs://bucket/path/a.jsonl.gz")
+    sink.uris = []
+    sink.logger = FakeLogger()
+    sink._credentials = object()
+    sink._config = {"timeout": 123}
+    sink.table = make_bigquery_table()
+
+    sink.clean_up()
+
+    [call] = client.calls
+    assert call["uris"] == ["gs://bucket/path/a.jsonl.gz"]
+    assert call["table_ref"] == sink.table.as_ref()
+    assert call["timeout"] == 123
+    assert call["job_config"].write_disposition == bigquery.WriteDisposition.WRITE_APPEND
+    assert cleaned == [True]
+    assert ("Data loaded successfully", ()) in sink.logger.messages
+
+
+def test_gcs_staging_bucket_helpers_protect_location(monkeypatch):
+    sink = object.__new__(BigQueryGcsStagingSink)
+    sink._config = {"location": "US", "storage_class": "NEARLINE"}
+    sink.bucket_name = "bucket"
+    sink.client = FakeExistingBucketClient("EU")
+
+    with pytest.raises(Exception, match="Location of existing GCS bucket"):
+        sink.create_bucket_if_not_exists()
+
+    sink.client = object()
+    bucket = sink.as_bucket(location="EU", storage_class="COLDLINE")
+    assert bucket.name == "bucket"
+    assert bucket.storage_class == "COLDLINE"
+
+    slept: list[int] = []
+    sink._gcs_bucket = SimpleNamespace(location="US")
+    monkeypatch.setattr(
+        "target_bigquery.gcs_stage.time.sleep", lambda seconds: slept.append(seconds)
+    )
+
+    assert sink.create_bucket_if_not_exists() is sink._gcs_bucket
+    assert slept == [5]
+
+
+def test_denormalized_gcs_staging_config_allows_field_addition():
+    sink = object.__new__(BigQueryGcsStagingDenormalizedSink)
+    sink.table = make_bigquery_table(ingestion_strategy=IngestionStrategy.DENORMALIZED)
+
+    config = sink.job_config
+
+    assert config["schema_update_options"] == [bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION]
+    assert config["ignore_unknown_values"] is True
+    assert sink.evolve_schema() is None
 
 
 def test_streaming_insert_records_are_normalized_to_json_compatible_values():
@@ -333,33 +606,16 @@ def test_denormalized_update_schema_uses_bigquery_client_for_gcs_stage_sinks():
 
 
 def test_merge_table_uses_shared_columns_and_does_not_update_keys():
-    sink = object.__new__(BigQueryBatchJobDenormalizedSink)
-    sink._config = {"dedupe_before_upsert": False}
-    sink.stream_name = "orders"
-    sink._key_properties = ["id"]
-    sink.table = BigQueryTable(
-        name="orders__tmp",
-        dataset="analytics",
-        project="project",
-        jsonschema={
-            "type": "object",
-            "properties": {
-                "id": {"type": ["integer", "null"]},
-                "value": {"type": ["string", "null"]},
-                "source_only": {"type": ["string", "null"]},
-            },
-        },
-        ingestion_strategy=IngestionStrategy.DENORMALIZED,
+    sink = make_merge_sink(
+        {
+            "id": {"type": ["integer", "null"]},
+            "value": {"type": ["string", "null"]},
+            "source_only": {"type": ["string", "null"]},
+        }
     )
-    sink.merge_target = BigQueryTable(
-        name="orders",
-        dataset="analytics",
-        project="project",
-        jsonschema={"type": "object", "properties": {}},
-        ingestion_strategy=IngestionStrategy.DENORMALIZED,
-    )
+    merge_target = cast(BigQueryTable, sink.merge_target)
     target_table = bigquery.Table(
-        sink.merge_target.as_ref(),
+        merge_target.as_ref(),
         schema=[
             bigquery.SchemaField("id", "INTEGER"),
             bigquery.SchemaField("value", "STRING"),
@@ -368,7 +624,7 @@ def test_merge_table_uses_shared_columns_and_does_not_update_keys():
     )
     client = FakeBigQueryClient(target_table)
 
-    sink.merge_table(client)
+    sink.merge_table(cast(Any, client))
 
     sql = client.queries[0]
     assert "target.`id` = source.`id`" in sql
@@ -380,34 +636,15 @@ def test_merge_table_uses_shared_columns_and_does_not_update_keys():
 
 
 def test_merge_table_omits_matched_clause_when_only_keys_are_shared():
-    sink = object.__new__(BigQueryBatchJobDenormalizedSink)
-    sink._config = {"dedupe_before_upsert": False}
-    sink.stream_name = "orders"
-    sink._key_properties = ["id"]
-    sink.table = BigQueryTable(
-        name="orders__tmp",
-        dataset="analytics",
-        project="project",
-        jsonschema={
-            "type": "object",
-            "properties": {"id": {"type": ["integer", "null"]}},
-        },
-        ingestion_strategy=IngestionStrategy.DENORMALIZED,
-    )
-    sink.merge_target = BigQueryTable(
-        name="orders",
-        dataset="analytics",
-        project="project",
-        jsonschema={"type": "object", "properties": {}},
-        ingestion_strategy=IngestionStrategy.DENORMALIZED,
-    )
+    sink = make_merge_sink({"id": {"type": ["integer", "null"]}})
+    merge_target = cast(BigQueryTable, sink.merge_target)
     target_table = bigquery.Table(
-        sink.merge_target.as_ref(),
+        merge_target.as_ref(),
         schema=[bigquery.SchemaField("id", "INTEGER")],
     )
     client = FakeBigQueryClient(target_table)
 
-    sink.merge_table(client)
+    sink.merge_table(cast(Any, client))
 
     assert "WHEN MATCHED" not in client.queries[0]
 
