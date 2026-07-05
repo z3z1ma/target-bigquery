@@ -408,18 +408,18 @@ SELECT
       STRUCT(
         JSON_VALUE(data, '$.work.customColumns.column_1655996461265') as column_1655996461265,
         ARRAY(
-          SELECT   STRING(column_1644862416222__rows.column_1644862416222) as column_1644862416222
+          SELECT   JSON_VALUE(column_1644862416222__rows, '$') as column_1644862416222
           FROM UNNEST(
               JSON_QUERY_ARRAY(data, '$.work.customColumns.column_1644862416222')
           ) AS column_1644862416222__rows
-          WHERE   STRING(column_1644862416222__rows.column_1644862416222) IS NOT NULL
+          WHERE   JSON_VALUE(column_1644862416222__rows, '$') IS NOT NULL
         ) AS column_1644862416222,
         ARRAY(
-          SELECT   STRING(column_1644861659664__rows.column_1644861659664) as column_1644861659664
+          SELECT   JSON_VALUE(column_1644861659664__rows, '$') as column_1644861659664
           FROM UNNEST(
               JSON_QUERY_ARRAY(data, '$.work.customColumns.column_1644861659664')
           ) AS column_1644861659664__rows
-          WHERE   STRING(column_1644861659664__rows.column_1644861659664) IS NOT NULL
+          WHERE   JSON_VALUE(column_1644861659664__rows, '$') IS NOT NULL
         ) AS column_1644861659664
       ) as customColumns,
       STRUCT(
@@ -568,6 +568,97 @@ def test_schema_translator_views(
         ).generate_view_statement(table)
         == expected
     )
+
+
+def test_schema_translator_generated_view_uses_json_query_for_json_values():
+    schema = {
+        "type": "object",
+        "properties": {
+            "object": {"type": ["object", "null"]},
+            "sources": {"type": ["array", "null"], "items": {"type": ["string", "null"]}},
+        },
+    }
+    table = BigQueryTable(
+        name="versions",
+        dataset="analytics",
+        project="project",
+        jsonschema={},
+        ingestion_strategy=IngestionStrategy.FIXED,
+    )
+
+    sql = SchemaTranslator(schema, {}).generate_view_statement(table)
+
+    assert "JSON_QUERY(data, '$.object') as object" in sql
+    assert "JSON_VALUE(sources__rows, '$') as sources" in sql
+    assert "JSON_VALUE(sources__rows, '$.sources')" not in sql
+    assert "CAST(JSON_VALUE" not in sql
+
+
+def test_schema_translator_generated_view_uses_configured_timestamp_format():
+    schema = {
+        "type": "object",
+        "properties": {
+            "created_at": {"type": ["string", "null"], "format": "date-time"},
+        },
+    }
+    table = BigQueryTable(
+        name="events",
+        dataset="analytics",
+        project="project",
+        jsonschema={},
+        ingestion_strategy=IngestionStrategy.FIXED,
+    )
+
+    sql = SchemaTranslator(
+        schema,
+        {},
+        timestamp_format="%Y-%m-%d %H:%M:%S %z",
+    ).generate_view_statement(table)
+
+    assert (
+        "PARSE_TIMESTAMP('%Y-%m-%d %H:%M:%S %z', JSON_VALUE(data, '$.created_at')) as created_at"
+        in sql
+    )
+
+
+def test_schema_translator_skips_sdk_sdc_fields_not_in_fixed_schema():
+    schema = {
+        "type": "object",
+        "properties": {
+            "_sdc_sync_started_at": {"type": ["string", "null"], "format": "date-time"},
+        },
+    }
+    table = BigQueryTable(
+        name="events",
+        dataset="analytics",
+        project="project",
+        jsonschema={},
+        ingestion_strategy=IngestionStrategy.FIXED,
+    )
+
+    sql = SchemaTranslator(schema, {}).generate_view_statement(table)
+
+    assert "_sdc_sync_started_at" not in sql
+
+
+def test_schema_translator_passes_through_fixed_table_sdc_fields():
+    schema = {
+        "type": "object",
+        "properties": {
+            "_sdc_extracted_at": {"type": ["string", "null"], "format": "date-time"},
+        },
+    }
+    table = BigQueryTable(
+        name="events",
+        dataset="analytics",
+        project="project",
+        jsonschema={},
+        ingestion_strategy=IngestionStrategy.FIXED,
+    )
+
+    sql = SchemaTranslator(schema, {}).generate_view_statement(table)
+
+    assert "_sdc_extracted_at as _sdc_extracted_at" in sql
 
 
 @pytest.mark.parametrize(

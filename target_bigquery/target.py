@@ -155,6 +155,14 @@ class TargetBigQuery(Target):
             default=False,
         ),
         th.Property(
+            "timestamp_format",
+            th.StringType,
+            description=(
+                "Optional BigQuery PARSE_TIMESTAMP format string used for generated timestamp"
+                " view columns when generate_view=true."
+            ),
+        ),
+        th.Property(
             "bucket",
             th.StringType,
             description="The GCS bucket to use for staging data. Only used if method is gcs_stage.",
@@ -188,6 +196,15 @@ class TargetBigQuery(Target):
             description=(
                 "Determines whether to cluster on the key properties from the tap. Defaults to"
                 " false. When false, clustering will be based on _sdc_batched_at instead."
+            ),
+        ),
+        th.Property(
+            "clustering_fields",
+            th.ArrayType(th.StringType),
+            required=False,
+            description=(
+                "Optional explicit BigQuery clustering fields. When set, this takes precedence"
+                " over cluster_on_key_properties."
             ),
         ),
         th.Property(
@@ -348,6 +365,16 @@ class TargetBigQuery(Target):
             description=(
                 "Number of hours before upsert and overwrite temporary tables expire. Defaults"
                 " to 168 hours so long-running syncs do not lose staged data after one day."
+            ),
+        ),
+        th.Property(
+            "temporary_table_name_template",
+            th.StringType,
+            default="{table_name}__{timestamp}__{uuid}",
+            description=(
+                "Template for upsert and overwrite temporary table names. Supports {table_name},"
+                " {timestamp}, and {uuid}; characters outside letters, digits, and underscores are"
+                " normalized to underscores."
             ),
         ),
         th.Property(

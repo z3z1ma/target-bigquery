@@ -11,6 +11,7 @@ from google.api_core.exceptions import NotFound
 from google.cloud import bigquery
 from singer_sdk.exceptions import MissingKeyPropertiesError
 
+import target_bigquery.core as core
 from target_bigquery.batch_job import BigQueryBatchJobDenormalizedSink, BigQueryBatchJobSink
 from target_bigquery.constants import DEFAULT_SCHEMA
 from target_bigquery.core import (
@@ -157,6 +158,17 @@ def test_table_name_replaces_bigquery_invalid_characters():
     assert sink.table_name == "test_specialchars_in_attributes"
 
 
+def test_temporary_table_name_template_uses_safe_placeholders(monkeypatch):
+    sink = make_sink(
+        {"temporary_table_name_template": "tmp-{table_name}-{timestamp}-{uuid}"},
+        stream_name="Orders.Stream",
+    )
+    monkeypatch.setattr(core.time, "strftime", lambda _: "20260705020530")
+    monkeypatch.setattr(core.uuid, "uuid4", lambda: SimpleNamespace(hex="abc123"))
+
+    assert sink._temporary_table_name() == "tmp_orders_stream_20260705020530_abc123"
+
+
 def test_fixed_schema_preprocess_record_moves_sdc_metadata_under_top_level_keys():
     sink = make_sink({})
     record = {
@@ -241,6 +253,39 @@ def test_denormalized_key_properties_apply_column_transforms():
         "order_id",
         "nested__value",
     ]
+
+
+def test_create_target_prefers_explicit_clustering_fields():
+    calls: dict[str, Any] = {}
+    sink = cast(
+        Any,
+        make_sink(
+            {
+                "cluster_on_key_properties": True,
+                "clustering_fields": ["tenant_id", "updated_at", "id", "region", "ignored"],
+            }
+        ),
+    )
+    sink.client = object()
+    sink.table = SimpleNamespace(
+        create_table=lambda client, apply_transforms, **kwargs: (
+            calls.update(
+                client=client,
+                apply_transforms=apply_transforms,
+                kwargs=kwargs,
+            )
+            or True
+        )
+    )
+
+    assert sink.create_target(key_properties=["tap_id"]) is True
+
+    assert calls["kwargs"]["table"]["clustering_fields"] == (
+        "tenant_id",
+        "updated_at",
+        "id",
+        "region",
+    )
 
 
 def test_streaming_insert_records_are_normalized_to_json_compatible_values():

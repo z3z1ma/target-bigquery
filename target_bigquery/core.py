@@ -54,7 +54,7 @@ from singer_sdk.exceptions import MissingKeyPropertiesError
 from singer_sdk.sinks import BatchSink
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_fixed
 
-from target_bigquery.constants import DEFAULT_SCHEMA
+from target_bigquery.constants import DEFAULT_SCHEMA, SDC_FIELDS
 
 
 class IngestionStrategy(Enum):
@@ -162,6 +162,7 @@ class BigQueryTable:
     transforms: dict[str, bool] = field(default_factory=dict)
     """A dict of transformation rules to apply to the table schema."""
     schema_resolver_version: SchemaResolverVersion = SchemaResolverVersion.V1
+    timestamp_format: str | None = None
 
     @property
     def schema_translator(self) -> "SchemaTranslator":
@@ -171,6 +172,7 @@ class BigQueryTable:
                 schema=self.jsonschema,
                 transforms=self.transforms,
                 resolver_version=self.schema_resolver_version,
+                timestamp_format=self.timestamp_format,
             )
         return self._schema_translator
 
@@ -299,6 +301,7 @@ class BigQueryTable:
             self.ingestion_strategy,
             self.transforms,
             self.schema_resolver_version,
+            self.timestamp_format,
         ) == (
             other.name,
             other.dataset,
@@ -307,6 +310,7 @@ class BigQueryTable:
             other.ingestion_strategy,
             other.transforms,
             other.schema_resolver_version,
+            other.timestamp_format,
         )
 
 
@@ -391,6 +395,7 @@ class BaseBigQuerySink(BatchSink):
             "schema_resolver_version": SchemaResolverVersion(
                 self.config.get("schema_resolver_version", 1)
             ),
+            "timestamp_format": self.config.get("timestamp_format"),
         }
         self.table = BigQueryTable(name=self.table_name, **self.table_opts)
         self._input_key_properties = list(key_properties or [])
@@ -423,7 +428,7 @@ class BaseBigQuerySink(BatchSink):
     def _create_overwrite_table(self) -> None:
         expiration_hours = self.config.get("temporary_table_expiration_hours", 7 * 24)
         self.table = BigQueryTable(
-            name=f"{self.table_name}__{time.strftime('%Y%m%d%H%M%S')}__{uuid.uuid4()}",
+            name=self._temporary_table_name(),
             **self.table_opts,
         )
         self.table.create_table(
@@ -443,6 +448,19 @@ class BaseBigQuerySink(BatchSink):
             },
         )
         time.sleep(2.5)  # Wait for eventual consistency
+
+    def _temporary_table_name(self) -> str:
+        """Return the configured temporary table name for upsert/overwrite staging."""
+        template = self.config.get(
+            "temporary_table_name_template",
+            "{table_name}__{timestamp}__{uuid}",
+        )
+        formatted = template.format(
+            table_name=self.table_name,
+            timestamp=time.strftime("%Y%m%d%H%M%S"),
+            uuid=uuid.uuid4().hex,
+        )
+        return re.sub(r"[^a-zA-Z0-9_]", "_", formatted)
 
     def _transformed_key_properties(self, key_properties: Sequence[str] | None) -> list[str] | None:
         """Return key properties as BigQuery column names for the active strategy."""
@@ -549,7 +567,10 @@ class BaseBigQuerySink(BatchSink):
         """Create the table in BigQuery."""
         kwargs: dict[str, dict[str, Any]] = {"table": {}, "dataset": {}}
         # Table opts
-        if key_properties and self.config.get("cluster_on_key_properties", False):
+        clustering_fields = self.config.get("clustering_fields")
+        if clustering_fields:
+            kwargs["table"]["clustering_fields"] = tuple(clustering_fields[:4])
+        elif key_properties and self.config.get("cluster_on_key_properties", False):
             kwargs["table"]["clustering_fields"] = tuple(key_properties[:4])
         partition_grain: str | None = self.config.get("partition_granularity")
         partition_expiration_days: int | None = self.config.get("partition_expiration_days")
@@ -794,10 +815,12 @@ class SchemaTranslator:
         schema: dict[str, Any],
         transforms: dict[str, bool],
         resolver_version: SchemaResolverVersion = SchemaResolverVersion.V1,
+        timestamp_format: str | None = None,
     ) -> None:
         self.schema = schema
         self.transforms = transforms
         self.resolver_version = resolver_version
+        self.timestamp_format = timestamp_format
         # Used by fixed schema strategy where we defer transformation
         # to the view statement
         self._translated_schema: list[SchemaField] | None = None
@@ -859,6 +882,8 @@ class SchemaTranslator:
         """Generate a CREATE VIEW statement for the SchemaTranslator `schema`."""
         projection = ""
         for field_ in self.translated_schema[:]:
+            if field_.name.startswith("_sdc_") and field_.name not in SDC_FIELDS:
+                continue
             if field_.mode == "REPEATED":
                 projection += indent(self._wrap_json_array(field_, path="$", depth=1), " " * 4)
             else:
@@ -1003,7 +1028,7 @@ class SchemaTranslator:
     ) -> _FieldProjection:
         """Translate a BigQuery schema field into a SQL projection."""
         # Pass-through _sdc columns into the projection as-is
-        if field.name.startswith("_sdc_"):
+        if field.name in SDC_FIELDS:
             return _FieldProjection(field.name, field.name)
 
         scalar = f"{base}.{field.name}"
@@ -1067,8 +1092,11 @@ class SchemaTranslator:
         self, field: SchemaField, path: str, depth: int = 0, base: str = "data"
     ) -> str:
         """Translate a BigQuery schema field into a SQL projection for a repeated field."""
-        _v = self._bigquery_field_to_projection(
-            field, path="$", depth=depth, base=f"{field.name}__rows"
+        row_base = f"{field.name}__rows"
+        _v = (
+            self._bigquery_field_to_projection(field, path="$", depth=depth, base=row_base)
+            if field.field_type.upper() == "RECORD"
+            else self._bigquery_array_element_projection(field, depth=depth, base=row_base)
         )
         v = _v.to_sql().rstrip(", \n")
         return (" " * depth * 2) + indent(
@@ -1091,20 +1119,44 @@ class SchemaTranslator:
         self, field: SchemaField, path: str = "$", base: str = "data"
     ) -> _FieldProjection:
         """Translate a BigQuery schema field into a SQL projection for a nullable field."""
+        json_path = f"{path}.{field.name}"
+        value = f"JSON_VALUE({base}, '{json_path}')"
+        query = f"JSON_QUERY({base}, '{json_path}')"
+        return self._json_scalar_projection(field, value, query)
+
+    def _bigquery_array_element_projection(
+        self, field: SchemaField, depth: int, base: str
+    ) -> _FieldProjection:
+        """Translate a repeated scalar BigQuery field from a JSON array element."""
+        value = f"JSON_VALUE({base}, '$')"
+        query = f"JSON_QUERY({base}, '$')"
+        projection = self._json_scalar_projection(field, value, query)
+        return _FieldProjection((" " * depth * 2) + projection.projection, projection.alias)
+
+    def _json_scalar_projection(
+        self,
+        field: SchemaField,
+        value_expression: str,
+        query_expression: str,
+    ) -> _FieldProjection:
+        """Translate a JSON scalar extraction expression into a typed SQL projection."""
         typ = field.field_type.upper()
+        alias = f" {transform_column_name(field.name, **self.transforms)}"
         if typ == "STRING":
+            return _FieldProjection(value_expression, alias)
+        if typ == "JSON":
+            return _FieldProjection(query_expression, alias)
+        if typ == "TIMESTAMP" and self.timestamp_format:
+            escaped_format = self.timestamp_format.replace("'", "''")
             return _FieldProjection(
-                f"JSON_VALUE({base}, '{path}.{field.name}')",
-                f" {transform_column_name(field.name, **self.transforms)}",
+                f"PARSE_TIMESTAMP('{escaped_format}', {value_expression})",
+                alias,
             )
         if typ == "FLOAT":
             typ = "FLOAT64"
         if typ in ("INT", "INTEGER"):
             typ = "INT64"
-        return _FieldProjection(
-            f"CAST(JSON_VALUE({base}, '{path}.{field.name}') as {typ})",
-            f" {transform_column_name(field.name, **self.transforms)}",
-        )
+        return _FieldProjection(f"CAST({value_expression} as {typ})", alias)
 
 
 class Compressor:
