@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from typing import Any
 
 import pytest
+from singer_sdk import Sink
 
 from target_bigquery.batch_job import BigQueryBatchJobDenormalizedSink, BigQueryBatchJobSink
 from target_bigquery.core import ParType
@@ -42,6 +44,36 @@ class FakeWorker:
     def start(self) -> None:
         self.starts += 1
         self.alive = True
+
+
+class FakeNotification:
+    def __init__(self, *messages: object) -> None:
+        self.messages = list(messages)
+
+    def poll(self) -> bool:
+        return bool(self.messages)
+
+    def recv(self) -> object:
+        return self.messages.pop(0)
+
+
+class SinkTrackingTarget(TargetBigQuery):
+    checked_streams: list[str]
+    added: list[tuple[str, dict[str, Any], Sequence[str] | None]]
+    sink_to_add: Sink
+
+    def _assert_sink_exists(self, stream_name: str) -> None:
+        self.checked_streams.append(stream_name)
+
+
+class FailFastDrainTarget(TargetBigQuery):
+    shutdowns: list[bool]
+
+    def resize_worker_pool(self) -> None:
+        pass
+
+    def _shutdown_workers(self) -> None:
+        self.shutdowns.append(True)
 
 
 def make_target(config: dict[str, Any]) -> TargetBigQuery:
@@ -153,38 +185,61 @@ def test_resize_worker_pool_culls_dead_workers_and_starts_at_least_one_worker(ca
 
 
 def test_get_sink_returns_active_sink_when_schema_is_absent():
-    target = make_target({})
-    active_sink = object()
+    target = object.__new__(SinkTrackingTarget)
+    target._config = {}
+    active_sink = object.__new__(BigQueryBatchJobSink)
     target._sinks_active = {"orders": active_sink}
-    checked_streams: list[str] = []
-    target._assert_sink_exists = checked_streams.append
+    target.checked_streams = []
 
     assert target.get_sink("orders") is active_sink
-    assert checked_streams == ["orders"]
+    assert target.checked_streams == ["orders"]
 
 
 def test_get_sink_adds_only_the_first_schema_for_a_stream():
-    target = make_target({})
-    first_sink = object()
-    existing_sink = object()
+    target = object.__new__(SinkTrackingTarget)
+    target._config = {}
+    first_sink = object.__new__(BigQueryBatchJobSink)
+    existing_sink = object.__new__(BigQueryBatchJobSink)
     target._sinks_active = {}
-    added: list[tuple[str, dict[str, Any], list[str] | None]] = []
+    target.added = []
+    target.sink_to_add = first_sink
 
     def add_sink(
         stream_name: str,
         schema: dict[str, Any],
-        key_properties: list[str] | None,
-    ) -> object:
-        added.append((stream_name, schema, key_properties))
-        return first_sink
+        key_properties: Sequence[str] | None = None,
+    ) -> Sink:
+        target.added.append((stream_name, schema, key_properties))
+        return target.sink_to_add
 
-    target.add_sink = add_sink
+    object.__setattr__(target, "add_sink", add_sink)
 
     schema = {"type": "object"}
     assert target.get_sink("orders", schema=schema, key_properties=["id"]) is first_sink
-    assert added == [("orders", schema, ["id"])]
+    assert target.added == [("orders", schema, ["id"])]
 
     target._sinks_active["orders"] = existing_sink
     assert target.get_sink("orders", schema={"type": "object"}, key_properties=["other"]) is (
         existing_sink
     )
+
+
+def test_drain_one_fail_fast_stops_workers_without_writing_state():
+    target = object.__new__(FailFastDrainTarget)
+    target._config = {"fail_fast": True}
+    target.job_notification = FakeNotification()
+    target.log_notification = FakeNotification()
+    exc = RuntimeError("worker failed")
+    target.error_notification = FakeNotification((exc, "serialized failure"))
+    target.shutdowns = []
+    object.__setattr__(
+        target,
+        "drain_all",
+        lambda *, is_endofpipe=False: pytest.fail("drain_all wrote state"),
+    )
+
+    with pytest.raises(RuntimeError, match="serialized failure") as err:
+        target.drain_one(object.__new__(BigQueryBatchJobSink))
+
+    assert err.value.__cause__ is exc
+    assert target.shutdowns == [True]

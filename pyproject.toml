@@ -85,7 +85,7 @@ ignore = [
 testpaths = ["target_bigquery/tests"]
 
 [tool.deptry.per_rule_ignores]
-DEP004 = ["pytest"]
+DEP004 = ["hypothesis", "pytest"]
 
 [tool.mypy]
 python_version = "3.10"

@@ -37,10 +37,14 @@ Burn down the 18 open issues and 10 open PRs observed on 2026-07-05 by fixing, s
 
 - 2026-07-05: Raw issue/PR exports and per-item detail artifacts stored under `.10x/research/.storage/`.
 - 2026-07-05: Synthesis recorded in `.10x/research/2026-07-05-github-issue-pr-burn-down-context.md`.
+- 2026-07-05: Production hardening slice addresses source-backed portions of #93, #99, #101, #103, #107, #108, #110, #118, #125, and #127 with regression tests.
+- 2026-07-05: Live-compatible BigQuery subset passed against project `regal-scholar-336206`; GCS staging and legacy streaming remain externally blocked as recorded in `.10x/evidence/2026-07-05-production-quality-live-bigquery-verification.md`.
 
 ## Blockers
 
-- Live BigQuery/GCS key not found at the path named by the user.
+- GCS staging live verification is blocked by disabled project billing.
+- Legacy streaming insert live verification is blocked by the project free-tier streaming restriction.
+- GitHub issue/PR closure commands must wait until the production hardening commit is pushed.
 
 ## Evidence Expectations
 

@@ -24,6 +24,7 @@ from typing import Any, cast
 
 import google.cloud.storage as storage
 import orjson
+from google.api_core.exceptions import NotFound
 from google.cloud import bigquery
 from google.cloud.storage.blob import BlobWriter
 
@@ -37,6 +38,7 @@ from target_bigquery.core import (
     ParType,
     bigquery_client_factory,
     gcs_client_factory,
+    make_json_compatible,
 )
 
 
@@ -161,7 +163,9 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
         }
 
     def process_record(self, record: dict[str, Any], context: dict[str, Any]) -> None:
-        self.buffer.write(orjson.dumps(record, option=orjson.OPT_APPEND_NEWLINE))
+        self.buffer.write(
+            orjson.dumps(make_json_compatible(record), option=orjson.OPT_APPEND_NEWLINE)
+        )
 
     def process_batch(self, context: dict[str, Any]) -> None:
         self.buffer.close()
@@ -223,16 +227,19 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
 
         if not hasattr(self, "_gcs_bucket"):
             client = cast(storage.Client, self.client)
-            self._gcs_bucket = client.get_bucket(self.as_bucket())
-            if self._gcs_bucket is not None:
-                if self._gcs_bucket.location.lower() != location.lower():
-                    raise Exception(
-                        "Location of existing GCS bucket "
-                        f"{self.bucket_name} ({self._gcs_bucket.location.lower()}) does not match "
-                        f"specified location: {location}"
-                    )
-            else:
+            try:
+                self._gcs_bucket = client.get_bucket(self.bucket_name)
+            except NotFound:
                 self._gcs_bucket = client.create_bucket(self.as_bucket(), location=location)
+            if (
+                self._gcs_bucket is not None
+                and self._gcs_bucket.location.lower() != location.lower()
+            ):
+                raise Exception(
+                    "Location of existing GCS bucket "
+                    f"{self.bucket_name} ({self._gcs_bucket.location.lower()}) does not match "
+                    f"specified location: {location}"
+                )
         else:
             # Wait for eventual consistency
             time.sleep(5)

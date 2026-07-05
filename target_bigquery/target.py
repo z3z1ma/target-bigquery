@@ -278,6 +278,7 @@ class TargetBigQuery(Target):
                 {
                     "anyOf": [
                         {"type": "boolean"},
+                        {"type": "string"},
                         {"type": "array", "items": {"type": "string"}},
                     ]
                 }
@@ -287,9 +288,10 @@ class TargetBigQuery(Target):
                 "Determines if we should upsert. Defaults to false. A value of true will write to a"
                 " temporary table and then merge into the target table (upsert). This requires the"
                 " target table to be unique on the key properties. A value of false will write to"
-                " the target table directly (append). A value of an array of strings will evaluate"
-                " the strings in order using fnmatch. At the end of the array, the value of the"
-                " last match will be used. If not matched, the default value is false (append)."
+                " the target table directly (append). String booleans are accepted for env-based"
+                " configuration. A string or array of strings will evaluate the strings in order"
+                " using fnmatch. At the end of the array, the value of the last match will be used."
+                " If not matched, the default value is false (append)."
             ),
         ),
         th.Property(
@@ -298,6 +300,7 @@ class TargetBigQuery(Target):
                 {
                     "anyOf": [
                         {"type": "boolean"},
+                        {"type": "string"},
                         {"type": "array", "items": {"type": "string"}},
                     ]
                 }
@@ -306,11 +309,12 @@ class TargetBigQuery(Target):
             description=(
                 "Determines if the target table should be overwritten on load. Defaults to false. A"
                 " value of true will write to a temporary table and then overwrite the target table"
-                " inside a transaction (so it is safe). A value of false will write to the target"
-                " table directly (append). A value of an array of strings will evaluate the strings"
-                " in order using fnmatch. At the end of the array, the value of the last match will"
-                " be used. If not matched, the default value is false. This is mutually exclusive"
-                " with the `upsert` option. If both are set, `upsert` will take precedence."
+                " atomically with CREATE OR REPLACE TABLE. A value of false will write to the"
+                " target table directly (append). String booleans are accepted for env-based"
+                " configuration. A string or array of strings will evaluate the strings in order"
+                " using fnmatch. At the end of the array, the value of the last match will be used."
+                " If not matched, the default value is false. This is mutually exclusive with the"
+                " `upsert` option. If both are set, `upsert` will take precedence."
             ),
         ),
         th.Property(
@@ -319,6 +323,7 @@ class TargetBigQuery(Target):
                 {
                     "anyOf": [
                         {"type": "boolean"},
+                        {"type": "string"},
                         {"type": "array", "items": {"type": "string"}},
                     ]
                 }
@@ -333,6 +338,16 @@ class TargetBigQuery(Target):
                 " unique in the source system. Data lake ingestion is often a good example of this"
                 " where the same unique record may exist in the lake at different points in time"
                 " from different extracts."
+                " String booleans and pattern strings are accepted for env-based configuration."
+            ),
+        ),
+        th.Property(
+            "temporary_table_expiration_hours",
+            th.IntegerType,
+            default=168,
+            description=(
+                "Number of hours before upsert and overwrite temporary tables expire. Defaults"
+                " to 168 hours so long-running syncs do not lose staged data after one day."
             ),
         ),
         th.Property(
@@ -536,16 +551,8 @@ class TargetBigQuery(Target):
             e, msg = self.error_notification.recv()
             if self.config.get("fail_fast", True):
                 self.logger.error(msg)
-                try:
-                    # Try to drain if we can. This is a best effort.
-                    # TODO: we should consider if draining here is the right thing
-                    # to do. It's _possible_ we increment the state message when
-                    # data is not actually written. Its _unlikely_ so the upside is
-                    # greater than the downside for now but will revisit this.
-                    self.logger.error("Draining all sinks and terminating.")
-                    self.drain_all(is_endofpipe=True)
-                except Exception:
-                    self.logger.error("Drain failed.")
+                self.logger.error("Terminating workers without writing state.")
+                self._shutdown_workers()
                 raise RuntimeError(msg) from e
             else:
                 self.logger.warning(msg)

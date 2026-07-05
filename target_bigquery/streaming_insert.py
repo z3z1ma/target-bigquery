@@ -26,6 +26,7 @@ from target_bigquery.core import (
     BaseWorker,
     Denormalized,
     bigquery_client_factory,
+    make_json_compatible,
 )
 
 
@@ -105,7 +106,7 @@ class BigQueryStreamingInsertSink(BaseBigQuerySink):
 
     def preprocess_record(self, record: dict, context: dict) -> dict:
         record = super().preprocess_record(record, context)
-        record["data"] = orjson.dumps(record["data"]).decode("utf-8")
+        record["data"] = orjson.dumps(make_json_compatible(record["data"])).decode("utf-8")
         return record
 
     @property
@@ -113,7 +114,7 @@ class BigQueryStreamingInsertSink(BaseBigQuerySink):
         return min(super().max_size, 500)
 
     def process_record(self, record: dict[str, Any], context: dict[str, Any]) -> None:
-        self.records_to_drain.append(record)
+        self.records_to_drain.append(make_json_compatible(record))
 
     def process_batch(self, context: dict[str, Any]) -> None:
         self.global_queue.put(Job(table=self.table.as_ref(), records=self.records_to_drain.copy()))

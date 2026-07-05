@@ -26,10 +26,14 @@ Complete the uploaded Production Python Quality Optimizer procedure against the 
 - 2026-07-05: Added pure unit tests for target sink dispatch, worker-pool selection, stream reuse, selection config, metadata preprocessing, table schema resolution, and Storage Write worker error/backpressure behavior.
 - 2026-07-05: Coverage improved from 45% to 59% before the final deep loop.
 - 2026-07-05: Credential file named by the user was not present at `~/Downloads/regal-scholar-336206-47839b5c155a.json`; broad home search was stopped after the exact-path check and Downloads listing showed no matching file.
+- 2026-07-05: Corrected credential path `~/Documents/regal-scholar-336206-47839b5c155a.json` is available and was used without printing key contents.
+- 2026-07-05: Production hardening added regression coverage for selector strings, fixed-schema key validation, denormalized key transforms, Decimal JSON compatibility, GCS BigQuery-client use, schema-drift-safe merges, fail-fast state safety, and Storage Write already-closed streams.
+- 2026-07-05: Current evidence recorded in `.10x/evidence/2026-07-05-production-quality-live-bigquery-verification.md`: local gates exit zero, coverage is 70%, CodeQL/Semgrep/OSV/Gitleaks/audit are zero-finding, Scalene/Memray exit zero, and the live-compatible BigQuery subset passed 22 tests with 6 deselected.
 
 ## Blockers
 
-- Live BigQuery verification is blocked until the service-account JSON key is available on disk or equivalent `BQ_CREDS`, `BQ_PROJECT`, `BQ_DATASET`, and `GCS_BUCKET` values are provided.
+- GCS staging live verification is blocked by the GCP project's disabled billing account state.
+- Legacy streaming insert live verification is blocked by the BigQuery free-tier streaming restriction.
 
 ## Evidence Expectations
 

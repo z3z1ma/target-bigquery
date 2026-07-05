@@ -63,9 +63,9 @@ The GitHub burn-down should be executed as several coherent workstreams:
 4. Generated-view/schema resolver behavior: #34, #39, #40.
 5. Modernization closure and obsolete PR/issue retirement: #109, #111, #113, #116, #62, #58, #56, #29, #26, #23.
 
-The first two workstreams have source-backed defects that can be fixed without inventing product scope. The Storage Write/generated-view workstreams should use live BigQuery when credentials are available; the stated credential path was not present at `~/Downloads/regal-scholar-336206-47839b5c155a.json` during this pass.
+The first two workstreams have source-backed defects that can be fixed without inventing product scope. The Storage Write/generated-view workstreams should use live BigQuery when credentials are available; the later corrected credential path at `~/Documents/regal-scholar-336206-47839b5c155a.json` allowed live-compatible BigQuery verification, while GCS staging and legacy streaming remained externally blocked by project billing/tier constraints.
 
 ## Limits
 
 - This record summarizes current issue/PR bodies, comments, PR metadata, and PR changed-file lists. It does not claim every issue is fixed.
-- The service-account key was not found at the path named by the user; no live BigQuery test has been run in this pass yet.
+- The original service-account key path was incorrect. The corrected path later enabled live BigQuery tests, but not the GCS staging or legacy streaming variants blocked by external project state.

@@ -19,6 +19,7 @@ import time
 import traceback
 import uuid
 from abc import ABC, abstractmethod
+from decimal import Decimal
 
 try:
     from functools import cache
@@ -49,6 +50,7 @@ from google.api_core.exceptions import NotFound
 from google.cloud import bigquery, bigquery_storage_v1
 from google.cloud.bigquery import SchemaField
 from google.cloud.bigquery.table import TimePartitioning, TimePartitioningType
+from singer_sdk.exceptions import MissingKeyPropertiesError
 from singer_sdk.sinks import BatchSink
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_fixed
 
@@ -72,6 +74,9 @@ PARTITION_STRATEGY = {
     "HOUR": TimePartitioningType.HOUR,
 }
 
+TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
+FALSE_STRINGS = {"", "0", "false", "f", "no", "n", "off", "none", "null"}
+
 
 class SchemaResolverVersion(Enum):
     """The schema resolver version to use."""
@@ -81,6 +86,65 @@ class SchemaResolverVersion(Enum):
 
     def __str__(self) -> str:
         return str(self.value)
+
+
+def _normalize_string_selection(selection: str) -> bool | list[Any]:
+    normalized = selection.strip()
+    lowered = normalized.lower()
+    if lowered in TRUE_STRINGS:
+        return True
+    if lowered in FALSE_STRINGS:
+        return False
+    if normalized.startswith("["):
+        with suppress(json.JSONDecodeError):
+            parsed = json.loads(normalized)
+            return parsed if isinstance(parsed, list) else bool(parsed)
+    return [part.strip() for part in normalized.split(",") if part.strip()]
+
+
+def _pattern_selection_result(pattern: str, stream_name: str) -> bool | None:
+    inverted = pattern.startswith("!")
+    pattern = pattern[1:] if inverted else pattern
+    if not fnmatch(stream_name, pattern):
+        return None
+    return not inverted
+
+
+def _list_selection_matches(selection: list[Any], stream_name: str) -> bool:
+    selected = False
+    for pattern in selection:
+        if not isinstance(pattern, str):
+            selected = bool(pattern)
+            continue
+        pattern_result = _pattern_selection_result(pattern, stream_name)
+        selected = selected if pattern_result is None else pattern_result
+    return selected
+
+
+def selection_matches(selection: Any, stream_name: str) -> bool:
+    """Return whether a boolean, string, or pattern list selects a stream."""
+    if isinstance(selection, bool):
+        return selection
+    if isinstance(selection, str):
+        selection = _normalize_string_selection(selection)
+    if isinstance(selection, list):
+        return _list_selection_matches(selection, stream_name)
+    return bool(selection)
+
+
+def make_json_compatible(value: Any) -> Any:
+    """Return a value compatible with BigQuery JSON upload and load paths."""
+    if isinstance(value, Decimal):
+        if value.is_finite() and value == value.to_integral_value():
+            return int(value)
+        if value.is_finite():
+            return float(value)
+        return str(value)
+    if isinstance(value, dict):
+        return {key: make_json_compatible(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [make_json_compatible(item) for item in value]
+    return value
 
 
 @dataclass
@@ -329,8 +393,10 @@ class BaseBigQuerySink(BatchSink):
             ),
         }
         self.table = BigQueryTable(name=self.table_name, **self.table_opts)
+        self._input_key_properties = list(key_properties or [])
+        self._key_properties = self._target_key_properties(key_properties)
 
-        created = self.create_target(key_properties=key_properties)
+        created = self.create_target(key_properties=self.key_properties)
         if not created:
             self.update_schema()
 
@@ -340,7 +406,7 @@ class BaseBigQuerySink(BatchSink):
         # If the stream is marked for one of these strategies, we create a temporary table instead
         # and merge or overwrite the target table with the temporary table after the ingest.
         if (
-            key_properties
+            self.key_properties
             and self.ingestion_strategy is IngestionStrategy.DENORMALIZED
             and self._is_upsert_candidate()
         ):
@@ -355,16 +421,18 @@ class BaseBigQuerySink(BatchSink):
         self.increment_jobs_enqueued = target.increment_jobs_enqueued
 
     def _create_overwrite_table(self) -> None:
+        expiration_hours = self.config.get("temporary_table_expiration_hours", 7 * 24)
         self.table = BigQueryTable(
             name=f"{self.table_name}__{time.strftime('%Y%m%d%H%M%S')}__{uuid.uuid4()}",
             **self.table_opts,
         )
         self.table.create_table(
-            self.client,
+            self._get_bigquery_client(),
             self.apply_transforms,
             **{
                 "table": {
-                    "expires": datetime.datetime.now() + datetime.timedelta(days=1),
+                    "expires": datetime.datetime.now(datetime.timezone.utc)
+                    + datetime.timedelta(hours=expiration_hours),
                 },
                 "dataset": {
                     "location": self.config.get(
@@ -376,60 +444,42 @@ class BaseBigQuerySink(BatchSink):
         )
         time.sleep(2.5)  # Wait for eventual consistency
 
+    def _transformed_key_properties(self, key_properties: Sequence[str] | None) -> list[str] | None:
+        """Return key properties as BigQuery column names for the active strategy."""
+        if not key_properties:
+            return None
+        if not self.apply_transforms:
+            return list(key_properties)
+        transforms = {**self.table.transforms, "quote": False}
+        return [transform_column_name(key, **transforms) for key in key_properties]
+
+    def _target_key_properties(self, key_properties: Sequence[str] | None) -> list[str]:
+        """Return SDK validation keys for the transformed target record shape."""
+        if not self.apply_transforms:
+            return []
+        return self._transformed_key_properties(key_properties) or []
+
     def _is_upsert_candidate(self) -> bool:
         """Determine if this stream is an upsert candidate based on user configuration."""
-        upsert_selection = self.config.get("upsert", False)
-        upsert_candidate = False
-        if isinstance(upsert_selection, list):
-            selection: str
-            for selection in upsert_selection:
-                invert = selection.startswith("!")
-                if invert:
-                    selection = selection[1:]
-                if fnmatch(self.stream_name, selection):
-                    upsert_candidate = True ^ invert
-        elif upsert_selection:
-            upsert_candidate = True
-        return upsert_candidate
+        return selection_matches(self.config.get("upsert", False), self.stream_name)
 
     def _is_overwrite_candidate(self) -> bool:
         """Determine if this stream is an overwrite candidate based on user configuration."""
-        overwrite_selection = self.config.get("overwrite", False)
-        overwrite_candidate = False
-        if isinstance(overwrite_selection, list):
-            selection: str
-            for selection in overwrite_selection:
-                invert = selection.startswith("!")
-                if invert:
-                    selection = selection[1:]
-                if fnmatch(self.stream_name, selection):
-                    overwrite_candidate = True ^ invert
-        elif overwrite_selection:
-            overwrite_candidate = True
-        return overwrite_candidate
+        return selection_matches(self.config.get("overwrite", False), self.stream_name)
 
     def _is_dedupe_before_upsert_candidate(self) -> bool:
         """Determine if this stream is a dedupe before upsert candidate based on user configuration."""
         # TODO: we can enable this for `overwrite` too if we want but the purpose would
         # be less for functional reasons (merge constraints) and more for convenience
-        dedupe_before_upsert_selection = self.config.get("dedupe_before_upsert", False)
-        dedupe_before_upsert_candidate = False
-        if isinstance(dedupe_before_upsert_selection, list):
-            selection: str
-            for selection in dedupe_before_upsert_selection:
-                invert = selection.startswith("!")
-                if invert:
-                    selection = selection[1:]
-                if fnmatch(self.stream_name, selection):
-                    dedupe_before_upsert_candidate = True ^ invert
-        elif dedupe_before_upsert_selection:
-            dedupe_before_upsert_candidate = True
-        return dedupe_before_upsert_candidate
+        return selection_matches(
+            self.config.get("dedupe_before_upsert", False),
+            self.stream_name,
+        )
 
     @property
     def table_name(self) -> str:
         """Returns the table name."""
-        return self.stream_name.lower().replace("-", "_").replace(".", "_")
+        return re.sub(r"[^a-z0-9_]", "_", self.stream_name.lower())
 
     @property
     def max_size(self) -> int:
@@ -450,6 +500,29 @@ class BaseBigQuerySink(BatchSink):
 
     def _validate_and_parse(self, record: dict) -> dict:
         return record
+
+    def _singer_validate_message(self, record: dict) -> None:
+        """Validate key properties against the transformed target record shape."""
+        if self.apply_transforms:
+            super()._singer_validate_message(record)
+            return
+        if not self._input_key_properties:
+            return
+        data = record.get("data")
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except json.JSONDecodeError:
+                data = {}
+        if not isinstance(data, dict) or any(
+            key_property not in data for key_property in self._input_key_properties
+        ):
+            msg = (
+                "Record is missing one or more key_properties. \n"
+                f"Key Properties: {self._input_key_properties}, "
+                f"Record Keys: {list(data.keys()) if isinstance(data, dict) else list(record.keys())}"
+            )
+            raise MissingKeyPropertiesError(msg)
 
     def preprocess_record(self, record: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
         """Preprocess a record before writing it to the sink."""
@@ -540,7 +613,7 @@ class BaseBigQuerySink(BatchSink):
         if merge_target is None:
             raise RuntimeError("merge_table called without a merge target")
 
-        target = merge_target.as_table()
+        target = bigquery_client.get_table(merge_target.as_ref())
         ordering_columns = ["_sdc_extracted_at", "_sdc_received_at"]
         tmp, ctas_tmp = None, "SELECT 1 AS _no_op"
         if self._is_dedupe_before_upsert_candidate():
@@ -553,20 +626,37 @@ class BaseBigQuerySink(BatchSink):
                 f"ORDER BY {', '.join(f'{c} DESC' for c in ordering_columns)}) = 1"
             )
             ctas_tmp = f"CREATE OR REPLACE TEMP TABLE `{tmp}` AS {dedupe_query}"
+        source_columns = {field.name for field in self.table.as_table().schema}
+        target_columns = [field.name for field in target.schema if field.name in source_columns]
+        if not target_columns:
+            raise RuntimeError("merge_table called without shared source and target columns")
+        key_properties = self.key_properties or []
+        if not key_properties:
+            raise RuntimeError("merge_table called without key properties")
+        missing_keys = [field for field in key_properties if field not in target_columns]
+        if missing_keys:
+            raise RuntimeError(
+                "merge_table key properties missing from shared schema: " + ", ".join(missing_keys)
+            )
         merge_clause = (
             f"MERGE `{merge_target}` AS target USING `{tmp or self.table}` AS source ON "
-            + " AND ".join(f"target.`{f}` = source.`{f}`" for f in self.key_properties)
+            + " AND ".join(f"target.`{field}` = source.`{field}`" for field in key_properties)
         )
-        update_clause = "UPDATE SET " + ", ".join(
-            f"target.`{f.name}` = source.`{f.name}`" for f in target.schema
+        update_columns = [field for field in target_columns if field not in key_properties]
+        update_clause = (
+            "UPDATE SET "
+            + ", ".join(f"target.`{field}` = source.`{field}`" for field in update_columns)
+            if update_columns
+            else None
         )
         insert_clause = (
-            f"INSERT ({', '.join(f'`{f.name}`' for f in target.schema)}) "
-            f"VALUES ({', '.join(f'source.`{f.name}`' for f in target.schema)})"
+            f"INSERT ({', '.join(f'`{field}`' for field in target_columns)}) "
+            f"VALUES ({', '.join(f'source.`{field}`' for field in target_columns)})"
         )
+        matched_clause = f"WHEN MATCHED THEN {update_clause} " if update_clause else ""
         bigquery_client.query(
             f"{ctas_tmp}; {merge_clause} "
-            f"WHEN MATCHED THEN {update_clause} "
+            f"{matched_clause}"
             f"WHEN NOT MATCHED THEN {insert_clause}; "
             f"DROP TABLE IF EXISTS {self.table.get_escaped_name()};"
         ).result()
@@ -583,11 +673,9 @@ class BaseBigQuerySink(BatchSink):
             self.merge_target = None
         elif self.overwrite_target is not None:
             # We must overwrite the target table with the temp table.
-            # Do it in a transaction to avoid partial writes.
             bigquery_client.query(
-                f"DROP TABLE IF EXISTS {self.overwrite_target.get_escaped_name()}; CREATE TABLE"
-                f" {self.overwrite_target.get_escaped_name()} AS SELECT * FROM"
-                f" {self.table.get_escaped_name()}; DROP TABLE IF EXISTS"
+                f"CREATE OR REPLACE TABLE {self.overwrite_target.get_escaped_name()} AS SELECT *"
+                f" FROM {self.table.get_escaped_name()}; DROP TABLE IF EXISTS"
                 f" {self.table.get_escaped_name()};"
             ).result()
             self.table = self.overwrite_target
@@ -611,7 +699,8 @@ class Denormalized:
     def update_schema(self) -> None:
         """Update the target schema."""
         sink = cast(BaseBigQuerySink, self)
-        table = sink.table.as_table()
+        bigquery_client = sink._get_bigquery_client()
+        table = bigquery_client.get_table(sink.table.as_ref())
         current_schema = table.schema[:]
         mut_schema = table.schema[:]
         for expected_field in sink.table.get_resolved_schema(sink.apply_transforms):
@@ -619,7 +708,7 @@ class Denormalized:
                 mut_schema.append(expected_field)
         if len(mut_schema) > len(current_schema):
             table.schema = mut_schema
-            sink.client.update_table(
+            bigquery_client.update_table(
                 table,
                 ["schema"],
                 retry=bigquery.DEFAULT_RETRY.with_timeout(15),

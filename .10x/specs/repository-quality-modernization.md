@@ -26,7 +26,7 @@ The work MUST prioritize:
 - CI and developer documentation MUST stop instructing users or automation to use Poetry for this project.
 - Quality work MUST be driven by objective tool output from the uploaded Production Python Quality Optimizer procedure.
 - Tool findings MAY drive source cleanup and bug fixes when the behavior is record-backed by source, tests, or documented project behavior.
-- No live BigQuery verification is available in this workstream; BigQuery behavior MUST be assessed through unit tests, static analysis, query construction inspection, and adversarial review.
+- Live BigQuery verification is available after the corrected service-account key path was provided. BigQuery behavior MUST be verified live where the project tier allows it, and externally blocked variants MUST be recorded with exact service errors rather than represented as locally passing.
 
 ## Constraints
 
@@ -36,6 +36,7 @@ The work MUST prioritize:
 - The implementation MUST avoid speculative abstractions and broad rewrites.
 - Tool skips MUST be explicit and evidence-backed.
 - Secret scanner output MUST be redacted if findings appear.
+- Service-account key material MUST NOT be committed or printed. Evidence may name the user-provided credential path and the non-secret project id only.
 
 ## Acceptance Criteria
 

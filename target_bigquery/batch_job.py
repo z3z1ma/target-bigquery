@@ -28,6 +28,7 @@ from target_bigquery.core import (
     Denormalized,
     ParType,
     bigquery_client_factory,
+    make_json_compatible,
 )
 
 
@@ -118,7 +119,9 @@ class BigQueryBatchJobSink(BaseBigQuerySink):
         return cast(type[BatchJobThreadWorker], Worker)
 
     def process_record(self, record: dict[str, Any], context: dict[str, Any]) -> None:
-        self.buffer.write(orjson.dumps(record, option=orjson.OPT_APPEND_NEWLINE))
+        self.buffer.write(
+            orjson.dumps(make_json_compatible(record), option=orjson.OPT_APPEND_NEWLINE)
+        )
 
     def process_batch(self, context: dict[str, Any]) -> None:
         self.buffer.close()
