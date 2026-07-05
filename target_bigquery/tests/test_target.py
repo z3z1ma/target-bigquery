@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import io
+import json
 import logging
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from singer_sdk import Sink
@@ -57,6 +59,46 @@ class FakeNotification:
         return self.messages.pop(0)
 
 
+class FakeMetric:
+    def increment(self) -> None:
+        pass
+
+
+class FakeRecordSink:
+    include_sdc_metadata_properties = False
+    is_full = False
+    current_size = 0
+    stream_name = "table_name"
+    record_counter_metric = FakeMetric()
+
+    def __init__(self) -> None:
+        self.records: list[dict[str, Any]] = []
+
+    def _get_context(self, record: dict[str, Any]) -> dict[str, Any]:
+        return {}
+
+    def _remove_sdc_metadata_from_record(self, record: dict[str, Any]) -> None:
+        pass
+
+    def _validate_and_parse(self, record: dict[str, Any]) -> None:
+        pass
+
+    def preprocess_record(self, record: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+        return record
+
+    def _singer_validate_message(self, record: dict[str, Any]) -> None:
+        pass
+
+    def tally_record_read(self) -> None:
+        pass
+
+    def process_record(self, record: dict[str, Any], context: dict[str, Any]) -> None:
+        self.records.append(record)
+
+    def _after_process_record(self, context: dict[str, Any]) -> None:
+        pass
+
+
 class SinkTrackingTarget(TargetBigQuery):
     checked_streams: list[str]
     added: list[tuple[str, dict[str, Any], Sequence[str] | None]]
@@ -74,6 +116,28 @@ class FailFastDrainTarget(TargetBigQuery):
 
     def _shutdown_workers(self) -> None:
         self.shutdowns.append(True)
+
+
+class StreamMapRecordingTarget(TargetBigQuery):
+    calls: list[tuple[str, str, bool, bool]]
+    fake_sink: FakeRecordSink
+
+    def _assert_sink_exists(self, stream_name: str) -> None:
+        self.calls.append(("exists", stream_name, False, False))
+
+    def get_sink(
+        self,
+        stream_name: str,
+        schema: dict[str, Any] | None = None,
+        key_properties: Sequence[str] | None = None,
+        record: dict[str, Any] | None = None,
+    ) -> Sink:
+        del key_properties
+        self.calls.append(("get", stream_name, schema is not None, record is not None))
+        return cast(Sink, self.fake_sink)
+
+    def _handle_max_record_age(self) -> None:
+        pass
 
 
 def make_target(config: dict[str, Any]) -> TargetBigQuery:
@@ -222,6 +286,52 @@ def test_get_sink_adds_only_the_first_schema_for_a_stream():
     assert target.get_sink("orders", schema={"type": "object"}, key_properties=["other"]) is (
         existing_sink
     )
+
+
+def test_stream_maps_alias_schema_and_records_route_to_alias():
+    target = StreamMapRecordingTarget(
+        config={
+            "credentials_json": "{}",
+            "project": "project",
+            "dataset": "dataset",
+            "stream_maps": {"databasename-table_name": {"__alias__": "table_name"}},
+        }
+    )
+    target.calls = []
+    target.fake_sink = FakeRecordSink()
+    singer_input = io.StringIO(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "SCHEMA",
+                        "stream": "databasename-table_name",
+                        "schema": {
+                            "type": "object",
+                            "properties": {"id": {"type": "integer"}},
+                        },
+                        "key_properties": ["id"],
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "RECORD",
+                        "stream": "databasename-table_name",
+                        "record": {"id": 1},
+                    }
+                ),
+            ]
+        )
+    )
+
+    target.process_lines(singer_input)
+
+    assert target.calls == [
+        ("get", "table_name", True, False),
+        ("exists", "table_name", False, False),
+        ("get", "table_name", False, True),
+    ]
+    assert target.fake_sink.records == [{"id": 1}]
 
 
 def test_drain_one_fail_fast_stops_workers_without_writing_state():
