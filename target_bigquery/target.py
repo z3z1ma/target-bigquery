@@ -574,16 +574,21 @@ class TargetBigQuery(Target):
         while self.log_notification.poll():
             msg = self.log_notification.recv()
             self.logger.info(msg)
+        self._handle_worker_error()
+        super().drain_one(sink)
+
+    def _handle_worker_error(self, *, shutdown_workers: bool = True) -> None:
+        """Raise or log a worker error notification according to fail-fast config."""
         if self.error_notification.poll():
             e, msg = self.error_notification.recv()
             if self.config.get("fail_fast", True):
                 self.logger.error(msg)
                 self.logger.error("Terminating workers without writing state.")
-                self._shutdown_workers()
+                if shutdown_workers:
+                    self._shutdown_workers()
                 raise RuntimeError(msg) from e
             else:
                 self.logger.warning(msg)
-        super().drain_one(sink)
 
     def drain_all(self, is_endofpipe: bool = False) -> None:  # type: ignore
         """Drain all sinks and write state message. If is_endofpipe, execute clean_up() on all sinks.
@@ -592,9 +597,11 @@ class TargetBigQuery(Target):
         self._drain_all(list(self._sinks_active.values()), self.max_parallelism)
         if is_endofpipe:
             self._shutdown_workers()
+            self._handle_worker_error(shutdown_workers=False)
             self._clean_up_sinks()
         else:
             self._join_workers()
+            self._handle_worker_error()
             self._run_pre_state_hooks()
         if state:
             self._write_state_message(state)

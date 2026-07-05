@@ -42,6 +42,7 @@ Burn down the 18 open issues and 10 open PRs observed on 2026-07-05 by fixing, s
 - 2026-07-05: New dependabot GitHub Actions PRs #129, #130, and #131 were absorbed by updating `.github/workflows/ci.yml` action SHAs on `main`; evidence is recorded in `.10x/evidence/2026-07-05-github-actions-pin-refresh.md`.
 - 2026-07-05: Generated-view/config slice addresses #34, #39, #40, #104, and the remaining table-name portion of #108 with local and live BigQuery evidence in `.10x/evidence/2026-07-05-generated-view-config-verification.md`.
 - 2026-07-05: Install/protobuf/stream-map slice addresses #111, #113, and #124 with isolated pip install, protobuf 6 generation, console-script, and alias-routing evidence in `.10x/evidence/2026-07-05-install-protobuf-stream-map-verification.md`.
+- 2026-07-05: Storage Write nested slice fixes #71 and strengthens #76 evidence with live nested default-stream verification in `.10x/evidence/2026-07-05-storage-write-nested-verification.md`.
 
 ## Blockers
 

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
+from google.cloud.bigquery import SchemaField
 from google.cloud.bigquery_storage_v1 import exceptions, types
 
 import target_bigquery.storage_write as storage_write
@@ -82,14 +83,20 @@ def first_error_message(notifier: FakeNotifier) -> tuple[Exception, str]:
 
 
 class FakeFuture:
-    def __init__(self, exc: Exception | None = None) -> None:
+    def __init__(
+        self,
+        exc: Exception | None = None,
+        response: types.AppendRowsResponse | None = None,
+    ) -> None:
         self.exc = exc
+        self.response = response
         self.results = 0
 
-    def result(self) -> None:
+    def result(self) -> types.AppendRowsResponse | None:
         self.results += 1
         if self.exc is not None:
             raise self.exc
+        return self.response
 
 
 class FakeStream:
@@ -136,6 +143,24 @@ def test_generate_request_for_default_stream_uses_stream_path():
 
     assert request.write_stream == "projects/p/datasets/d/tables/t/_default"
     assert request.proto_rows.rows == payload
+
+
+def test_generate_template_uses_local_nested_type_names():
+    proto_cls = storage_write.proto_schema_factory_v2(
+        [
+            SchemaField(
+                "profile",
+                "RECORD",
+                fields=[SchemaField("name", "STRING")],
+            ),
+        ]
+    )
+
+    descriptor = storage_write.generate_template(
+        proto_cls
+    ).proto_rows.writer_schema.proto_descriptor
+
+    assert descriptor.field[0].type_name == "Nested_profile"
 
 
 def test_generate_request_for_application_stream_uses_cached_offset():
@@ -274,6 +299,23 @@ def test_wait_reports_success_and_serializes_future_errors():
     assert "Worker ID: worker-a" in message
 
 
+def test_wait_reports_append_response_errors():
+    worker = object.__new__(storage_write.StorageWriteBatchWorker)
+    response = types.AppendRowsResponse(error={"code": 3, "message": "nested row rejected"})
+    worker.awaiting = [FakeFuture(response=response)]
+    worker.error_notifier = FakeNotifier()
+    worker.job_notifier = FakeNotifier()
+    worker.ext_id = "worker-a"
+
+    worker.wait(drain=True)
+
+    assert worker.job_notifier.messages == [True]
+    error, message = first_error_message(worker.error_notifier)
+    assert isinstance(error, RuntimeError)
+    assert "nested row rejected" in str(error)
+    assert "Worker ID: worker-a" in message
+
+
 def test_close_cached_streams_reports_close_errors():
     worker = object.__new__(storage_write.StorageWriteBatchWorker)
     exc = RuntimeError("close failed")
@@ -293,6 +335,19 @@ def test_close_cached_streams_reports_close_errors():
     error, message = first_error_message(worker.error_notifier)
     assert error is exc
     assert "Worker ID: worker-a" in message
+
+
+def test_close_cached_streams_tolerates_already_closed_stream():
+    worker = object.__new__(storage_write.StorageWriteBatchWorker)
+    worker.cache = {
+        "closed": ("closed-stream", AlreadyClosedStream(), lambda request: request),
+    }
+    worker.error_notifier = FakeNotifier()
+    worker.ext_id = "worker-a"
+
+    worker.close_cached_streams()
+
+    assert worker.error_notifier.messages == []
 
 
 def test_storage_write_commit_streams_tolerates_already_closed_stream(monkeypatch):

@@ -10,6 +10,7 @@
 # substantial portions of the Software.
 import hashlib
 import os
+import re
 from collections.abc import Iterable
 from typing import Any
 
@@ -31,6 +32,49 @@ MAP = {
     "DATE": descriptor_pb2.FieldDescriptorProto.TYPE_STRING,
     "TIME": descriptor_pb2.FieldDescriptorProto.TYPE_STRING,
 }
+
+
+def _proto_message_name(name: str) -> str:
+    """Return a valid nested proto message name for a BigQuery field name."""
+    safe = re.sub(r"[^0-9A-Za-z_]", "_", name)
+    if not safe or safe[0].isdigit():
+        safe = f"Field_{safe}"
+    return f"Nested_{safe}"
+
+
+def _populate_descriptor(
+    desc_proto: descriptor_pb2.DescriptorProto,
+    bigquery_schema: Iterable[SchemaField],
+    *,
+    package: str,
+    path: list[str],
+) -> None:
+    """Populate a message descriptor with fields and nested message definitions."""
+    for i, field in enumerate(bigquery_schema, start=1):
+        field_proto = desc_proto.field.add()
+        name = field.name
+        typ = field.field_type.upper()
+        field_proto.name = name
+        field_proto.number = i
+        field_proto.label = (
+            descriptor_pb2.FieldDescriptorProto.LABEL_REPEATED
+            if field.mode == "REPEATED"
+            else descriptor_pb2.FieldDescriptorProto.LABEL_OPTIONAL
+        )
+        field_proto.json_name = name
+        if typ == "RECORD":
+            nested_proto = desc_proto.nested_type.add()
+            nested_proto.name = _proto_message_name(name)
+            _populate_descriptor(
+                nested_proto,
+                field.fields,
+                package=package,
+                path=[*path, nested_proto.name],
+            )
+            field_proto.type = descriptor_pb2.FieldDescriptorProto.TYPE_MESSAGE
+            field_proto.type_name = ".".join([package, *path, nested_proto.name])
+        else:
+            field_proto.type = MAP[typ]
 
 
 def generate_field_v2(base: SchemaField, i: int = 1, pool: Any | None = None) -> dict[str, Any]:
@@ -89,10 +133,7 @@ def proto_schema_factory_v2(
         file_proto.package = package
         desc_proto = file_proto.message_type.add()
         desc_proto.name = name
-        for i, f in enumerate(bigquery_schema):
-            field_proto = desc_proto.field.add()
-            for k, v in generate_field_v2(f, i + 1, pool).items():
-                setattr(field_proto, k, v)
+        _populate_descriptor(desc_proto, bigquery_schema, package=package, path=[name])
         pool.Add(file_proto)
         proto_descriptor = pool.FindMessageTypeByName(clsname)
         proto_cls = message_factory.GetMessageClass(proto_descriptor)

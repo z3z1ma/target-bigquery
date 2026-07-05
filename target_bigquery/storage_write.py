@@ -96,7 +96,7 @@ def generate_request(
     return request
 
 
-def generate_template(message: type[message.Message]):
+def generate_template(proto_message: type[Any]) -> types.AppendRowsRequest:
     """Generate a template for the storage write API from a proto message class."""
     from google.protobuf import descriptor_pb2
 
@@ -106,11 +106,26 @@ def generate_template(message: type[message.Message]):
         descriptor_pb2.DescriptorProto(),
         types.AppendRowsRequest.ProtoData(),
     )
-    message.DESCRIPTOR.CopyToProto(proto_descriptor)
+    proto_message.DESCRIPTOR.CopyToProto(proto_descriptor)
+    _localize_nested_type_names(proto_descriptor)
     proto_schema.proto_descriptor = proto_descriptor
     proto_data.writer_schema = proto_schema
     template.proto_rows = proto_data
     return template
+
+
+def _localize_nested_type_names(descriptor: Any) -> None:
+    """Rewrite nested message type names for BigQuery's DescriptorProto-only schema."""
+    nested_names = {nested.name for nested in descriptor.nested_type}
+    for field in descriptor.field:
+        if not field.type_name:
+            continue
+        for nested_name in nested_names:
+            if field.type_name == nested_name or field.type_name.endswith(f".{nested_name}"):
+                field.type_name = nested_name
+                break
+    for nested in descriptor.nested_type:
+        _localize_nested_type_names(nested)
 
 
 class Job:
@@ -245,6 +260,8 @@ class StorageWriteBatchWorker(BaseWorker):
         for _, stream, _ in self.cache.values():
             try:
                 stream.close()
+            except exceptions.StreamClosedError:
+                pass
             except Exception as exc:
                 self.error_notifier.send((exc, self.serialize_exception(exc)))
 
@@ -252,11 +269,25 @@ class StorageWriteBatchWorker(BaseWorker):
         """Wait for in-flight requests to complete."""
         while self.awaiting and ((len(self.awaiting) > MAX_IN_FLIGHT // 2) or drain):
             try:
-                self.awaiting.pop(0).result()
+                response = self.awaiting.pop(0).result()
+                self._raise_for_append_response(response)
             except Exception as exc:
                 self.error_notifier.send((exc, self.serialize_exception(exc)))
             finally:
                 self.job_notifier.send(True)
+
+    @staticmethod
+    def _raise_for_append_response(response: types.AppendRowsResponse | None) -> None:
+        """Raise when Storage Write accepts the RPC but rejects rows."""
+        if response is None:
+            return
+        if response.error.code:
+            raise RuntimeError(f"Storage Write append failed: {response.error.message}")
+        if response.row_errors:
+            errors = "; ".join(
+                f"row {error.index}: {error.message}" for error in response.row_errors
+            )
+            raise RuntimeError(f"Storage Write append row errors: {errors}")
 
 
 class StorageWriteStreamWorker(StorageWriteBatchWorker):

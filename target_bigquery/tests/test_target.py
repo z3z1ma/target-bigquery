@@ -353,3 +353,30 @@ def test_drain_one_fail_fast_stops_workers_without_writing_state():
 
     assert err.value.__cause__ is exc
     assert target.shutdowns == [True]
+
+
+def test_drain_all_fail_fast_checks_worker_errors_after_shutdown():
+    target = object.__new__(FailFastDrainTarget)
+    target._config = {"fail_fast": True}
+    target._latest_state = {"bookmarks": {"orders": {}}}
+    target._sinks_active = {"orders": object()}
+    target.max_parallelism = 1
+    target.error_notification = FakeNotification((RuntimeError("worker failed"), "late failure"))
+    target.shutdowns = []
+    object.__setattr__(target, "_drain_all", lambda sinks, parallelism: None)
+    object.__setattr__(
+        target,
+        "_clean_up_sinks",
+        lambda: pytest.fail("clean_up ran after worker failure"),
+    )
+    object.__setattr__(
+        target,
+        "_write_state_message",
+        lambda state: pytest.fail("state advanced after worker failure"),
+    )
+    object.__setattr__(target, "_reset_max_record_age", lambda: None)
+
+    with pytest.raises(RuntimeError, match="late failure"):
+        target.drain_all(is_endofpipe=True)
+
+    assert target.shutdowns == [True]
