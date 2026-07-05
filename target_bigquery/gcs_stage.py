@@ -225,9 +225,7 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
         storage_class: Optional[str] = self.config.get("storage_class")
         if storage_class:
             kwargs["storage_class"] = storage_class
-        location: str = self.config.get(
-            "location", self.default_bucket_options()["location"]
-        )
+        location: str = self.config.get("location", self.default_bucket_options()["location"])
 
         if not hasattr(self, "_gcs_bucket"):
             self._gcs_bucket = self.client.get_bucket(self.as_bucket())
@@ -239,9 +237,7 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
                         f"specified location: {location}"
                     )
             else:
-                self._gcs_bucket = self.client.create_bucket(
-                    self.as_bucket(), location=location
-                )
+                self._gcs_bucket = self.client.create_bucket(self.as_bucket(), location=location)
         else:
             # Wait for eventual consistency
             time.sleep(5)

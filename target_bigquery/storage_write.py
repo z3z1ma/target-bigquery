@@ -63,9 +63,7 @@ def get_application_stream(client: BigQueryWriteClient, job: "Job") -> StreamCom
     """Get an application created stream for the parent. This stream must be finalized and committed."""
     write_stream = types.WriteStream()
     write_stream.type_ = types.WriteStream.Type.PENDING  # type: ignore
-    write_stream = client.create_write_stream(
-        parent=job.parent, write_stream=write_stream
-    )
+    write_stream = client.create_write_stream(parent=job.parent, write_stream=write_stream)
     job.template.write_stream = write_stream.name
     append_rows_stream = writer.AppendRowsStream(client, job.template)
     rv = (write_stream.name, append_rows_stream)
@@ -365,9 +363,7 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
             )
             self.logger.info(f"Batch commit time: {write.commit_time}")
             self.logger.info(f"Batch commit errors: {write.stream_errors}")
-            self.logger.info(
-                f"Writes to streams: '{self.open_streams}' have been committed."
-            )
+            self.logger.info(f"Writes to streams: '{self.open_streams}' have been committed.")
         self.open_streams = set()
 
     def clean_up(self) -> None:

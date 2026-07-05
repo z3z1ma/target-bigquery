@@ -121,14 +121,10 @@ class BigQueryStreamingInsertSink(BaseBigQuerySink):
         self.records_to_drain.append(record)
 
     def process_batch(self, context: Dict[str, Any]) -> None:
-        self.global_queue.put(
-            Job(table=self.table.as_ref(), records=self.records_to_drain.copy())
-        )
+        self.global_queue.put(Job(table=self.table.as_ref(), records=self.records_to_drain.copy()))
         self.increment_jobs_enqueued()
         self.records_to_drain = []
 
 
-class BigQueryStreamingInsertDenormalizedSink(
-    Denormalized, BigQueryStreamingInsertSink
-):
+class BigQueryStreamingInsertDenormalizedSink(Denormalized, BigQueryStreamingInsertSink):
     pass

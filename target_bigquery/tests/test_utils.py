@@ -12,6 +12,11 @@ from target_bigquery.core import (
     transform_column_name,
 )
 from target_bigquery.proto_gen import proto_schema_factory_v2
+from target_bigquery.target import TargetBigQuery
+
+
+def test_plugin_version_uses_distribution_name():
+    assert TargetBigQuery.plugin_version != "[could not be detected]"
 
 
 @pytest.mark.parametrize(
@@ -176,12 +181,8 @@ SELECT
                             "customColumns",
                             th.ObjectType(
                                 th.Property("column_1655996461265", th.StringType),
-                                th.Property(
-                                    "column_1644862416222", th.ArrayType(th.StringType)
-                                ),
-                                th.Property(
-                                    "column_1644861659664", th.ArrayType(th.StringType)
-                                ),
+                                th.Property("column_1644862416222", th.ArrayType(th.StringType)),
+                                th.Property("column_1644861659664", th.ArrayType(th.StringType)),
                             ),
                         ),
                         th.Property(
@@ -264,26 +265,16 @@ SELECT
                                 th.Property(
                                     "customColumns",
                                     th.ObjectType(
-                                        th.Property(
-                                            "column_1664478354663", th.StringType
-                                        ),
-                                        th.Property(
-                                            "column_1655996461265", th.StringType
-                                        ),
-                                        th.Property(
-                                            "column_1644862416222", th.StringType
-                                        ),
-                                        th.Property(
-                                            "column_1644861659664", th.StringType
-                                        ),
+                                        th.Property("column_1664478354663", th.StringType),
+                                        th.Property("column_1655996461265", th.StringType),
+                                        th.Property("column_1644862416222", th.StringType),
+                                        th.Property("column_1644861659664", th.StringType),
                                     ),
                                 ),
                                 th.Property(
                                     "custom",
                                     th.ObjectType(
-                                        th.Property(
-                                            "field_1651169416679", th.StringType
-                                        ),
+                                        th.Property("field_1651169416679", th.StringType),
                                     ),
                                 ),
                             ),
@@ -295,9 +286,7 @@ SELECT
                                 th.Property("yearsSinceTermination", th.StringType),
                                 th.Property("terminationReason", th.StringType),
                                 th.Property("probationEndDate", th.StringType),
-                                th.Property(
-                                    "currentActiveStatusStartDate", th.StringType
-                                ),
+                                th.Property("currentActiveStatusStartDate", th.StringType),
                                 th.Property("terminationDate", th.StringType),
                                 th.Property("status", th.StringType),
                                 th.Property("terminationType", th.StringType),
@@ -323,9 +312,7 @@ SELECT
                                 th.Property(
                                     "custom",
                                     th.ObjectType(
-                                        th.Property(
-                                            "field_1645133202751", th.StringType
-                                        ),
+                                        th.Property("field_1645133202751", th.StringType),
                                     ),
                                 ),
                             ),
@@ -338,12 +325,8 @@ SELECT
                                 th.Property(
                                     "custom",
                                     th.ObjectType(
-                                        th.Property(
-                                            "field_1647463606890", th.StringType
-                                        ),
-                                        th.Property(
-                                            "field_1647619490812", th.StringType
-                                        ),
+                                        th.Property("field_1647463606890", th.StringType),
+                                        th.Property("field_1647619490812", th.StringType),
                                     ),
                                 ),
                             ),
@@ -354,9 +337,7 @@ SELECT
                                 th.Property(
                                     "custom",
                                     th.ObjectType(
-                                        th.Property(
-                                            "field_1651694080083", th.StringType
-                                        ),
+                                        th.Property("field_1651694080083", th.StringType),
                                     ),
                                 ),
                             ),
@@ -369,12 +350,8 @@ SELECT
                                     th.ObjectType(
                                         th.Property("siteWorkinPattern", th.StringType),
                                         th.Property("salaryPayType", th.StringType),
-                                        th.Property(
-                                            "actualWorkingPattern", th.StringType
-                                        ),
-                                        th.Property(
-                                            "activeeffectivedate", th.StringType
-                                        ),
+                                        th.Property("actualWorkingPattern", th.StringType),
+                                        th.Property("activeeffectivedate", th.StringType),
                                         th.Property("workingPattern", th.StringType),
                                         th.Property("fte", th.StringType),
                                         th.Property("type", th.StringType),
@@ -609,9 +586,7 @@ def test_schema_translator_views(
     ],
     ids=["basic_schema_translation", "schema_translation_with_transform"],
 )
-def test_schema_translator_tables(
-    schema: dict, transforms: dict, expected: List[SchemaField]
-):
+def test_schema_translator_tables(schema: dict, transforms: dict, expected: List[SchemaField]):
     assert (
         SchemaTranslator(
             schema,
@@ -669,9 +644,7 @@ def test_schema_translator_tables(
                                         "type": "array",
                                         "items": {
                                             "type": "object",
-                                            "properties": {
-                                                "IntColumn": {"type": "integer"}
-                                            },
+                                            "properties": {"IntColumn": {"type": "integer"}},
                                         },
                                     }
                                 },
@@ -682,11 +655,7 @@ def test_schema_translator_tables(
             },
             {"snake_case": True},
             [
-                {
-                    "NestedLevelOne": {
-                        "NestedLevelTwo": {"ArrayColumn": [{"IntColumn": 1}]}
-                    }
-                },
+                {"NestedLevelOne": {"NestedLevelTwo": {"ArrayColumn": [{"IntColumn": 1}]}}},
                 {
                     "NestedLevelOne": {
                         "NestedLevelTwo": {
@@ -700,11 +669,7 @@ def test_schema_translator_tables(
                 },
             ],
             [
-                {
-                    "nested_level_one": {
-                        "nested_level_two": {"array_column": [{"int_column": 1}]}
-                    }
-                },
+                {"nested_level_one": {"nested_level_two": {"array_column": [{"int_column": 1}]}}},
                 {
                     "nested_level_one": {
                         "nested_level_two": {
@@ -765,7 +730,6 @@ def test_jit_compile_proto():
         if f.name in payload:
             setattr(data, f.name, payload[f.name])
     assert (
-        data.SerializeToString()
-        == b"\x08\x01\x12\x04test\x19\x00\x00\x00\x00\x00\x00\xf0?"
+        data.SerializeToString() == b"\x08\x01\x12\x04test\x19\x00\x00\x00\x00\x00\x00\xf0?"
         b" \x01*\n2020-01-012\n2020-01-01:\x0800:00:00"
     )

@@ -3,7 +3,7 @@
 <p align="center">
 <a href="https://github.com/z3z1ma/target-bigquery/actions/"><img alt="Actions Status" src="https://github.com/z3z1ma/target-bigquery/actions/workflows/ci.yml/badge.svg"></a>
 <a href="https://github.com/z3z1ma/target-bigquery/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg"></a>
-<a href="https://github.com/psf/black"><img alt="Code style: black" src="https://img.shields.io/badge/code%20style-black-000000.svg"></a>
+<a href="https://docs.astral.sh/ruff/"><img alt="Code style: ruff" src="https://img.shields.io/badge/code%20style-ruff-46a2f1.svg"></a>
 </p>
 
 **A rare 💎 you have stumbled upon**
@@ -196,8 +196,8 @@ tap-carbon-intensity | target-bigquery --config /path/to/target-bigquery-config.
 ### Initialize your Development Environment
 
 ```bash
-pipx install poetry
-poetry install
+pipx install uv
+uv sync --extra dev
 ```
 
 ### Create and Run Tests
@@ -206,13 +206,13 @@ Create tests within the `target_bigquery/tests` subfolder and
   then run:
 
 ```bash
-poetry run pytest
+uv run pytest
 ```
 
-You can also test the `target-bigquery` CLI interface directly using `poetry run`:
+You can also test the `target-bigquery` CLI interface directly using `uv run`:
 
 ```bash
-poetry run target-bigquery --help
+uv run target-bigquery --help
 ```
 
 ### Testing with [Meltano](https://meltano.com/)

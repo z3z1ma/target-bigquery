@@ -32,9 +32,7 @@ MAP = {
 }
 
 
-def generate_field_v2(
-    base: SchemaField, i: int = 1, pool: Optional[Any] = None
-) -> Dict[str, Any]:
+def generate_field_v2(base: SchemaField, i: int = 1, pool: Optional[Any] = None) -> Dict[str, Any]:
     """Generate proto2 field properties from a SchemaField."""
     name: str = base.name
     typ: str = cast(str, base.field_type).upper()
@@ -74,14 +72,12 @@ def proto_schema_factory_v2(
     for f in bigquery_schema:
         fhash.update(hash(f).to_bytes(8, "big", signed=True))
     fname = f"AnonymousProto_{fhash.hexdigest()}.proto"
-    clsname = (
-        f"net.proto2.python.public.target_bigquery.AnonymousProto_{fhash.hexdigest()}"
-    )
-    
+    clsname = f"net.proto2.python.public.target_bigquery.AnonymousProto_{fhash.hexdigest()}"
+
     # Use the pool directly if provided, otherwise use the default pool
     if pool is None:
         pool = descriptor_pool.Default()
-    
+
     try:
         proto_descriptor = pool.FindMessageTypeByName(clsname)
         proto_cls = message_factory.GetMessageClass(proto_descriptor)
@@ -109,10 +105,7 @@ def generate_field(base: SchemaField, i: int = 1) -> Tuple[proto.Field, str]:
     name: str = base.name
     typ: str = cast(str, base.field_type).upper()
 
-    if base.mode == "REPEATED":
-        cls = proto.RepeatedField
-    else:
-        cls = proto.Field
+    cls = proto.RepeatedField if base.mode == "REPEATED" else proto.Field
 
     if typ.upper() == "RECORD":
         f = cls(
@@ -131,12 +124,10 @@ def proto_schema_factory(bigquery_schema: Iterable[SchemaField]) -> Type[proto.M
     """Not intended for production use.
     Generate a proto.Message from a BigQuery schema."""
     return type(
-        f"Schema{abs(hash((f for f in bigquery_schema)))}",
+        f"Schema{abs(hash(f for f in bigquery_schema))}",
         (proto.Message,),
         {
             name: f
-            for f, name in (
-                generate_field(field, i + 1) for i, field in enumerate(bigquery_schema)
-            )
+            for f, name in (generate_field(field, i + 1) for i, field in enumerate(bigquery_schema))
         },
     )
