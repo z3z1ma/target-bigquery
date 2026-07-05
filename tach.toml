@@ -1,0 +1,8 @@
+source_roots = ["."]
+
+[external]
+exclude = ["pytest"]
+
+[[modules]]
+path = "target_bigquery"
+depends_on = []

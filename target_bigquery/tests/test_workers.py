@@ -3,9 +3,15 @@
 from queue import Empty
 from types import SimpleNamespace
 
+import pytest
 from google.cloud.bigquery_storage_v1 import types
 
-from target_bigquery.storage_write import StorageWriteBatchWorker
+from target_bigquery.storage_write import (
+    MAX_IN_FLIGHT,
+    BigQueryStorageWriteSink,
+    StorageWriteBatchWorker,
+    StorageWriteStreamWorker,
+)
 from target_bigquery.target import TargetBigQuery
 
 
@@ -32,6 +38,36 @@ class FakeWorker:
 class EmptyQueue:
     def get(self, timeout: float) -> object:
         raise Empty
+
+
+class FakeNotifier:
+    def __init__(self) -> None:
+        self.messages: list[object] = []
+
+    def send(self, message: object) -> None:
+        self.messages.append(message)
+
+
+class FakeFuture:
+    def __init__(self, exc: Exception | None = None) -> None:
+        self.exc = exc
+        self.results = 0
+
+    def result(self) -> None:
+        self.results += 1
+        if self.exc is not None:
+            raise self.exc
+
+
+class FakeStream:
+    def __init__(self, exc: Exception | None = None) -> None:
+        self.exc = exc
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+        if self.exc is not None:
+            raise self.exc
 
 
 def test_shutdown_workers_joins_each_worker_once():
@@ -99,3 +135,125 @@ def test_get_stream_components_for_job_refreshes_missing_or_closed_streams():
 
     assert worker._get_stream_components_for_job(object(), job) == replacement
     assert worker.cache["parent"] == replacement
+
+
+def test_storage_write_worker_factory_selects_stream_or_batch_worker():
+    stream_worker_cls = BigQueryStorageWriteSink.worker_cls_factory(
+        object,
+        {"options": {"storage_write_batch_mode": False}},
+    )
+    batch_worker_cls = BigQueryStorageWriteSink.worker_cls_factory(
+        object,
+        {"options": {"storage_write_batch_mode": True}},
+    )
+
+    assert issubclass(stream_worker_cls, StorageWriteStreamWorker)
+    assert issubclass(batch_worker_cls, StorageWriteBatchWorker)
+
+
+def test_handle_dispatch_error_requeues_retryable_job():
+    worker = object.__new__(StorageWriteBatchWorker)
+    worker.queue = FakeQueue()
+    worker.error_notifier = FakeNotifier()
+    worker.logger = SimpleNamespace(info=lambda message: None)
+    worker.max_errors_before_recycle = 5
+    worker.ext_id = "worker-a"
+    job = SimpleNamespace(attempts=1)
+
+    worker._handle_dispatch_error(job, RuntimeError("transient"))
+
+    assert job.attempts == 2
+    assert worker.queue.items == [job]
+    assert worker.error_notifier.messages == []
+    assert worker.max_errors_before_recycle == 4
+
+
+def test_handle_dispatch_error_sends_terminal_error_after_three_attempts():
+    worker = object.__new__(StorageWriteBatchWorker)
+    worker.queue = FakeQueue()
+    worker.error_notifier = FakeNotifier()
+    worker.logger = SimpleNamespace(info=lambda message: None)
+    worker.max_errors_before_recycle = 5
+    worker.ext_id = "worker-a"
+    exc = RuntimeError("terminal")
+    job = SimpleNamespace(attempts=3)
+
+    worker._handle_dispatch_error(job, exc)
+
+    assert worker.queue.items == []
+    assert worker.error_notifier.messages[0][0] is exc
+    assert "Worker ID: worker-a" in worker.error_notifier.messages[0][1]
+
+
+def test_handle_dispatch_error_recycles_streams_when_error_threshold_is_hit():
+    worker = object.__new__(StorageWriteBatchWorker)
+    worker.queue = FakeQueue()
+    worker.error_notifier = FakeNotifier()
+    worker.logger = SimpleNamespace(info=lambda message: None)
+    worker.max_errors_before_recycle = 1
+    waited: list[bool] = []
+    closed: list[bool] = []
+    worker.wait = lambda drain=False: waited.append(drain)
+    worker.close_cached_streams = lambda: closed.append(True)
+    job = SimpleNamespace(attempts=1)
+    exc = RuntimeError("recycle")
+
+    with pytest.raises(RuntimeError, match="recycle"):
+        worker._handle_dispatch_error(job, exc)
+
+    assert worker.queue.items == [job]
+    assert waited == [True]
+    assert closed == [True]
+
+
+def test_record_dispatch_success_advances_offsets_and_applies_backpressure():
+    worker = object.__new__(StorageWriteBatchWorker)
+    worker.ext_id = "worker-a"
+    worker.log_notifier = FakeNotifier()
+    worker.offsets = {"parent": 7}
+    waited: list[bool] = []
+    worker.wait = lambda drain=False: waited.append(drain)
+    worker.awaiting = [object()] * (MAX_IN_FLIGHT + 1)
+    job = SimpleNamespace(parent="parent", data=SimpleNamespace(serialized_rows=[b"a", b"b"]))
+
+    worker._record_dispatch_success(job, "stream-a")
+
+    assert worker.offsets == {"parent": 9}
+    assert worker.log_notifier.messages == ["[worker-a] Sent 2 rows to stream-a with offset 7."]
+    assert waited == [False]
+
+
+def test_wait_reports_success_and_serializes_future_errors():
+    worker = object.__new__(StorageWriteBatchWorker)
+    exc = RuntimeError("append failed")
+    worker.awaiting = [FakeFuture(), FakeFuture(exc)]
+    worker.error_notifier = FakeNotifier()
+    worker.job_notifier = FakeNotifier()
+    worker.ext_id = "worker-a"
+
+    worker.wait(drain=True)
+
+    assert worker.awaiting == []
+    assert worker.job_notifier.messages == [True, True]
+    assert worker.error_notifier.messages[0][0] is exc
+    assert "Worker ID: worker-a" in worker.error_notifier.messages[0][1]
+
+
+def test_close_cached_streams_reports_close_errors():
+    worker = object.__new__(StorageWriteBatchWorker)
+    exc = RuntimeError("close failed")
+    good_stream = FakeStream()
+    bad_stream = FakeStream(exc)
+    worker.cache = {
+        "good": ("good-stream", good_stream, lambda request: request),
+        "bad": ("bad-stream", bad_stream, lambda request: request),
+    }
+    worker.error_notifier = FakeNotifier()
+    worker.ext_id = "worker-a"
+
+    worker.close_cached_streams()
+
+    assert good_stream.closed is True
+    assert bad_stream.closed is True
+    assert worker.error_notifier.messages[0][0] is exc
+    assert "Worker ID: worker-a" in worker.error_notifier.messages[0][1]
