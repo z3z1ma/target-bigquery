@@ -11,6 +11,17 @@ from singer_sdk.testing import target_sync_test
 from target_bigquery.core import BigQueryCredentials, bigquery_client_factory
 from target_bigquery.target import TargetBigQuery
 
+LEGACY_STREAMING_INSERT_CI_SKIP_REASON = (
+    "BigQuery free tier blocks legacy streaming inserts in GitHub Actions CI."
+)
+
+
+def _skip_legacy_streaming_insert_in_ci(method: str) -> None:
+    """Skip legacy streaming integration tests only in GitHub Actions CI."""
+    if method == "streaming_insert" and os.environ.get("GITHUB_ACTIONS") == "true":
+        pytest.skip(LEGACY_STREAMING_INSERT_CI_SKIP_REASON)
+
+
 # id = (0-4) - normal case
 # id = 5 - datetime NULL case
 # id = 6 - datetime wrong format case
@@ -56,6 +67,8 @@ SECONDARY_SINGER_STREAM = """
 )
 @pytest.mark.parametrize("batch_mode", [False, True], ids=["no_batch_mode", "batch_mode"])
 def test_basic_sync(method, batch_mode, bigquery_gcs_config: dict[str, str]):
+    _skip_legacy_streaming_insert_in_ci(method)
+
     OPTS = {
         "method": method,
         "denormalized": False,
@@ -131,6 +144,8 @@ def test_basic_sync(method, batch_mode, bigquery_gcs_config: dict[str, str]):
     ids=["batch_job", "streaming_insert", "gcs_stage", "storage_write_api"],
 )
 def test_basic_denorm_sync(method, bigquery_gcs_config: dict[str, str]):
+    _skip_legacy_streaming_insert_in_ci(method)
+
     OPTS = {
         "method": method,
         "denormalized": True,
