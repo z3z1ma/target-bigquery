@@ -144,7 +144,8 @@ First a valid example to give context to the below including a nested key exampl
 | bucket                                             |  False   |       None        | The GCS bucket to use for staging data. Only used if method is gcs_stage. |
 | cluster_on_key_properties                          |  False   |         0         | Determines whether to cluster on the key properties from the tap. Defaults to false. When false, clustering will be based on _sdc_batched_at instead. |
 | clustering_fields                                  |  False   |       None        | Optional explicit BigQuery clustering fields. When set, this takes precedence over `cluster_on_key_properties` and does not change merge key semantics. |
-| partition_granularity                              |  False   |      "month"      | Indicates the granularity of the created table partitioning scheme which is based on `_sdc_batched_at`. By default the granularity is monthly. Must be one of: "hour", "day", "month", "year". |
+| partition_granularity                              |  False   |      "month"      | Indicates the granularity of the created table partitioning scheme which is based on `_sdc_batched_at`. By default the granularity is monthly. Must be one of: "none", "hour", "day", "month", "year". |
+| partition_granularity_by_stream                    |  False   |       None        | Optional mapping of `fnmatch` stream-name patterns to partition granularities. The last matching pattern wins. |
 | partition_expiration_days                          |  False   |       None        | If set for date- or timestamp-type partitions, the partition will expire that many days after the date it represents. |
 | column_name_transforms.lower                       |  False   |       None        | Lowercase column names. |
 | column_name_transforms.quote                       |  False   |       None        | Quote column names in any generated DDL. |

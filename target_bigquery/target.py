@@ -173,6 +173,7 @@ class TargetBigQuery(Target):
                 {
                     "type": "string",
                     "enum": [
+                        "none",
                         "year",
                         "month",
                         "day",
@@ -182,6 +183,23 @@ class TargetBigQuery(Target):
             ),
             default="month",
             description="The granularity of the partitioning strategy. Defaults to month.",
+        ),
+        th.Property(
+            "partition_granularity_by_stream",
+            th.CustomType(
+                {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string",
+                        "enum": ["none", "hour", "day", "month", "year"],
+                    },
+                }
+            ),
+            required=False,
+            description=(
+                "Optional stream-name pattern overrides for partition_granularity. "
+                "Patterns use fnmatch and the last matching entry wins."
+            ),
         ),
         th.Property(
             "partition_expiration_days",
