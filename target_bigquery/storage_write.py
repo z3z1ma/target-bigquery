@@ -12,7 +12,7 @@
 
 import logging
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from contextlib import suppress
 from multiprocessing import Process
 from multiprocessing.connection import Connection
@@ -25,6 +25,7 @@ from typing import (
 )
 
 import orjson
+from google.cloud.bigquery import SchemaField
 from google.cloud.bigquery_storage_v1 import BigQueryWriteClient, exceptions, types, writer
 from google.protobuf import json_format, message
 from tenacity import retry, stop_after_attempt, wait_fixed
@@ -33,6 +34,7 @@ from target_bigquery.core import (
     BaseBigQuerySink,
     BaseWorker,
     Denormalized,
+    IngestionStrategy,
     make_json_compatible,
     storage_client_factory,
 )
@@ -126,6 +128,31 @@ def _localize_nested_type_names(descriptor: Any) -> None:
                 break
     for nested in descriptor.nested_type:
         _localize_nested_type_names(nested)
+
+
+def serialize_json_fields(record: dict[str, Any], schema: Iterable[SchemaField]) -> dict[str, Any]:
+    """Serialize BigQuery JSON fields to the string representation required by Protobuf."""
+    for field in schema:
+        value = record.get(field.name)
+        if value is None:
+            continue
+
+        if field.field_type.upper() == "JSON":
+            if field.mode.upper() == "REPEATED":
+                record[field.name] = [
+                    orjson.dumps(make_json_compatible(item)).decode("utf-8") for item in value
+                ]
+            else:
+                record[field.name] = orjson.dumps(make_json_compatible(value)).decode("utf-8")
+        elif field.field_type.upper() == "RECORD":
+            if field.mode.upper() == "REPEATED":
+                for item in value:
+                    if isinstance(item, dict):
+                        serialize_json_fields(item, field.fields)
+            elif isinstance(value, dict):
+                serialize_json_fields(value, field.fields)
+
+    return record
 
 
 class Job:
@@ -349,13 +376,21 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
             self.table.name,
         )
         self.stream_notification, self.stream_notifier = target.pipe_cls(False)
+        self._resolved_schema = self.table.get_resolved_schema(self.apply_transforms)
         self.template = generate_template(self.proto_schema)
+
+    @property
+    def resolved_schema(self) -> list[SchemaField]:
+        """Return the schema used for this sink's lifetime."""
+        if not hasattr(self, "_resolved_schema"):
+            self._resolved_schema = self.table.get_resolved_schema(self.apply_transforms)
+        return self._resolved_schema
 
     @property
     def proto_schema(self) -> type[message.Message]:
         if not hasattr(self, "_proto_schema"):
             self._proto_schema = proto_schema_factory_v2(
-                self.table.get_resolved_schema(self.apply_transforms)
+                self.resolved_schema
             )
         return cast(type[message.Message], self._proto_schema)
 
@@ -368,6 +403,11 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
         return record
 
     def process_record(self, record: dict[str, Any], context: dict[str, Any]) -> None:
+        if self.ingestion_strategy is IngestionStrategy.DENORMALIZED:
+            record = serialize_json_fields(
+                record,
+                self.resolved_schema,
+            )
         self.proto_rows.serialized_rows.append(
             json_format.ParseDict(record, self.proto_schema()).SerializeToString()
         )
