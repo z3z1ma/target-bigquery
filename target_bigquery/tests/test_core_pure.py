@@ -25,6 +25,7 @@ from target_bigquery.core import (
     IngestionStrategy,
     ParType,
     SchemaResolverVersion,
+    TableLayout,
     make_json_compatible,
     selection_matches,
 )
@@ -413,6 +414,133 @@ def test_create_target_prefers_explicit_clustering_fields():
         "id",
         "region",
     )
+
+
+@pytest.mark.parametrize(
+    ("config", "stream_name", "expected"),
+    [
+        ({}, "orders", "month"),
+        ({"partition_granularity_by_stream": {"orders": "none"}}, "orders", "none"),
+        ({"partition_granularity_by_stream": {"order*": "day"}}, "orders", "day"),
+        (
+            {"partition_granularity_by_stream": {"*": "day", "orders": "none"}},
+            "orders",
+            "none",
+        ),
+    ],
+)
+def test_resolved_layout_uses_default_and_last_matching_stream_override(
+    config: dict[str, Any], stream_name: str, expected: str
+):
+    layout = make_sink(config, stream_name=stream_name).resolved_layout()
+
+    assert layout.partition_granularity == expected
+    assert layout.clustering_fields == ("_sdc_batched_at",)
+
+
+def test_overwrite_ddl_preserves_monthly_partitioning_and_clustering():
+    layout = TableLayout("month", None, ("_sdc_batched_at",))
+    target = make_bigquery_table(name="orders")
+    source = make_bigquery_table(name="orders__tmp")
+
+    ddl = layout.overwrite_ddl(target, source)
+
+    assert "PARTITION BY TIMESTAMP_TRUNC(`_sdc_batched_at`, MONTH)" in ddl
+    assert "CLUSTER BY `_sdc_batched_at`" in ddl
+    assert ddl.endswith("AS SELECT * FROM `project`.`analytics`.`orders__tmp`")
+
+
+def test_overwrite_ddl_for_unpartitioned_table_omits_partition_by():
+    layout = TableLayout("none", None, ("_sdc_batched_at",))
+    ddl = layout.overwrite_ddl(make_bigquery_table(), make_bigquery_table(name="orders__tmp"))
+
+    assert "PARTITION BY" not in ddl
+    assert "CLUSTER BY `_sdc_batched_at`" in ddl
+
+
+def test_monthly_layout_matches_table_after_consecutive_overwrites():
+    layout = TableLayout("month", None, ("_sdc_batched_at",))
+    existing = bigquery.Table(make_bigquery_table().as_ref())
+    existing.time_partitioning = bigquery.table.TimePartitioning(
+        type_=bigquery.table.TimePartitioningType.MONTH,
+        field="_sdc_batched_at",
+    )
+    existing.clustering_fields = ("_sdc_batched_at",)
+
+    assert layout.matches_table(existing)
+    assert layout.matches_table(existing)
+
+
+def test_incompatible_existing_layout_fails_before_overwrite_staging():
+    sink = make_sink({"partition_granularity": "none"})
+    sink._key_properties = []
+    sink.overwrite_target = make_bigquery_table()
+    existing = bigquery.Table(sink.overwrite_target.as_ref())
+    existing.time_partitioning = bigquery.table.TimePartitioning(
+        type_=bigquery.table.TimePartitioningType.MONTH,
+        field="_sdc_batched_at",
+    )
+    existing.clustering_fields = ("_sdc_batched_at",)
+    sink._get_bigquery_client = lambda: SimpleNamespace(get_table=lambda _: existing)
+
+    with pytest.raises(RuntimeError, match="explicit table migration"):
+        sink._assert_overwrite_layout_compatible()
+
+
+@pytest.mark.parametrize(
+    ("config", "key_properties", "expected"),
+    [
+        ({"clustering_fields": []}, None, ()),
+        ({"clustering_fields": []}, ["id"], ()),
+        ({"clustering_fields": [], "cluster_on_key_properties": True}, ["id"], ()),
+        ({"clustering_fields": ["tenant_id"]}, None, ("tenant_id",)),
+        ({"clustering_fields_by_stream": {"orders": []}}, None, ()),
+        (
+            {
+                "clustering_fields": ["tenant_id"],
+                "clustering_fields_by_stream": {"*": [], "orders": ["updated_at"]},
+            },
+            None,
+            ("updated_at",),
+        ),
+        (
+            {"clustering_fields_by_stream": {"orders": ["a", "b", "c", "d", "e"]}},
+            None,
+            ("a", "b", "c", "d"),
+        ),
+    ],
+)
+def test_resolved_layout_clustering_disable_and_stream_overrides(
+    config: dict[str, Any], key_properties: list[str] | None, expected: tuple[str, ...]
+):
+    layout = make_sink(config).resolved_layout(key_properties)
+
+    assert layout.clustering_fields == expected
+
+
+def test_resolved_layout_defaults_to_sdc_batched_at_clustering():
+    layout = make_sink({}).resolved_layout()
+
+    assert layout.clustering_fields == ("_sdc_batched_at",)
+
+
+def test_overwrite_ddl_omits_cluster_by_when_clustering_disabled():
+    ddl = TableLayout("none", None, ()).overwrite_ddl(
+        make_bigquery_table(), make_bigquery_table(name="orders__tmp")
+    )
+
+    assert "PARTITION BY" not in ddl
+    assert "CLUSTER BY" not in ddl
+
+
+def test_matches_table_respects_disabled_clustering():
+    layout = TableLayout("none", None, ())
+    unclustered = bigquery.Table(make_bigquery_table().as_ref())
+    assert layout.matches_table(unclustered)
+
+    clustered = bigquery.Table(make_bigquery_table().as_ref())
+    clustered.clustering_fields = ("_sdc_batched_at",)
+    assert not layout.matches_table(clustered)
 
 
 def test_batch_job_process_batch_enqueues_compressed_json_job():

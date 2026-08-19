@@ -173,6 +173,7 @@ class TargetBigQuery(Target):
                 {
                     "type": "string",
                     "enum": [
+                        "none",
                         "year",
                         "month",
                         "day",
@@ -182,6 +183,23 @@ class TargetBigQuery(Target):
             ),
             default="month",
             description="The granularity of the partitioning strategy. Defaults to month.",
+        ),
+        th.Property(
+            "partition_granularity_by_stream",
+            th.CustomType(
+                {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string",
+                        "enum": ["none", "hour", "day", "month", "year"],
+                    },
+                }
+            ),
+            required=False,
+            description=(
+                "Optional stream-name pattern overrides for partition_granularity. "
+                "Patterns use fnmatch and the last matching entry wins."
+            ),
         ),
         th.Property(
             "partition_expiration_days",
@@ -204,7 +222,26 @@ class TargetBigQuery(Target):
             required=False,
             description=(
                 "Optional explicit BigQuery clustering fields. When set, this takes precedence"
-                " over cluster_on_key_properties."
+                " over cluster_on_key_properties. An empty list disables clustering entirely,"
+                " mirroring partition_granularity=none."
+            ),
+        ),
+        th.Property(
+            "clustering_fields_by_stream",
+            th.CustomType(
+                {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                }
+            ),
+            required=False,
+            description=(
+                "Optional stream-name pattern overrides for clustering fields. Patterns use"
+                " fnmatch and the last matching entry wins. An empty array disables clustering"
+                " for matching streams."
             ),
         ),
         th.Property(
