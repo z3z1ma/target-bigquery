@@ -487,6 +487,62 @@ def test_incompatible_existing_layout_fails_before_overwrite_staging():
         sink._assert_overwrite_layout_compatible()
 
 
+@pytest.mark.parametrize(
+    ("config", "key_properties", "expected"),
+    [
+        ({"clustering_fields": []}, None, ()),
+        ({"clustering_fields": []}, ["id"], ()),
+        ({"clustering_fields": [], "cluster_on_key_properties": True}, ["id"], ()),
+        ({"clustering_fields": ["tenant_id"]}, None, ("tenant_id",)),
+        ({"clustering_fields_by_stream": {"orders": []}}, None, ()),
+        (
+            {
+                "clustering_fields": ["tenant_id"],
+                "clustering_fields_by_stream": {"*": [], "orders": ["updated_at"]},
+            },
+            None,
+            ("updated_at",),
+        ),
+        (
+            {"clustering_fields_by_stream": {"orders": ["a", "b", "c", "d", "e"]}},
+            None,
+            ("a", "b", "c", "d"),
+        ),
+    ],
+)
+def test_resolved_layout_clustering_disable_and_stream_overrides(
+    config: dict[str, Any], key_properties: list[str] | None, expected: tuple[str, ...]
+):
+    layout = make_sink(config).resolved_layout(key_properties)
+
+    assert layout.clustering_fields == expected
+
+
+def test_resolved_layout_defaults_to_sdc_batched_at_clustering():
+    layout = make_sink({}).resolved_layout()
+
+    assert layout.clustering_fields == ("_sdc_batched_at",)
+
+
+def test_overwrite_ddl_omits_cluster_by_when_clustering_disabled():
+    ddl = TableLayout("none", None, ()).overwrite_ddl(
+        make_bigquery_table(), make_bigquery_table(name="orders__tmp")
+    )
+
+    assert "PARTITION BY" not in ddl
+    assert "CLUSTER BY" not in ddl
+
+
+def test_matches_table_respects_disabled_clustering():
+    layout = TableLayout("none", None, ())
+    unclustered = bigquery.Table(make_bigquery_table().as_ref())
+    assert layout.matches_table(unclustered)
+
+    clustered = bigquery.Table(make_bigquery_table().as_ref())
+    clustered.clustering_fields = ("_sdc_batched_at",)
+    assert not layout.matches_table(clustered)
+
+
 def test_batch_job_process_batch_enqueues_compressed_json_job():
     sink, queue, increments = prepare_buffered_sink(BigQueryBatchJobSink)
 

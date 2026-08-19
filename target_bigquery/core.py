@@ -104,7 +104,9 @@ class TableLayout:
 
     def table_options(self) -> dict[str, Any]:
         """Return the BigQuery client options used when initially creating a table."""
-        options: dict[str, Any] = {"clustering_fields": self.clustering_fields}
+        options: dict[str, Any] = {}
+        if self.clustering_fields:
+            options["clustering_fields"] = self.clustering_fields
         if self.is_partitioned:
             expiration_ms = (
                 self.partition_expiration_days * 24 * 60 * 60 * 1000
@@ -545,12 +547,22 @@ class BaseBigQuerySink(BatchSink):
             )
 
         clustering_fields = self.config.get("clustering_fields")
-        if clustering_fields:
+        if clustering_fields is not None:
             clustering = tuple(clustering_fields[:4])
         elif key_properties and self.config.get("cluster_on_key_properties", False):
             clustering = tuple(key_properties[:4])
         else:
             clustering = ("_sdc_batched_at",)
+        clustering_overrides = self.config.get("clustering_fields_by_stream", {}) or {}
+        if not isinstance(clustering_overrides, dict):
+            raise ValueError(
+                "clustering_fields_by_stream must be a mapping of patterns to field lists"
+            )
+        for pattern, candidate in clustering_overrides.items():
+            if not isinstance(pattern, str):
+                raise ValueError("clustering_fields_by_stream patterns must be strings")
+            if fnmatch(self.stream_name, pattern):
+                clustering = tuple(candidate[:4])
         return TableLayout(
             partition_granularity=granularity,
             partition_expiration_days=self.config.get("partition_expiration_days"),
