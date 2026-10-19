@@ -675,12 +675,14 @@ class BaseBigQuerySink(BatchSink):
             f"VALUES ({', '.join(f'source.`{field}`' for field in target_columns)})"
         )
         matched_clause = f"WHEN MATCHED THEN {update_clause} " if update_clause else ""
+        timeout = self.config.get("timeout", 600)
         bigquery_client.query(
             f"{ctas_tmp}; {merge_clause} "
             f"{matched_clause}"
             f"WHEN NOT MATCHED THEN {insert_clause}; "
-            f"DROP TABLE IF EXISTS {self.table.get_escaped_name()};"
-        ).result()
+            f"DROP TABLE IF EXISTS {self.table.get_escaped_name()};",
+            timeout=timeout,
+        ).result(timeout=timeout)
 
     def clean_up(self) -> None:
         """Clean up the target table."""
@@ -694,11 +696,13 @@ class BaseBigQuerySink(BatchSink):
             self.merge_target = None
         elif self.overwrite_target is not None:
             # We must overwrite the target table with the temp table.
+            timeout = self.config.get("timeout", 600)
             bigquery_client.query(
                 f"CREATE OR REPLACE TABLE {self.overwrite_target.get_escaped_name()} AS SELECT *"
                 f" FROM {self.table.get_escaped_name()}; DROP TABLE IF EXISTS"
-                f" {self.table.get_escaped_name()};"
-            ).result()
+                f" {self.table.get_escaped_name()};",
+                timeout=timeout,
+            ).result(timeout=timeout)
             self.table = self.overwrite_target
             self.overwrite_target = None
 

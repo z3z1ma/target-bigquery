@@ -42,14 +42,19 @@ from target_bigquery.streaming_insert import BigQueryStreamingInsertSink
 
 
 class FakeBigQueryJob:
-    def result(self) -> None:
-        pass
+    def __init__(self) -> None:
+        self.result_timeouts: list[int | None] = []
+
+    def result(self, timeout: int | None = None) -> None:
+        self.result_timeouts.append(timeout)
 
 
 class FakeBigQueryClient:
     def __init__(self, table: bigquery.Table) -> None:
         self.table = table
         self.queries: list[str] = []
+        self.query_timeouts: list[int | None] = []
+        self.jobs: list[FakeBigQueryJob] = []
         self.updated: list[tuple[bigquery.Table, list[str]]] = []
 
     def get_table(self, table_ref: bigquery.TableReference) -> bigquery.Table:
@@ -65,9 +70,12 @@ class FakeBigQueryClient:
         self.updated.append((table, fields))
         return table
 
-    def query(self, sql: str) -> FakeBigQueryJob:
+    def query(self, sql: str, *, timeout: int | None = None) -> FakeBigQueryJob:
         self.queries.append(sql)
-        return FakeBigQueryJob()
+        self.query_timeouts.append(timeout)
+        job = FakeBigQueryJob()
+        self.jobs.append(job)
+        return job
 
 
 class FakeBigQueryUriClient:
@@ -633,6 +641,32 @@ def test_merge_table_uses_shared_columns_and_does_not_update_keys():
     assert "INSERT (`id`, `value`)" in sql
     assert "source_only" not in sql
     assert "target_only" not in sql
+    assert client.query_timeouts == [600]
+    assert client.jobs[0].result_timeouts == [600]
+
+
+def test_merge_table_uses_configured_query_timeout():
+    sink = make_merge_sink(
+        {
+            "id": {"type": ["integer", "null"]},
+            "value": {"type": ["string", "null"]},
+        }
+    )
+    sink._config["timeout"] = 123
+    merge_target = cast(BigQueryTable, sink.merge_target)
+    target_table = bigquery.Table(
+        merge_target.as_ref(),
+        schema=[
+            bigquery.SchemaField("id", "INTEGER"),
+            bigquery.SchemaField("value", "STRING"),
+        ],
+    )
+    client = FakeBigQueryClient(target_table)
+
+    sink.merge_table(cast(Any, client))
+
+    assert client.query_timeouts == [123]
+    assert client.jobs[0].result_timeouts == [123]
 
 
 def test_merge_table_omits_matched_clause_when_only_keys_are_shared():
