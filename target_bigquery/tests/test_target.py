@@ -380,3 +380,79 @@ def test_drain_all_fail_fast_checks_worker_errors_after_shutdown():
         target.drain_all(is_endofpipe=True)
 
     assert target.shutdowns == [True]
+
+
+@pytest.mark.parametrize("failure", [None, "commit", "merge", "rotate"])
+def test_storage_checkpoint_merges_before_state_and_rotates_destination(monkeypatch, failure):
+    """Exercise real drain and sink hooks, including a second checkpoint's destination."""
+    from types import SimpleNamespace
+
+    events = []
+    sink = object.__new__(BigQueryStorageWriteDenormalizedSink)
+    sink.table = SimpleNamespace(project="p", dataset="d", name="stage0")
+    sink.parent = "projects/p/datasets/d/tables/stage0"
+    sink.merge_target = object()
+    target = make_target({})
+    target._latest_state = {"bookmarks": {"orders": {"pos": 1}}}
+    target._sinks_active = {"orders": sink}
+    target.max_parallelism = 1
+    target.error_notification = FakeNotification()
+
+    def step(name):
+        events.append(name)
+        if failure == name:
+            raise RuntimeError(name)
+
+    monkeypatch.setattr(sink, "commit_streams", lambda: step("commit"))
+    monkeypatch.setattr(sink, "_get_bigquery_client", lambda: None)
+    monkeypatch.setattr(sink, "merge_table", lambda **kwargs: step("merge"))
+
+    rotations = [1]
+
+    def rotate():
+        step("rotate")
+        sink.table = SimpleNamespace(project="p", dataset="d", name=f"stage{rotations[0]}")
+        rotations[0] += 1
+
+    monkeypatch.setattr(sink, "_create_overwrite_table", rotate)
+    monkeypatch.setattr(target, "_drain_all", lambda *args: None)
+    monkeypatch.setattr(target, "_join_workers", lambda: None)
+    monkeypatch.setattr(target, "_write_state_message", lambda state: events.append("state"))
+    monkeypatch.setattr(target, "_reset_max_record_age", lambda: None)
+
+    if failure:
+        with pytest.raises(RuntimeError, match=failure):
+            target.drain_all()
+        assert "state" not in events
+        assert (
+            events
+            == ["commit", "merge", "rotate"][: ["commit", "merge", "rotate"].index(failure) + 1]
+        )
+    else:
+        target.drain_all()
+        assert events == ["commit", "merge", "rotate", "state"]
+        assert sink.parent == "projects/p/datasets/d/tables/stage1"
+        jobs = []
+        sink.global_queue = SimpleNamespace(qsize=lambda: 0, put=jobs.append)
+        sink.template = object()
+        sink.proto_rows = object()
+        sink.stream_notifier = object()
+        sink.increment_jobs_enqueued = lambda: None
+        sink.process_batch({})
+        assert jobs[0].parent == "projects/p/datasets/d/tables/stage1"
+        events.clear()
+        target.drain_all()
+        assert events == ["commit", "merge", "rotate", "state"]
+        assert sink.parent == "projects/p/datasets/d/tables/stage2"
+
+
+def test_storage_fixed_checkpoint_does_not_merge(monkeypatch):
+    sink = object.__new__(BigQueryStorageWriteSink)
+    sink.merge_target = None
+    sink.table = type("Table", (), {"project": "p", "dataset": "d", "name": "fixed"})()
+    events = []
+    monkeypatch.setattr(sink, "commit_streams", lambda: events.append("commit"))
+    monkeypatch.setattr(sink, "merge_table", lambda **kwargs: pytest.fail("unexpected merge"))
+    sink.pre_state_hook()
+    assert events == ["commit"]
+    assert sink.parent == "projects/p/datasets/d/tables/fixed"

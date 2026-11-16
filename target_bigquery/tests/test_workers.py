@@ -10,6 +10,7 @@ import pytest
 from google.cloud import bigquery
 from google.cloud.bigquery import SchemaField
 from google.cloud.bigquery_storage_v1 import exceptions, types
+from google.protobuf import json_format
 
 import target_bigquery.batch_job as batch_job
 import target_bigquery.gcs_stage as gcs_stage
@@ -412,6 +413,63 @@ def test_generate_template_uses_local_nested_type_names():
     assert descriptor.field[0].type_name == "Nested_profile"
 
 
+def test_serialize_json_fields_for_storage_write_proto():
+    schema = [
+        SchemaField("json_payload", "JSON"),
+        SchemaField("json_items", "JSON", mode="REPEATED"),
+        SchemaField(
+            "settings",
+            "RECORD",
+            fields=[SchemaField("json_override", "JSON")],
+        ),
+        SchemaField("active", "BOOLEAN"),
+    ]
+    record = {
+        "json_payload": {"status": "active", "priority": 1},
+        "json_items": [{"category": "primary"}, ["secondary"]],
+        "settings": {"json_override": {"enabled": True}},
+        "active": True,
+    }
+
+    serialized = storage_write.serialize_json_fields(record, schema)
+
+    assert serialized == {
+        "json_payload": '{"status":"active","priority":1}',
+        "json_items": ['{"category":"primary"}', '["secondary"]'],
+        "settings": {"json_override": '{"enabled":true}'},
+        "active": True,
+    }
+    proto_cls = storage_write.proto_schema_factory_v2(schema)
+    parsed = json_format.ParseDict(serialized, proto_cls())
+    assert parsed.json_payload == '{"status":"active","priority":1}'
+    assert list(parsed.json_items) == ['{"category":"primary"}', '["secondary"]']
+    assert parsed.settings.json_override == '{"enabled":true}'
+
+
+def test_denormalized_storage_write_serializes_json_before_proto_conversion():
+    schema = [SchemaField("json_payload", "JSON")]
+    proto_cls = storage_write.proto_schema_factory_v2(schema)
+    sink = object.__new__(storage_write.BigQueryStorageWriteDenormalizedSink)
+    sink._proto_schema = proto_cls
+    schema_calls = 0
+
+    def get_resolved_schema(_: bool) -> list[SchemaField]:
+        nonlocal schema_calls
+        schema_calls += 1
+        return schema
+
+    sink.table = SimpleNamespace(get_resolved_schema=get_resolved_schema)
+    sink.proto_rows = types.ProtoRows()
+
+    sink.process_record({"json_payload": {"status": "active"}}, {})
+    sink.process_record({"json_payload": {"status": "inactive"}}, {})
+
+    parsed = proto_cls()
+    parsed.ParseFromString(sink.proto_rows.serialized_rows[0])
+    assert parsed.json_payload == '{"status":"active"}'
+    assert schema_calls == 1
+
+
 def test_generate_request_for_application_stream_uses_cached_offset():
     worker = object.__new__(storage_write.StorageWriteBatchWorker)
     worker.offsets = {"parent": 7}
@@ -608,3 +666,44 @@ def test_storage_write_commit_streams_tolerates_already_closed_stream(monkeypatc
     assert committer.finalized == [stream_name]
     assert committer.committed == [[stream_name]]
     assert sink.open_streams == set()
+
+
+@pytest.mark.parametrize("failure", ["finalize", "commit", "response"])
+@pytest.mark.parametrize("endofpipe", [False, True])
+def test_storage_write_commit_failure_retains_streams(monkeypatch, failure, endofpipe):
+    sink = object.__new__(storage_write.BigQueryStorageWriteSink)
+    stream_name = "projects/p/datasets/d/tables/t/streams/s"
+    stream = AlreadyClosedStream()
+    sink.open_streams = set()
+    sink.stream_notification = FakeStreamNotification((stream_name, stream))
+    sink._credentials = object()
+    sink.parent = "projects/p/datasets/d/tables/t"
+    sink.logger = SimpleNamespace(debug=lambda *args: None, info=lambda *args: None)
+
+    def finalize(**kwargs):
+        if failure == "finalize":
+            raise RuntimeError("finalize failed")
+
+    def commit(request):
+        if failure == "commit":
+            raise RuntimeError("commit failed")
+        return types.BatchCommitWriteStreamsResponse(
+            stream_errors=[types.StorageError(error_message="stream rejected")]
+        )
+
+    committer = SimpleNamespace(finalize_write_stream=finalize, batch_commit_write_streams=commit)
+    monkeypatch.setattr(storage_write, "storage_client_factory", lambda credentials: committer)
+    target = object.__new__(TargetBigQuery)
+    target._config = {}
+    target._latest_state = {"pos": 1}
+    target._sinks_active = {"orders": sink}
+    target.max_parallelism = 1
+    target.error_notification = FakeStreamNotification()
+    monkeypatch.setattr(target, "_drain_all", lambda *args: None)
+    monkeypatch.setattr(target, "_join_workers", lambda: None)
+    monkeypatch.setattr(target, "_shutdown_workers", lambda: None)
+    monkeypatch.setattr(target, "_write_state_message", lambda state: pytest.fail("state advanced"))
+    monkeypatch.setattr(sink, "merge_table", lambda **kwargs: pytest.fail("merge ran"))
+    with pytest.raises(RuntimeError):
+        target.drain_all(is_endofpipe=endofpipe)
+    assert sink.open_streams == {(stream_name, stream)}

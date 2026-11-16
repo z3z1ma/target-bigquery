@@ -11,9 +11,11 @@
 """BigQuery Storage Write Sink."""
 
 import logging
+import math
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from contextlib import suppress
+from decimal import Decimal
 from multiprocessing import Process
 from multiprocessing.connection import Connection
 from multiprocessing.dummy import Process as _Thread
@@ -25,6 +27,7 @@ from typing import (
 )
 
 import orjson
+from google.cloud.bigquery import SchemaField
 from google.cloud.bigquery_storage_v1 import BigQueryWriteClient, exceptions, types, writer
 from google.protobuf import json_format, message
 from tenacity import retry, stop_after_attempt, wait_fixed
@@ -33,6 +36,7 @@ from target_bigquery.core import (
     BaseBigQuerySink,
     BaseWorker,
     Denormalized,
+    IngestionStrategy,
     make_json_compatible,
     storage_client_factory,
 )
@@ -126,6 +130,52 @@ def _localize_nested_type_names(descriptor: Any) -> None:
                 break
     for nested in descriptor.nested_type:
         _localize_nested_type_names(nested)
+
+
+def _normalize_json_value(value: Any) -> Any:
+    """Normalize Decimal values without silently replacing non-finite numbers."""
+    if isinstance(value, Decimal):
+        if not value.is_finite():
+            raise ValueError("BigQuery JSON does not support non-finite numbers")
+        value = make_json_compatible(value)
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError("BigQuery JSON does not support non-finite numbers")
+    if isinstance(value, dict):
+        return {key: _normalize_json_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_normalize_json_value(item) for item in value]
+    return value
+
+
+def serialize_json_fields(record: dict[str, Any], schema: Iterable[SchemaField]) -> dict[str, Any]:
+    """Copy record containers and encode JSON fields as protobuf strings."""
+    record = record.copy()
+    for field in schema:
+        value = record.get(field.name)
+        if value is None:
+            continue
+        if (
+            field.mode.upper() == "REPEATED"
+            and field.field_type.upper() in {"JSON", "RECORD"}
+            and not isinstance(value, (list, tuple))
+        ):
+            raise TypeError(f"Repeated field {field.name!r} requires an array")
+        if field.field_type.upper() == "JSON":
+            if field.mode.upper() == "REPEATED":
+                record[field.name] = [
+                    orjson.dumps(_normalize_json_value(item)).decode("utf-8") for item in value
+                ]
+            else:
+                record[field.name] = orjson.dumps(_normalize_json_value(value)).decode("utf-8")
+        elif field.field_type.upper() == "RECORD":
+            if field.mode.upper() == "REPEATED":
+                record[field.name] = [
+                    serialize_json_fields(item, field.fields) if isinstance(item, dict) else item
+                    for item in value
+                ]
+            elif isinstance(value, dict):
+                record[field.name] = serialize_json_fields(value, field.fields)
+    return record
 
 
 class Job:
@@ -349,14 +399,20 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
             self.table.name,
         )
         self.stream_notification, self.stream_notifier = target.pipe_cls(False)
+        self._resolved_schema = self.table.get_resolved_schema(self.apply_transforms)
         self.template = generate_template(self.proto_schema)
+
+    @property
+    def resolved_schema(self) -> list[SchemaField]:
+        """Return the schema used for this sink's lifetime."""
+        if not hasattr(self, "_resolved_schema"):
+            self._resolved_schema = self.table.get_resolved_schema(self.apply_transforms)
+        return self._resolved_schema
 
     @property
     def proto_schema(self) -> type[message.Message]:
         if not hasattr(self, "_proto_schema"):
-            self._proto_schema = proto_schema_factory_v2(
-                self.table.get_resolved_schema(self.apply_transforms)
-            )
+            self._proto_schema = proto_schema_factory_v2(self.resolved_schema)
         return cast(type[message.Message], self._proto_schema)
 
     def start_batch(self, context: dict[str, Any]) -> None:
@@ -368,6 +424,11 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
         return record
 
     def process_record(self, record: dict[str, Any], context: dict[str, Any]) -> None:
+        if self.ingestion_strategy is IngestionStrategy.DENORMALIZED:
+            record = serialize_json_fields(
+                record,
+                self.resolved_schema,
+            )
         self.proto_rows.serialized_rows.append(
             json_format.ParseDict(record, self.proto_schema()).SerializeToString()
         )
@@ -409,6 +470,8 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
                     write_streams=[name for name, _ in self.open_streams],
                 )
             )
+            if write.stream_errors:
+                raise RuntimeError(f"Storage Write batch commit failed: {write.stream_errors}")
             self.logger.info(f"Batch commit time: {write.commit_time}")
             self.logger.info(f"Batch commit errors: {write.stream_errors}")
             self.logger.info(f"Writes to streams: '{self.open_streams}' have been committed.")
@@ -420,6 +483,12 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
 
     def pre_state_hook(self) -> None:
         self.commit_streams()
+        super().pre_state_hook()
+        # A successful merge rotates the staging table. New jobs must use it,
+        # rather than the old table which merge_table has dropped.
+        self.parent = BigQueryWriteClient.table_path(
+            self.table.project, self.table.dataset, self.table.name
+        )
 
 
 class BigQueryStorageWriteDenormalizedSink(Denormalized, BigQueryStorageWriteSink):

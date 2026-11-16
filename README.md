@@ -46,6 +46,10 @@ pipx install z3-target-bigquery
 target-bigquery --version
 ```
 
+See the [capability and validation guide](docs/capabilities.md) for transport,
+strategy, JSON, replay and migration limits. Unreleased work is tracked in the
+[release-readiness candidate](docs/release-readiness.md).
+
 ## Usage Notes
 
 ### Denormalization
@@ -54,7 +58,7 @@ So denormalized is a loaded term, so lets clarify here what we mean by it:
 
 > In the context of JSON objects, denormalization refers to the process of flattening a hierarchical or nested JSON object into a simpler, more "denormalized" structure that can be easier to work with for certain use cases.
 
-Denormalized=False (default) means we load all data into a single `JSON` column. This means all access requires an accessor such as `SELECT data.my_column FROM table` instead of `SELECT my_column FROM table`. Hence the term denormalized is relative to the `data` column which is the default for this target. This is a tradeoff between convenience/resilience and performance. This is the default because most _resilient_. IE a load will **never** fail due to a schema change or an invalid schema. You can always denormalize later via `dbt`. However, it is not the most performant and slower to transform. If your tap has a high quality and consistent schema, denormalization is the way to go to get the best performance and start modeling quickly.
+Denormalized=False (default) means we load all data into a single `JSON` column. This means all access requires an accessor such as `SELECT data.my_column FROM table` instead of `SELECT my_column FROM table`. Hence the term denormalized is relative to the `data` column which is the default for this target. This is a tradeoff between convenience/resilience and performance. This is the default because most _resilient_. This reduces dependence on a stable source schema, but invalid JSON values, transport failures, permissions and quotas can still fail a load. You can denormalize later via `dbt`. However, it is not the most performant and slower to transform. If your tap has a high quality and consistent schema, denormalization is the way to go to get the best performance and start modeling quickly.
 
 Denormalized=True means we unpack the data into a schema which is derived from the tap schema. It does _not_ mean we will flatten the data. There is a separate option for flattening. We will convert arrays to repeated fields and records to structs. All top level keys will end up as columns which is was you might expect from more typical targets.
 
@@ -147,7 +151,7 @@ First a valid example to give context to the below including a nested key exampl
 | dataset                                            |   True   |       None        | The target dataset to materialize data into. |
 | location                                           |  False   |        US         | The target dataset location to materialize data into. Applies also to the GCS bucket if using `gcs_stage` load method. |
 | batch_size                                         |  False   |        500        | The maximum number of rows to send in a single batch to the worker. This should be configured based on load method. For `storage_write_api` and `streaming_insert` it should be `<=500`, for the LoadJob sinks, it can be much higher, ie `>100,000` |
-| timeout                                            |  False   |        600        | Default timeout for batch_job and gcs_stage derived LoadJobs. |
+| timeout                                            |  False   |        600        | Timeout in seconds for batch_job/gcs_stage LoadJobs and query submission/result waits (views, MERGE, overwrite). Query timeouts must be positive integers; SDK retries can exceed this value; it does not cancel remote jobs or impose a whole-process deadline. |
 | fail_fast                                          |  False   |        True       | Fail the entire load job if any row fails to insert. |
 | denormalized                                       |  False   |       False       | Determines whether to denormalize the data before writing to BigQuery. A false value will write data using a fixed JSON column based schema, while a true value will write data using a dynamic schema derived from the tap. |
 | method                                             |   True   | storage_write_api | The method to use for writing to BigQuery. Must be one of `batch_job`, `storage_write_api`, `gcs_stage`, `streaming_insert` |
@@ -268,3 +272,107 @@ meltano elt tap-carbon-intensity target-bigquery
 
 See the [dev guide](https://sdk.meltano.com/en/latest/dev_guide.html) for more instructions on how to use the Meltano SDK to
 develop your own Singer taps and targets.
+
+### Storage Write checkpoints
+
+For denormalized upserts, checkpoints wait for Storage Write completion and a
+successful merge into the destination before emitting Singer state. Pending
+streams are finalized and committed first. Commit or merge failures stop the
+checkpoint. After a merge rotates the staging table, subsequent batches use the
+new table. This does not provide end-to-end exactly-once delivery: replay after
+an ambiguous failure still requires stable upsert keys.
+
+When any stream uses overwrite mode, intermediate Singer state is deferred until
+all staged replacements are published at end of input. This applies to the whole
+state message, including other streams. A failure before EOF or a handled termination signal retains the last published
+checkpoint. Handled termination does not initiate publication or emit state, and exits
+nonzero. A replacement query already submitted can still complete remotely.
+Temporary tables remain subject to their configured expiration.
+Append-only streams in a mixed run may replay rows; use stable upsert keys where
+replay must be idempotent. Overwrites across several destination tables are not
+one atomic transaction.
+
+The target cannot distinguish a successful upstream snapshot from a failed tap
+that closes its output. The orchestrator must check upstream success; EOF alone
+is not proof of a complete snapshot.
+
+## Maintenance roadmap
+
+See [ROADMAP.md](ROADMAP.md) for audited priorities, acceptance tests, current status,
+and the verification required before each change ships.
+
+### Denormalized Storage Write JSON fields
+
+With schema resolver v2, fields resolved as BigQuery JSON are encoded as JSON
+text for protobuf transport, including JSON inside nested/repeated RECORDs.
+Python strings are JSON scalar strings, not pre-encoded documents. A nullable
+field's `None` remains SQL NULL; a `None` element in repeated JSON becomes JSON
+null. Serialization copies affected record containers rather than changing them.
+
+Non-finite float/Decimal values fail before the row is buffered. Integer values
+from -2^63 through 2^64-1 retain their numeric values; larger integers fail rather
+than round. Finite fractional Decimals follow the existing float conversion and
+are not arbitrary-precision JSON numbers. These transport checks do not replace
+BigQuery server validation. Fixed-schema encoding is unchanged. Existing column
+name transforms also apply recursively to keys inside JSON documents during
+preprocessing; configure transforms with that behavior in mind.
+
+Denormalized RECORD schemas and records use the same column-name transforms at
+every nested/repeated level. SQL quoting is not part of a physical field name;
+source keys containing backticks are rejected. Existing incompatible nested
+schemas require an explicit migration as described below.
+
+### Column transform collisions
+
+Denormalized loads reject distinct sibling keys that transform to the same name,
+such as `CamelKey` and `camel_key` with snake_case enabled. Declared schema
+collisions fail before destination creation/update. Dynamic keys, including keys
+inside JSON documents, are checked during record preprocessing before buffering;
+the error includes the stream, object path and conflicting source names. Rename
+the source keys or change the transform configuration before retrying. Automatic
+schema suffixes are no longer used because they did not preserve record values.
+Fixed-schema raw ingestion keeps original document keys. This containment does
+not migrate nested RECORD schemas or recover values lost by earlier runs.
+
+### Nested schema migration
+
+Before a denormalized sink creates or updates its destination or staging table,
+it reads the destination schema. Existing RECORD fields must match the expected
+nested names, order, types and modes, including repeated children. A mismatch
+stops the stream with the destination and field path before those mutations.
+The same check applies to append, upsert and overwrite. A completely new top-level
+field can still be added; a new child inside an existing RECORD requires an
+explicit schema update or migration. Extra historical top-level columns remain
+supported. Nested order and mode checks are conservative so whole-STRUCT MERGE
+assignments do not silently change meaning. Metadata access errors stop the load.
+
+Older versions could create raw nested names while transforming record keys.
+For example, `PacketData.ChildValue` with snake_case now resolves to
+`packet_data.child_value`; an existing `packet_data.ChildValue` is rejected.
+The target does not automatically rename, add, remove or backfill nested fields.
+It does not recover values discarded by earlier loads.
+
+To migrate, stop writers and retain the old table and checkpoint for rollback.
+Inspect the actual schema and populated fields, including raw/transformed names;
+do not infer that historical rows are complete. Choose one explicit approach:
+
+- Reload into a new dataset/destination using the intended transforms and a full
+  source replay. An incremental checkpoint alone cannot rebuild historical rows.
+- Backfill into a separately created table with the intended schema. Explicitly
+  map each old nested field, preserving null STRUCTs, array order and values.
+  Reconcile historical gaps from the source where required. Do not infer that
+  adding a renamed child copies the old child's values.
+
+For either approach, preserve/review partitioning, clustering, expiration,
+descriptions, policy tags, constraints and access settings. Validate row counts,
+keys and nested values before switching readers/writers and checkpoints. Keep the
+old table until cutover is verified. New-table backfill and cutover are operator
+operations; this target performs none of them. BigQuery documents supported
+[schema changes](https://docs.cloud.google.com/bigquery/docs/managing-table-schemas),
+but this target does not automate nested evolution. Concurrent external schema
+changes after preflight are not transactionally prevented; coordinate schema
+changes with ingestion. Live migration validation remains outstanding.
+
+JSON document keys retain their existing recursive transform behavior, including
+collision rejection. Fixed-schema raw ingestion and generated-view alias behavior
+are unchanged by this nested physical-schema fix.

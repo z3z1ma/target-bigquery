@@ -471,6 +471,12 @@ class BaseBigQuerySink(BatchSink):
             "timestamp_format": self.config.get("timestamp_format"),
         }
         self.table = BigQueryTable(name=self.table_name, **self.table_opts)
+        if self.ingestion_strategy is IngestionStrategy.DENORMALIZED:
+            try:
+                self.table.schema_translator.validate_transform_collisions()
+                self._validate_existing_nested_schema()
+            except ValueError as exc:
+                raise ValueError(f"Stream {stream_name!r}: {exc}") from exc
         self._input_key_properties = list(key_properties or [])
         self._key_properties = self._target_key_properties(key_properties)
 
@@ -500,6 +506,51 @@ class BaseBigQuerySink(BatchSink):
         self.global_par_typ = target.par_typ
         self.global_queue = target.queue
         self.increment_jobs_enqueued = target.increment_jobs_enqueued
+
+    def _validate_existing_nested_schema(self) -> None:
+        """Check existing nested fields before destination or staging mutations."""
+        self.table.get_resolved_schema(self.apply_transforms)
+        try:
+            existing = self._get_bigquery_client().get_table(self.table.as_ref())
+        except NotFound:
+            return
+        self._validate_nested_schema(existing.schema)
+
+    def _validate_nested_schema(self, existing: Sequence[SchemaField]) -> None:
+        expected = self.table.get_resolved_schema(self.apply_transforms)
+        aliases = {"STRUCT": "RECORD", "INT64": "INTEGER", "FLOAT64": "FLOAT", "BOOL": "BOOLEAN"}
+
+        def field_type(field: SchemaField) -> str:
+            return aliases.get(field.field_type.upper(), field.field_type.upper())
+
+        def mismatch(path: str, detail: str) -> None:
+            raise ValueError(
+                f"Destination {self.table}: incompatible nested schema at {path}: {detail}. "
+                "No automatic nested rename or backfill is performed. Migrate to a compatible "
+                "table or reload into a new destination; see README 'Nested schema migration'."
+            )
+
+        def compare(wanted: SchemaField, actual: SchemaField, path: str) -> None:
+            if (field_type(wanted), wanted.mode) != (field_type(actual), actual.mode):
+                mismatch(
+                    path,
+                    f"expected {wanted.field_type}/{wanted.mode}, "
+                    f"found {actual.field_type}/{actual.mode}",
+                )
+            wanted_names = [child.name for child in wanted.fields]
+            actual_names = [child.name for child in actual.fields]
+            if wanted_names != actual_names:
+                mismatch(
+                    path, f"expected ordered children {wanted_names!r}, found {actual_names!r}"
+                )
+            for child, current in zip(wanted.fields, actual.fields, strict=True):
+                compare(child, current, f"{path}[{child.name!r}]")
+
+        current_fields = {field.name: field for field in existing}
+        for wanted in expected:
+            actual = current_fields.get(wanted.name)
+            if actual is not None and "RECORD" in (field_type(wanted), field_type(actual)):
+                compare(wanted, actual, f"$[{wanted.name!r}]")
 
     def _create_overwrite_table(self) -> None:
         expiration_hours = self.config.get("temporary_table_expiration_hours", 7 * 24)
@@ -713,11 +764,12 @@ class BaseBigQuerySink(BatchSink):
         # Create the table
         is_created = self.table.create_table(self.client, self.apply_transforms, **kwargs)
         if self.generate_view:
-            self.client.query(
+            self._run_query(
+                self.client,
                 self.table.schema_translator.generate_view_statement(
                     self.table,
-                )
-            ).result()
+                ),
+            )
 
         return is_created
 
@@ -733,6 +785,23 @@ class BaseBigQuerySink(BatchSink):
             if isinstance(self.client, bigquery.Client)
             else bigquery_client_factory(self._credentials)
         )
+
+    def _run_query(self, client: bigquery.Client, sql: str) -> None:
+        """Submit and wait for DDL/DML using bounded client waits."""
+        timeout = self.config.get("timeout", 600)
+        if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout <= 0:
+            raise ValueError("timeout must be a positive integer number of seconds")
+        job = None
+        try:
+            job = client.query(sql, timeout=timeout)
+            job.result(timeout=timeout)
+        except Exception:
+            self.logger.error(
+                "BigQuery query failed or wait expired (job_id=%s, location=%s). Remote completion may be unknown; state will not advance.",
+                getattr(job, "job_id", "unavailable"),
+                getattr(job, "location", "unavailable"),
+            )
+            raise
 
     def pre_state_hook(self) -> None:
         # if we have a merge_target we need to merge the table before writing out state
@@ -795,12 +864,13 @@ class BaseBigQuerySink(BatchSink):
             f"VALUES ({', '.join(f'source.`{field}`' for field in target_columns)})"
         )
         matched_clause = f"WHEN MATCHED THEN {update_clause} " if update_clause else ""
-        bigquery_client.query(
+        self._run_query(
+            bigquery_client,
             f"{ctas_tmp}; {merge_clause} "
             f"{matched_clause}"
             f"WHEN NOT MATCHED THEN {insert_clause}; "
-            f"DROP TABLE IF EXISTS {self.table.get_escaped_name()};"
-        ).result()
+            f"DROP TABLE IF EXISTS {self.table.get_escaped_name()};",
+        )
 
     def clean_up(self) -> None:
         """Clean up the target table."""
@@ -815,10 +885,11 @@ class BaseBigQuerySink(BatchSink):
         elif self.overwrite_target is not None:
             # We must overwrite the target table with the temp table.
             layout = self.resolved_layout(self.key_properties)
-            bigquery_client.query(
+            self._run_query(
+                bigquery_client,
                 f"{layout.overwrite_ddl(self.overwrite_target, self.table)}; DROP TABLE IF EXISTS"
-                f" {self.table.get_escaped_name()};"
-            ).result()
+                f" {self.table.get_escaped_name()};",
+            )
             self.table = self.overwrite_target
             self.overwrite_target = None
 
@@ -842,6 +913,7 @@ class Denormalized:
         sink = cast(BaseBigQuerySink, self)
         bigquery_client = sink._get_bigquery_client()
         table = bigquery_client.get_table(sink.table.as_ref())
+        sink._validate_nested_schema(table.schema)
         current_schema = table.schema[:]
         mut_schema = table.schema[:]
         for expected_field in sink.table.get_resolved_schema(sink.apply_transforms):
@@ -862,7 +934,10 @@ class Denormalized:
     ) -> dict[str, Any]:
         """Preprocess a record before writing it to the sink."""
         sink = cast(BaseBigQuerySink, self)
-        return sink.table.schema_translator.translate_record(record)
+        try:
+            return sink.table.schema_translator.translate_record(record)
+        except ValueError as exc:
+            raise ValueError(f"Stream {sink.stream_name!r}: {exc}") from exc
 
 
 @contextmanager
@@ -962,41 +1037,89 @@ class SchemaTranslator:
     def translated_schema_transformed(self) -> list[SchemaField]:
         """Translate the schema into a BigQuery schema using the SchemaTranslator `transforms`."""
         if not self._translated_schema_transformed:
-            self._translated_schema_transformed = [
-                self._jsonschema_property_to_bigquery_column(
-                    transform_column_name(name, **self.transforms), contents
-                )
-                for name, contents in self.schema.get("properties", {}).items()
-            ]
+            self.validate_transform_collisions()
 
-        field_name_count: dict[str, int] = {}
-        for f in self._translated_schema_transformed:
-            field_name = f.name
-            count = field_name_count.get(field_name, 0)
-            if count:
-                f._properties["name"] += f"_{count}"
-            field_name_count[field_name] = count + 1
+            def transform(fields: Sequence[SchemaField], path: str) -> list[SchemaField]:
+                names = self._transformed_names((field.name for field in fields), path)
+                result = []
+                for field in fields:
+                    definition = dict(field.to_api_repr())
+                    definition["name"] = names[field.name]
+                    if field.fields:
+                        definition["fields"] = [
+                            child.to_api_repr()
+                            for child in transform(field.fields, f"{path}[{field.name!r}]")
+                        ]
+                    result.append(SchemaField.from_api_repr(definition))
+                return result
+
+            self._translated_schema_transformed = transform(self.translated_schema, "$")
 
         return self._translated_schema_transformed
 
-    def translate_record(self, record: dict) -> dict:
-        """Translate a record using the SchemaTranslator `transforms`."""
+    def _transformed_names(self, names: Iterable[str], path: str) -> dict[str, str]:
+        transformed = {}
+        sources: dict[str, str] = {}
+        for name in names:
+            target = transform_column_name(name, **{**self.transforms, "quote": False})
+            if "`" in name:
+                raise ValueError(
+                    f"Invalid physical column name at {path}: {name!r} contains backticks. "
+                    "Rename the source key; column_name_transforms.quote applies to SQL only."
+                )
+            if target in sources:
+                raise ValueError(
+                    f"Column transform collision at {path}: {sources[target]!r} and "
+                    f"{name!r} both map to {target!r}. Rename the source keys or "
+                    "change column_name_transforms."
+                )
+            sources[target] = name
+            transformed[name] = target
+        return transformed
+
+    def validate_transform_collisions(self) -> None:
+        """Reject ambiguous declared names before creating or updating a destination."""
+        if not self.transforms:
+            return
+
+        def validate(schema: Any, path: str) -> None:
+            if not isinstance(schema, dict):
+                return
+            properties = schema.get("properties", {})
+            self._transformed_names(properties, path)
+            for name, child in properties.items():
+                validate(child, f"{path}[{name!r}]")
+            items = schema.get("items")
+            for child in items if isinstance(items, list) else [items]:
+                validate(child, f"{path}[]")
+            for keyword in ("anyOf", "oneOf", "allOf"):
+                for child in schema.get(keyword, []):
+                    validate(child, path)
+            validate(schema.get("additionalProperties"), f"{path}.*")
+
+        validate(self.schema, "$")
+
+    def translate_record(self, record: dict, path: str = "$") -> dict:
+        """Transform record keys, rejecting collisions without changing the input."""
         if not self.transforms:
             return record
-        output = dict(
-            [
-                (transform_column_name(k, **{**self.transforms, "quote": False}), v)
-                for k, v in record.items()
-            ]
-        )
-        for k, v in output.items():
-            if isinstance(v, list):
-                for i, inner in enumerate(v):
-                    if isinstance(inner, dict):
-                        output[k][i] = self.translate_record(inner)
-            if isinstance(v, dict):
-                output[k] = self.translate_record(v)
-        return output
+        names = self._transformed_names(record, path)
+
+        def translate(value: Any, child_path: str) -> Any:
+            if isinstance(value, dict):
+                return self.translate_record(value, child_path)
+            if isinstance(value, list):
+                return [
+                    self.translate_record(item, f"{child_path}[{i}]")
+                    if isinstance(item, dict)
+                    else item
+                    for i, item in enumerate(value)
+                ]
+            return value
+
+        return {
+            names[name]: translate(value, f"{path}[{name!r}]") for name, value in record.items()
+        }
 
     def generate_view_statement(self, table_name: BigQueryTable) -> str:
         """Generate a CREATE VIEW statement for the SchemaTranslator `schema`."""
@@ -1230,7 +1353,7 @@ class SchemaTranslator:
             WHERE {_v.projection} IS NOT NULL
         """
                 + (" " * depth * 2)
-                + f") AS {field.name},\n"
+                + f") AS {transform_column_name(field.name, **self.transforms)},\n"
             ).lstrip(),
             " " * depth * 2,
         )
