@@ -50,10 +50,9 @@ and is not proof that an upstream full refresh succeeded.
   JSON element. Non-finite numeric values and integers outside the supported
   64-bit transport range fail before buffering. Other transports use their own
   serialization path; do not assume identical numeric edge behavior.
-- On current main, nested RECORD names must already be canonical for the chosen
-  transforms. [#164](https://github.com/z3z1ma/target-bigquery/pull/164) fixes that
-  mismatch and adds legacy-table preflight, but remains unmerged pending explicit
-  merge approval. Do not treat its migration behavior as available in a release.
+- Nested RECORD names align with record transforms after #164. Existing nested
+  schemas require exact compatible names, order, types and modes; incompatible
+  tables fail before mutations. See README for explicit migration guidance.
 - BigQuery JSON server constraints remain authoritative; see
   [JSON ingestion](https://docs.cloud.google.com/bigquery/docs/json-data).
 

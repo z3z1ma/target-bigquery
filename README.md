@@ -298,10 +298,10 @@ BigQuery server validation. Fixed-schema encoding is unchanged. Existing column
 name transforms also apply recursively to keys inside JSON documents during
 preprocessing; configure transforms with that behavior in mind.
 
-Nested RECORD names must already match the selected column-name transforms:
-record preprocessing transforms them recursively, but the current schema resolver
-transforms schema names only at the top level. The JSON transport fix does not
-change existing nested table schemas.
+Denormalized RECORD schemas and records use the same column-name transforms at
+every nested/repeated level. SQL quoting is not part of a physical field name;
+source keys containing backticks are rejected. Existing incompatible nested
+schemas require an explicit migration as described below.
 
 ### Column transform collisions
 
@@ -314,3 +314,46 @@ the source keys or change the transform configuration before retrying. Automatic
 schema suffixes are no longer used because they did not preserve record values.
 Fixed-schema raw ingestion keeps original document keys. This containment does
 not migrate nested RECORD schemas or recover values lost by earlier runs.
+
+### Nested schema migration
+
+Before a denormalized sink creates or updates its destination or staging table,
+it reads the destination schema. Existing RECORD fields must match the expected
+nested names, order, types and modes, including repeated children. A mismatch
+stops the stream with the destination and field path before those mutations.
+The same check applies to append, upsert and overwrite. A completely new top-level
+field can still be added; a new child inside an existing RECORD requires an
+explicit schema update or migration. Extra historical top-level columns remain
+supported. Nested order and mode checks are conservative so whole-STRUCT MERGE
+assignments do not silently change meaning. Metadata access errors stop the load.
+
+Older versions could create raw nested names while transforming record keys.
+For example, `PacketData.ChildValue` with snake_case now resolves to
+`packet_data.child_value`; an existing `packet_data.ChildValue` is rejected.
+The target does not automatically rename, add, remove or backfill nested fields.
+It does not recover values discarded by earlier loads.
+
+To migrate, stop writers and retain the old table and checkpoint for rollback.
+Inspect the actual schema and populated fields, including raw/transformed names;
+do not infer that historical rows are complete. Choose one explicit approach:
+
+- Reload into a new dataset/destination using the intended transforms and a full
+  source replay. An incremental checkpoint alone cannot rebuild historical rows.
+- Backfill into a separately created table with the intended schema. Explicitly
+  map each old nested field, preserving null STRUCTs, array order and values.
+  Reconcile historical gaps from the source where required. Do not infer that
+  adding a renamed child copies the old child's values.
+
+For either approach, preserve/review partitioning, clustering, expiration,
+descriptions, policy tags, constraints and access settings. Validate row counts,
+keys and nested values before switching readers/writers and checkpoints. Keep the
+old table until cutover is verified. New-table backfill and cutover are operator
+operations; this target performs none of them. BigQuery documents supported
+[schema changes](https://docs.cloud.google.com/bigquery/docs/managing-table-schemas),
+but this target does not automate nested evolution. Concurrent external schema
+changes after preflight are not transactionally prevented; coordinate schema
+changes with ingestion. Live migration validation remains outstanding.
+
+JSON document keys retain their existing recursive transform behavior, including
+collision rejection. Fixed-schema raw ingestion and generated-view alias behavior
+are unchanged by this nested physical-schema fix.

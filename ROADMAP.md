@@ -112,23 +112,25 @@ and already-existing suffix names. Validate schema ambiguity before destination
 mutations; the existing schema-only suffixing does not preserve record values.
 Keep original inputs unchanged and protect fixed-schema raw ingestion.
 
-P1 schema/record alignment is implemented in #164 (head f2e067e), with green
-Python 3.10–3.12 CI and independent review, but is unmerged pending specific
-merge approval. Its compatibility contract rejects incompatible existing nested
-schemas before mutation and documents operator migration. Current-main limits
-below remain until it lands.
-Nested RECORD schemas currently retain raw child names while records transform
-recursively. This blocks Storage Write; batch/GCS submit mismatched names with
-`ignore_unknown_values=True`, an additional discard risk not tested live.
-Existing-table preflight must identify incompatible nested names before staging,
-schema/view writes and explain migration. Do not silently recreate tables.
+P1 schema/record alignment merged in #164 as `3ebd3ad` after independent
+review (109 focused tests) and final-head CI run 43947355286 passed. Local: 339 passed, 13 skipped;
+Ruff/mypy pass. Resolved physical RECORD fields
+transform recursively using the record naming rules; SQL quotes are excluded and
+prequoted source names rejected. Preflight requires exact ordered nested
+structures before destination/staging mutations in append/upsert/overwrite, and
+rechecks before top-level schema updates. New top-level fields remain supported;
+nested changes require explicit migration. README documents new-destination
+reload or backfill/cutover, including historical loss and metadata risks. JSON-key
+transforms and fixed-mode view aliases deliberately retain existing behavior.
 
 Acceptance: both resolvers, all denormalized preprocessing paths, every transform,
 actual protobuf and captured other-method payloads; stable schema cache; collision
 rejection with no data/state advancement; explicit legacy-table compatibility;
 consistent scalar/STRUCT/repeated view aliases while preserving source JSON paths.
-Choose JSON document-key behavior separately from physical column naming and
-keep SQL quoting separate from logical names. Migration/server validation remains
+JSON document-key behavior remains legacy-compatible in this delivery; any
+future change requires a separate compatibility decision. Fixed-mode repeated
+view aliases remain a separate documentation/capability follow-up. Keep SQL
+quoting separate from logical physical names. Migration/server validation remains
 subject to separate cloud authorization. See [#159](https://github.com/z3z1ma/target-bigquery/issues/159)
 and [.10x/research/2026-11-16-transform-impact.md](.10x/research/2026-11-16-transform-impact.md).
 
@@ -304,13 +306,15 @@ Sources reviewed 2026-11-16; conclusions are specific to documented behavior.
   #150, #159 and protected PRs #139/#152. Next unblocked correctness work is
   #159 P1 schema/record alignment with an explicit existing-table migration plan.
 
-- Latest inventory remains 3 issues (#134/#150/#159), 3 PRs (#139/#152/#164).
-  #164 final head f2e067e passed CI run 43947355286 and independent review;
-  its merge requires specific approval after automatic approval review denied it.
-  Do not retry that merge without new approval. #139/#152 still require live-test
-  authorization; #150 requires an actual authorized release. None are closed
-  merely to reduce counts.
-- Future-facing capability work now includes a concrete repeated-view alias fix,
-  tested source-path preservation, a transport/strategy validation guide, and a
-  build-verified release candidate. Source-schema migration (#164), cloud gates,
-  and release publication are explicitly distinguished from implemented work.
+- #159 P1 implementation: recursive physical RECORD names now align with records;
+  existing nested schemas are checked before mutations. Missing/renamed/extra,
+  reordered, type/mode-changed nested fields require explicit migration. No
+  automatic nested evolution, JSON-key policy change or fixed-view change.
+  Offline tests include actual protobuf round-trips, all transport preprocessing,
+  real constructor preflight for append/upsert/overwrite, staging-cache reuse,
+  metadata preservation and Singer failure before data/state. Live migration
+  validation remains separate and unauthorized.
+
+- #164 merged after explicit maintainer authorization; #159 implementation is complete.
+  #165 adds repeated-view alias consistency, capability documentation and release
+  preparation. #139/#152 still await live-test authorization; no release performed.

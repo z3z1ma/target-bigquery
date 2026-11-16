@@ -52,9 +52,10 @@ candidate groups runtime changes, not every maintenance-only commit.
 
 ## Exclusions and decisions before publication
 
-#164 nested-schema alignment/preflight is not merged; #139/#152 layout-safe
-overwrite remains behind a separate live-test gate. Neither belongs in a release
-claim until its gate is satisfied. Any later view-alias correction requires an
+#164 nested-schema alignment/preflight subsequently merged as3ebd3ad with
+339 offline tests/13 skips and final-head CI43947355286 green. Include its explicit
+legacy-table migration requirements in final release notes. #139/#152 layout-safe
+overwrite remains behind a separate live-test gate. The layout fix does not belong in a release claim until its gate is satisfied. Any later view-alias correction requires an
 upgrade note for downstream column references and final-head CI evidence.
 
 Before publishing, choose the version and scope, reconcile this candidate with
