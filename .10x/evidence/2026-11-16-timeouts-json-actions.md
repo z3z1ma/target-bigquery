@@ -51,3 +51,15 @@ cloud credentials were skipped. Offline protobuf acceptance does not prove remot
 BigQuery acceptance. #159 needs a schema/migration design before nested field
 transforms can be declared supported; JSON document key transforms also predate
 this work and are explicitly documented.
+
+
+## Verified delivery updates
+
+- Timeout main CI run 43936374065 passed at merge 9864f87.
+- Actions final reviewed/refreshed head 7571cfd passed all Python 3.10–3.12 jobs
+  in run 43936552874. Merged #158 as f4f9739; originals #136/#137/#147 closed
+  as incorporated with their commits preserved.
+- JSON head a108a53 merges current main f4f9739 (workflow pins only changed
+  since its prior code review). The roadmap-only conflict was resolved by
+  preserving both delivery records. Combined suite remains 227 passed/13 skipped,
+  Ruff passed; final-head CI run 43938944542 pending.
