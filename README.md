@@ -46,6 +46,10 @@ pipx install z3-target-bigquery
 target-bigquery --version
 ```
 
+See the [capability and validation guide](docs/capabilities.md) for transport,
+strategy, JSON, replay and migration limits. Unreleased work is tracked in the
+[release-readiness candidate](docs/release-readiness.md).
+
 ## Usage Notes
 
 ### Denormalization
@@ -54,7 +58,7 @@ So denormalized is a loaded term, so lets clarify here what we mean by it:
 
 > In the context of JSON objects, denormalization refers to the process of flattening a hierarchical or nested JSON object into a simpler, more "denormalized" structure that can be easier to work with for certain use cases.
 
-Denormalized=False (default) means we load all data into a single `JSON` column. This means all access requires an accessor such as `SELECT data.my_column FROM table` instead of `SELECT my_column FROM table`. Hence the term denormalized is relative to the `data` column which is the default for this target. This is a tradeoff between convenience/resilience and performance. This is the default because most _resilient_. IE a load will **never** fail due to a schema change or an invalid schema. You can always denormalize later via `dbt`. However, it is not the most performant and slower to transform. If your tap has a high quality and consistent schema, denormalization is the way to go to get the best performance and start modeling quickly.
+Denormalized=False (default) means we load all data into a single `JSON` column. This means all access requires an accessor such as `SELECT data.my_column FROM table` instead of `SELECT my_column FROM table`. Hence the term denormalized is relative to the `data` column which is the default for this target. This is a tradeoff between convenience/resilience and performance. This is the default because most _resilient_. This reduces dependence on a stable source schema, but invalid JSON values, transport failures, permissions and quotas can still fail a load. You can denormalize later via `dbt`. However, it is not the most performant and slower to transform. If your tap has a high quality and consistent schema, denormalization is the way to go to get the best performance and start modeling quickly.
 
 Denormalized=True means we unpack the data into a schema which is derived from the tap schema. It does _not_ mean we will flatten the data. There is a separate option for flattening. We will convert arrays to repeated fields and records to structs. All top level keys will end up as columns which is was you might expect from more typical targets.
 

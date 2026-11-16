@@ -1171,7 +1171,7 @@ class SchemaTranslator:
             WHERE {_v.projection} IS NOT NULL
         """
                 + (" " * depth * 2)
-                + f") AS {field.name},\n"
+                + f") AS {transform_column_name(field.name, **self.transforms)},\n"
             ).lstrip(),
             " " * depth * 2,
         )

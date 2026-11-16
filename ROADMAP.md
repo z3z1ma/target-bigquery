@@ -112,7 +112,11 @@ and already-existing suffix names. Validate schema ambiguity before destination
 mutations; the existing schema-only suffixing does not preserve record values.
 Keep original inputs unchanged and protect fixed-schema raw ingestion.
 
-Then deliver P1 schema/record alignment with one explicit naming contract.
+P1 schema/record alignment is implemented in #164 (head f2e067e), with green
+Python 3.10–3.12 CI and independent review, but is unmerged pending specific
+merge approval. Its compatibility contract rejects incompatible existing nested
+schemas before mutation and documents operator migration. Current-main limits
+below remain until it lands.
 Nested RECORD schemas currently retain raw child names while records transform
 recursively. This blocks Storage Write; batch/GCS submit mismatched names with
 `ignore_unknown_values=True`, an additional discard risk not tested live.
@@ -182,7 +186,13 @@ replacement lands.
 
 Status: dependency PRs #136/#137/#147 incorporated into merged #158 (`f4f9739`),
 with all original commits preserved and current-head Python 3.10–3.12 CI green.
-Capability documentation and release preparation remain queued.
+Capability documentation and release preparation are implemented in the
+`fix/view-array-aliases` follow-up: `docs/capabilities.md` maps configured paths
+to offline tests and cloud gates; `docs/release-readiness.md` prepares #150 from
+merged history and records an offline wheel/sdist build plus CLI smoke check.
+Repeated view aliases are corrected with scalar/RECORD/nested/quote regressions.
+Independent review passed 84 focused tests; local suite 278 passed, 13 skipped,
+Ruff/mypy clean. Exact-head CI is required before merging this follow-up.
 
 Keep the Python 3.10–3.12 offline matrix and locked installs green. Add a tested
 method × fixed/denormalized × append/upsert/overwrite × JSON support matrix,
@@ -293,3 +303,14 @@ Sources reviewed 2026-11-16; conclusions are specific to documented behavior.
   its terminal result is linked from #162. Remaining inventory: issues #134,
   #150, #159 and protected PRs #139/#152. Next unblocked correctness work is
   #159 P1 schema/record alignment with an explicit existing-table migration plan.
+
+- Latest inventory remains 3 issues (#134/#150/#159), 3 PRs (#139/#152/#164).
+  #164 final head f2e067e passed CI run 43947355286 and independent review;
+  its merge requires specific approval after automatic approval review denied it.
+  Do not retry that merge without new approval. #139/#152 still require live-test
+  authorization; #150 requires an actual authorized release. None are closed
+  merely to reduce counts.
+- Future-facing capability work now includes a concrete repeated-view alias fix,
+  tested source-path preservation, a transport/strategy validation guide, and a
+  build-verified release candidate. Source-schema migration (#164), cloud gates,
+  and release publication are explicitly distinguished from implemented work.
