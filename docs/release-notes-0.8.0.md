@@ -1,8 +1,9 @@
 # 0.8.0 candidate release notes
 
 Unpublished. Publication remains gated by live overwrite validation and final
-artifact checks. These notes cover merged main9e7a99e; layout preservation from
-#152 must be added only after its gate passes and it lands.
+artifact checks. This candidate combines main9e7a99e with reconciled draft #152 (aabc5de).
+Its proposed layout preservation is included for validation, not a claim of
+completed live verification or merged support.
 
 ## Upgrade requirements
 
@@ -19,6 +20,13 @@ artifact checks. These notes cover merged main9e7a99e; layout preservation from
   downstream references that relied on the old raw aliases when views regenerate.
 - Overwrite checkpoints wait until successful EOF publication. Coordinate source
   success checks and replay; multiple table replacements are not atomic together.
+
+## Proposed overwrite fix — live validation pending
+
+- Preserve configured partitioning, expiration and clustering during overwrite.
+- Reject incompatible layouts before destination mutation; retain bounded query
+  waits, deferred overwrite checkpoints and nested-schema compatibility checks.
+- Per-stream layout overrides and unpartitioned mode are included in the candidate.
 
 ## Fixes and capabilities
 
