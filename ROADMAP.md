@@ -95,9 +95,10 @@ These offline criteria pass. Live failure/restart validation remains outstanding
 ### 3. P0 — transform collision containment (#159)
 
 Status: implemented in [#162](https://github.com/z3z1ma/target-bigquery/pull/162),
-code head `d8c4605`. Independent review approved; 99 focused tests passed
-independently. Exact-head CI is the remaining merge gate. Local: 260 passed,
-13 skipped; Ruff/mypy pass. Both resolvers
+merged as `8a6c0ba`. Independently reviewed code head `d8c4605`; 99 focused
+tests passed independently. Final head `e66cea5` passed Python 3.10–3.12 CI
+run 43942188040. Local: 260 passed, 13 skipped; Ruff/mypy pass. P0 containment
+is complete; #159 stays open for P1 naming and migration work. Both resolvers
 silently collapse colliding keys before transport. With snake_case, nested
 `CamelKey: 1` and `camel_key: 2` become only `camel_key: 2`; actual protobuf
 parsing succeeds with the first field absent. Top-level fields and transformed
@@ -278,7 +279,7 @@ Sources reviewed 2026-11-16; conclusions are specific to documented behavior.
   Original #149/#136/#137/#147/#140 closed as incorporated with attribution.
 - Current backlog after those merges: 3 issues (#134, #150, #159) and 2 original
   PRs (#139/#152), excluding this documentation PR. #159 collision containment
-  is implemented pending review/CI; broader schema/migration work is P1. No release performed.
+  landed in #162; broader schema/migration work remains P1. No release performed.
 
 - #159 P0 containment: shared translator rejects collisions with stream/path/source
   diagnostics; schema preflight runs before destination creation/update. Removed
@@ -286,3 +287,9 @@ Sources reviewed 2026-11-16; conclusions are specific to documented behavior.
   cases across both resolvers, all four denormalized transports and real Singer
   message processing, including no buffering/state after collision. Fixed raw
   ingestion is unchanged. Nested schema naming/migration remains open as P1.
+
+- #162 merged as `8a6c0ba` after final-head Python 3.10–3.12 CI run
+  43942188040 passed. Post-merge main run 43944790674 verifies the same runtime;
+  its terminal result is linked from #162. Remaining inventory: issues #134,
+  #150, #159 and protected PRs #139/#152. Next unblocked correctness work is
+  #159 P1 schema/record alignment with an explicit existing-table migration plan.
