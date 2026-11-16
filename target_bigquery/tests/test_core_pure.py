@@ -844,9 +844,7 @@ def test_overwrite_constructor_rejects_layout_before_any_mutation(monkeypatch, e
     from target_bigquery.target import TargetBigQuery
 
     existing = bigquery.Table("project.analytics.orders")
-    existing.time_partitioning = bigquery.TimePartitioning(
-        type_="MONTH", field="_sdc_batched_at"
-    )
+    existing.time_partitioning = bigquery.TimePartitioning(type_="MONTH", field="_sdc_batched_at")
     existing.clustering_fields = ["_sdc_batched_at"]
     if existing_kind == "unpartitioned":
         existing.time_partitioning = None
@@ -870,7 +868,9 @@ def test_overwrite_constructor_rejects_layout_before_any_mutation(monkeypatch, e
     monkeypatch.setattr(BaseBigQuerySink, "create_target", create)
     monkeypatch.setattr(BigQueryBatchJobDenormalizedSink, "update_schema", update)
     monkeypatch.setattr(BaseBigQuerySink, "_create_overwrite_table", stage)
-    target = TargetBigQuery(config={"project": "project", "dataset": "analytics", "overwrite": True})
+    target = TargetBigQuery(
+        config={"project": "project", "dataset": "analytics", "overwrite": True}
+    )
     with pytest.raises(RuntimeError, match="explicit table migration"):
         BigQueryBatchJobDenormalizedSink(
             target, "orders", {"type": "object", "properties": {"id": {"type": "integer"}}}, []
@@ -934,7 +934,9 @@ def test_overwrite_constructor_accepts_matching_or_new_destination(monkeypatch, 
     monkeypatch.setattr(BaseBigQuerySink, "create_target", create)
     monkeypatch.setattr(BigQueryBatchJobDenormalizedSink, "update_schema", update)
     monkeypatch.setattr(BaseBigQuerySink, "_create_overwrite_table", stage)
-    target = TargetBigQuery(config={"project": "project", "dataset": "analytics", "overwrite": True})
+    target = TargetBigQuery(
+        config={"project": "project", "dataset": "analytics", "overwrite": True}
+    )
     sink = BigQueryBatchJobDenormalizedSink(
         target, "orders", {"type": "object", "properties": {"id": {"type": "integer"}}}, []
     )
