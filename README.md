@@ -277,3 +277,24 @@ is not proof of a complete snapshot.
 
 See [ROADMAP.md](ROADMAP.md) for audited priorities, acceptance tests, current status,
 and the verification required before each change ships.
+
+### Denormalized Storage Write JSON fields
+
+With schema resolver v2, fields resolved as BigQuery JSON are encoded as JSON
+text for protobuf transport, including JSON inside nested/repeated RECORDs.
+Python strings are JSON scalar strings, not pre-encoded documents. A nullable
+field's `None` remains SQL NULL; a `None` element in repeated JSON becomes JSON
+null. Serialization copies affected record containers rather than changing them.
+
+Non-finite float/Decimal values fail before the row is buffered. Integer values
+from -2^63 through 2^64-1 retain their numeric values; larger integers fail rather
+than round. Finite fractional Decimals follow the existing float conversion and
+are not arbitrary-precision JSON numbers. These transport checks do not replace
+BigQuery server validation. Fixed-schema encoding is unchanged. Existing column
+name transforms also apply recursively to keys inside JSON documents during
+preprocessing; configure transforms with that behavior in mind.
+
+Nested RECORD names must already match the selected column-name transforms:
+record preprocessing transforms them recursively, but the current schema resolver
+transforms schema names only at the top level. The JSON transport fix does not
+change existing nested table schemas.
