@@ -112,8 +112,8 @@ and already-existing suffix names. Validate schema ambiguity before destination
 mutations; the existing schema-only suffixing does not preserve record values.
 Keep original inputs unchanged and protect fixed-schema raw ingestion.
 
-P1 schema/record alignment is implemented on `fix/nested-schema-alignment`,
-independently reviewed (109 focused tests), pending exact-head CI. Local: 339 passed, 13 skipped;
+P1 schema/record alignment merged in #164 as `3ebd3ad` after independent
+review (109 focused tests) and final-head CI run 43947355286 passed. Local: 339 passed, 13 skipped;
 Ruff/mypy pass. Resolved physical RECORD fields
 transform recursively using the record naming rules; SQL quotes are excluded and
 prequoted source names rejected. Preflight requires exact ordered nested
@@ -188,7 +188,13 @@ replacement lands.
 
 Status: dependency PRs #136/#137/#147 incorporated into merged #158 (`f4f9739`),
 with all original commits preserved and current-head Python 3.10–3.12 CI green.
-Capability documentation and release preparation remain queued.
+Capability documentation and release preparation are implemented in the
+`fix/view-array-aliases` follow-up: `docs/capabilities.md` maps configured paths
+to offline tests and cloud gates; `docs/release-readiness.md` prepares #150 from
+merged history and records an offline wheel/sdist build plus CLI smoke check.
+Repeated view aliases are corrected with scalar/RECORD/nested/quote regressions.
+Independent review passed 84 focused tests; local suite 278 passed, 13 skipped,
+Ruff/mypy clean. Exact-head CI is required before merging this follow-up.
 
 Keep the Python 3.10–3.12 offline matrix and locked installs green. Add a tested
 method × fixed/denormalized × append/upsert/overwrite × JSON support matrix,
@@ -308,3 +314,7 @@ Sources reviewed 2026-11-16; conclusions are specific to documented behavior.
   real constructor preflight for append/upsert/overwrite, staging-cache reuse,
   metadata preservation and Singer failure before data/state. Live migration
   validation remains separate and unauthorized.
+
+- #164 merged after explicit maintainer authorization; #159 implementation is complete.
+  #165 adds repeated-view alias consistency, capability documentation and release
+  preparation. #139/#152 still await live-test authorization; no release performed.
