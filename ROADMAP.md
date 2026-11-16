@@ -29,7 +29,7 @@ Issues, comments, PR diffs, source and tests were inspected; the table records a
 
 | Item | Classification and evidence | Decision / next action |
 | --- | --- | --- |
-| [#143](https://github.com/z3z1ma/target-bigquery/issues/143) Storage Write state | Confirmed durability bug. `storage_write.py:pre_state_hook` only commits streams; `core.py:pre_state_hook` performs MERGE. `target.py:drain_all` emits state after the sink hook. | P0, implementation in progress. Calling the parent alone is insufficient: MERGE rotates staging, so refresh the Storage Write parent before the next batch. Also reject response-level commit errors before clearing streams. |
+| [#143](https://github.com/z3z1ma/target-bigquery/issues/143) Storage Write state | Confirmed durability bug. `storage_write.py:pre_state_hook` only commits streams; `core.py:pre_state_hook` performs MERGE. `target.py:drain_all` emits state after the sink hook. | P0, implemented in [#153](https://github.com/z3z1ma/target-bigquery/pull/153), CI pending. Calling the parent alone is insufficient: MERGE rotates staging, so refresh the Storage Write parent before the next batch. Also reject response-level commit errors before clearing streams. |
 | [#148](https://github.com/z3z1ma/target-bigquery/issues/148) cleanup hang | Confirmed unbounded client waits in `core.py:merge_table/clean_up`; upstream reproduction supports the report. The report uses 0.7.2 but the unbounded calls remain on main. | P1, adapt #149 with failure tests and diagnostics. |
 | [#141](https://github.com/z3z1ma/target-bigquery/issues/141) JSON | Confirmed compatibility bug, not a configuration misunderstanding. Resolver v2 emits JSON; protobuf expects string; denormalized `process_record` passes dicts to `ParseDict`. | P1, preserve #140 contribution and expand its coverage on current main. |
 | [#134](https://github.com/z3z1ma/target-bigquery/issues/134) overwrite layout | Confirmed regression: initial table creation uses partitioning, replacement CTAS omits it. Separately, deliberately changing a pre-existing physical layout requires migration. | P1, blocked only on the separate #152 live gate. |
@@ -50,7 +50,9 @@ merely because a patch exists.
 
 ### 1. P0 — durable Storage Write checkpoints (#143)
 
-Status: implementation and offline regression verification underway.
+Status: [#153](https://github.com/z3z1ma/target-bigquery/pull/153), head `cca0eeb`.
+163 offline tests passed, 13 skipped; Ruff and mypy pass. Independent review
+completed and requested test additions addressed. Exact-head CI pending.
 
 Required ordering: completed appends → successful finalize/commit → successful
 MERGE → usable next staging destination → emitted STATE. Cover default and
@@ -67,9 +69,22 @@ Acceptance:
 - Record live two-checkpoint verification as outstanding until separately
   authorized; never infer it from mocks.
 
-### 2. P1 — bounded query waits (#148/#149)
+### 2. P0 investigation — overwrite checkpoint durability
 
-Status: audited; next implementation after the state patch.
+Status: source-backed follow-up, design not yet selected.
+
+`BaseBigQuerySink.pre_state_hook` handles merge targets only; overwrite publication
+occurs at EOF. Assess what a resumable tap does after an intermediate STATE and
+process failure while data exists only in staging. This is distinct from physical
+layout preservation. Acceptance: offline failure/restart trace demonstrating the
+bookmark and destination behavior; choose deferred state or a recoverable staged
+checkpoint protocol with explicit full-refresh semantics. Add a test proving no
+unrecoverable rows are skipped. Investigate before declaring all write strategies
+durable or preparing a release; do not silently introduce partial overwrites.
+
+### 3. P1 — bounded query waits (#148/#149)
+
+Status: audited; next implementation after the state patch and P0 investigation.
 
 Use the existing numeric timeout for submission and result waiting, including
 MERGE, overwrite and generated-view DDL. Record job ID when available and
@@ -81,7 +96,7 @@ cleared on failure; diagnostic contains job ID without record payloads. Document
 RPC/retry/wait scope rather than promising a strict wall-clock process deadline.
 Capture the original contribution when adapting #149.
 
-### 3. P1 — JSON transport compatibility (#141/#140)
+### 4. P1 — JSON transport compatibility (#141/#140)
 
 Status: audited; follows checkpoint correctness, can proceed independently of
 live-overwrite approval.
@@ -94,9 +109,11 @@ JSON null needs its own explicit test. Preserve ordinary STRING/RECORD behavior.
 Acceptance: actual protobuf parse round-trips objects, arrays, Unicode, scalar
 strings/numbers/booleans, null and empty values; repeated JSON and nested repeated
 RECORD; transformed column names; unchanged fixed-schema path; document/test
-input mutation. Full offline suite and current-head matrix CI before merge.
+input mutation. Test non-finite numbers and integer boundaries with an explicit
+reject-or-preserve policy: a valid protobuf string does not establish BigQuery
+JSON acceptance. Full offline suite and current-head matrix CI before merge.
 
-### 4. P1 — layout-safe overwrite (#134/#139/#152)
+### 5. P1 — layout-safe overwrite (#134/#139/#152)
 
 Status: blocked on the separate owner's bounded live-test authorization.
 
@@ -107,19 +124,6 @@ layout. Test batch_job and Storage Write. Reconcile #152 with then-current main
 only through its owner. Migration instructions must cover legacy unpartitioned
 tables and dataset expiration defaults. Close #139 as superseded only after the
 replacement lands.
-
-### 5. P0 investigation — overwrite checkpoint durability
-
-Status: source-backed follow-up, design not yet selected.
-
-`BaseBigQuerySink.pre_state_hook` handles merge targets only; overwrite publication
-occurs at EOF. Assess what a resumable tap does after an intermediate STATE and
-process failure while data exists only in staging. This is distinct from physical
-layout preservation. Acceptance: offline failure/restart trace demonstrating the
-bookmark and destination behavior; choose deferred state or a recoverable staged
-checkpoint protocol with explicit full-refresh semantics. Add a test proving no
-unrecoverable rows are skipped. Investigate before declaring all write strategies
-durable or preparing a release; do not silently introduce partial overwrites.
 
 ### 6. P2 — maintenance and capability documentation
 
@@ -188,3 +192,6 @@ Sources reviewed 2026-11-16; conclusions are specific to documented behavior.
   research and PR review completed. No cloud operations or releases performed.
 - #151 remains the merged offline CI repair baseline. #152 remains a separate
   draft with live validation pending; this roadmap does not claim it is complete.
+
+- #153 (`cca0eeb`): implemented state ordering, rotated staging routing and commit
+  response rejection; 163 passed, 13 skipped offline, Ruff/mypy clean. No live test.
