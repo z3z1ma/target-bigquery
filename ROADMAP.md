@@ -114,7 +114,8 @@ Capture the original contribution when adapting #149.
 
 Status: implemented on `fix/storage-json-compatibility`, preserving #140 author
 and original commit. Added nonmutating serialization, explicit numeric rejection
-and expanded protobuf round-trip coverage. Independent review and CI pending.
+and expanded protobuf round-trip coverage. Independent review approved (62 focused tests passed). Combined suite: 227 passed,
+13 skipped; Ruff/mypy pass. Final CI against the new action pins pending.
 
 Serialize only fields resolved as BigQuery JSON, recursively within RECORD and
 repeated RECORD. Specify that Python strings are JSON scalar strings, not
@@ -142,7 +143,9 @@ replacement lands.
 
 ### 6. P2 — maintenance and capability documentation
 
-Status: queued. Dependencies #136/#137/#147 can proceed without cloud access.
+Status: dependency PRs #136/#137/#147 incorporated into merged #158 (`f4f9739`),
+with all original commits preserved and current-head Python 3.10–3.12 CI green.
+Capability documentation and release preparation remain queued.
 
 Keep the Python 3.10–3.12 offline matrix and locked installs green. Add a tested
 method × fixed/denormalized × append/upsert/overwrite × JSON support matrix,
@@ -228,3 +231,8 @@ Sources reviewed 2026-11-16; conclusions are specific to documented behavior.
   transforms recursively. Tracked as [#159](https://github.com/z3z1ma/target-bigquery/issues/159), P1 with existing-table migration
   requirements; the JSON fix supports transformed top-level names and canonical
   nested names and explicitly documents this limit.
+
+- Action refresh implementation: contributor commits from #136/#137/#147 are
+  preserved in `ci/refresh-action-pins`; explicit `prune-cache: true` retains
+  prior cache behavior. Merged as #158 (`f4f9739`) after exact-head
+  Python 3.10–3.12 CI run 43936552874 passed. Original PRs closed as incorporated.
