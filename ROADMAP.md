@@ -71,22 +71,28 @@ Acceptance:
 
 ### 2. P0 — overwrite checkpoint durability (#155)
 
-Status: reproduced offline and tracked in [#155](https://github.com/z3z1ma/target-bigquery/issues/155).
-Implementation under review: defer the global state message while any overwrite
-remains unpublished; publish latest state only after all EOF cleanup succeeds.
+Status: [#156](https://github.com/z3z1ma/target-bigquery/pull/156), head `fd3be44`,
+implements [#155](https://github.com/z3z1ma/target-bigquery/issues/155); CI pending.
+171 offline tests passed, 13 skipped; Ruff and mypy pass. Independent review's
+termination finding and signal-test requests are addressed.
 
-`BaseBigQuerySink.pre_state_hook` handles merge targets only; overwrite publication
-occurs at EOF. Assess what a resumable tap does after an intermediate STATE and
-process failure while data exists only in staging. This is distinct from physical
-layout preservation. Acceptance: offline failure/restart trace demonstrating the
-bookmark and destination behavior; choose deferred state or a recoverable staged
-checkpoint protocol with explicit full-refresh semantics. Add a test proving no
-unrecoverable rows are skipped. Investigate before declaring all write strategies
-durable or preparing a release; do not silently introduce partial overwrites.
+The real target drain reproduced intermediate STATE before overwrite publication.
+The chosen contract defers global state while any overwrite is pending, including
+mixed streams. EOF publishes all replacements before emitting the latest state.
+SIGINT/SIGTERM stop workers without initiating publication or state and exit
+nonzero. An already-submitted remote query cannot be undone by signal handling.
+
+Acceptance: two intermediate checkpoints emit nothing; successful EOF emits the
+latest state; failure after one of several tables publishes emits nothing;
+append/upsert-only checkpoints remain unchanged; SIGINT/SIGTERM with mixed sinks
+skip cleanup/state and preserve normal termination behavior without overwrites.
+Documentation must explain replay, lack of cross-table atomicity, temporary-table
+expiration and upstream success checks (a failed tap closing stdin looks like EOF).
+These offline criteria pass. Live failure/restart validation remains outstanding.
 
 ### 3. P1 — bounded query waits (#148/#149)
 
-Status: audited; next implementation after the state patch and P0 investigation.
+Status: audited; next implementation after the two P0 checkpoint fixes.
 
 Use the existing numeric timeout for submission and result waiting, including
 MERGE, overwrite and generated-view DDL. Record job ID when available and
@@ -200,4 +206,4 @@ Sources reviewed 2026-11-16; conclusions are specific to documented behavior.
 
 - #153 merged as `8038818` after exact-head CI run 43932834199 succeeded.
 - #155: offline reproduction confirms intermediate state precedes overwrite
-  publication; regression implementation passes 167 tests (13 skipped), review pending.
+  publication; implemented in #156 (`fd3be44`), 171 passed / 13 skipped, Ruff/mypy pass; CI pending.
