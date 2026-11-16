@@ -249,3 +249,8 @@ meltano elt tap-carbon-intensity target-bigquery
 
 See the [dev guide](https://sdk.meltano.com/en/latest/dev_guide.html) for more instructions on how to use the Meltano SDK to
 develop your own Singer taps and targets.
+
+## Maintenance roadmap
+
+See [ROADMAP.md](ROADMAP.md) for audited priorities, acceptance tests, current status,
+and the verification required before each change ships.
