@@ -29,7 +29,7 @@ Issues, comments, PR diffs, source and tests were inspected; the table records a
 
 | Item | Classification and evidence | Decision / next action |
 | --- | --- | --- |
-| [#143](https://github.com/z3z1ma/target-bigquery/issues/143) Storage Write state | Confirmed durability bug. `storage_write.py:pre_state_hook` only commits streams; `core.py:pre_state_hook` performs MERGE. `target.py:drain_all` emits state after the sink hook. | P0, implemented in [#153](https://github.com/z3z1ma/target-bigquery/pull/153), CI pending. Calling the parent alone is insufficient: MERGE rotates staging, so refresh the Storage Write parent before the next batch. Also reject response-level commit errors before clearing streams. |
+| [#143](https://github.com/z3z1ma/target-bigquery/issues/143) Storage Write state | Confirmed durability bug. `storage_write.py:pre_state_hook` only commits streams; `core.py:pre_state_hook` performs MERGE. `target.py:drain_all` emits state after the sink hook. | P0, implemented in [#153](https://github.com/z3z1ma/target-bigquery/pull/153), merged. Calling the parent alone is insufficient: MERGE rotates staging, so refresh the Storage Write parent before the next batch. Also reject response-level commit errors before clearing streams. |
 | [#148](https://github.com/z3z1ma/target-bigquery/issues/148) cleanup hang | Confirmed unbounded client waits in `core.py:merge_table/clean_up`; upstream reproduction supports the report. The report uses 0.7.2 but the unbounded calls remain on main. | P1, adapt #149 with failure tests and diagnostics. |
 | [#141](https://github.com/z3z1ma/target-bigquery/issues/141) JSON | Confirmed compatibility bug, not a configuration misunderstanding. Resolver v2 emits JSON; protobuf expects string; denormalized `process_record` passes dicts to `ParseDict`. | P1, preserve #140 contribution and expand its coverage on current main. |
 | [#134](https://github.com/z3z1ma/target-bigquery/issues/134) overwrite layout | Confirmed regression: initial table creation uses partitioning, replacement CTAS omits it. Separately, deliberately changing a pre-existing physical layout requires migration. | P1, blocked only on the separate #152 live gate. |
@@ -52,7 +52,7 @@ merely because a patch exists.
 
 Status: [#153](https://github.com/z3z1ma/target-bigquery/pull/153), head `cca0eeb`.
 163 offline tests passed, 13 skipped; Ruff and mypy pass. Independent review
-completed and requested test additions addressed. Exact-head CI pending.
+completed and requested test additions addressed. Exact-head merged.
 
 Required ordering: completed appends → successful finalize/commit → successful
 MERGE → usable next staging destination → emitted STATE. Cover default and
@@ -69,9 +69,11 @@ Acceptance:
 - Record live two-checkpoint verification as outstanding until separately
   authorized; never infer it from mocks.
 
-### 2. P0 investigation — overwrite checkpoint durability
+### 2. P0 — overwrite checkpoint durability (#155)
 
-Status: source-backed follow-up, design not yet selected.
+Status: reproduced offline and tracked in [#155](https://github.com/z3z1ma/target-bigquery/issues/155).
+Implementation under review: defer the global state message while any overwrite
+remains unpublished; publish latest state only after all EOF cleanup succeeds.
 
 `BaseBigQuerySink.pre_state_hook` handles merge targets only; overwrite publication
 occurs at EOF. Assess what a resumable tap does after an intermediate STATE and
@@ -195,3 +197,7 @@ Sources reviewed 2026-11-16; conclusions are specific to documented behavior.
 
 - #153 (`cca0eeb`): implemented state ordering, rotated staging routing and commit
   response rejection; 163 passed, 13 skipped offline, Ruff/mypy clean. No live test.
+
+- #153 merged as `8038818` after exact-head CI run 43932834199 succeeded.
+- #155: offline reproduction confirms intermediate state precedes overwrite
+  publication; regression implementation passes 167 tests (13 skipped), review pending.

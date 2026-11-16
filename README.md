@@ -250,6 +250,15 @@ meltano elt tap-carbon-intensity target-bigquery
 See the [dev guide](https://sdk.meltano.com/en/latest/dev_guide.html) for more instructions on how to use the Meltano SDK to
 develop your own Singer taps and targets.
 
+### Storage Write checkpoints
+
+For denormalized upserts, checkpoints wait for Storage Write completion and a
+successful merge into the destination before emitting Singer state. Pending
+streams are finalized and committed first. Commit or merge failures stop the
+checkpoint. After a merge rotates the staging table, subsequent batches use the
+new table. This does not provide end-to-end exactly-once delivery: replay after
+an ambiguous failure still requires stable upsert keys.
+
 ## Maintenance roadmap
 
 See [ROADMAP.md](ROADMAP.md) for audited priorities, acceptance tests, current status,
