@@ -36,6 +36,8 @@ Merge: 8038818ef3acc2c54f765b5c1aee3c7aad4f02bb.
 ## #155 / #156
 
 Implementation head: fd3be44ab3788ed98920a94e41a910d06da44ad9.
+Final head a6939136f0f01796875cafd6ae2f83e384cf9519 adds the reviewer-requested
+documentation caveat about already-submitted remote publication.
 Base: 8038818. See roadmap for subsequent CI/merge status.
 
 - An offline probe invoking real TargetBigQuery.drain_all and the base sink hook
@@ -57,3 +59,12 @@ No BigQuery queries, cloud writes, IAM changes, setup, spending or release.
 gate remains with its separate owner. Storage Write live checkpoint/restart
 validation also remains unperformed. Mocked control-flow tests do not prove remote
 atomicity, query cancellation or global exactly-once delivery.
+
+## Replacement design spike: offline client compatibility
+
+Locked google-cloud-bigquery 3.42.1 exports `WriteDisposition.WRITE_TRUNCATE_DATA`.
+QueryJobConfig and LoadJobConfig both serialize `write_disposition="WRITE_TRUNCATE_DATA"`
+and `schema_update_options=["ALLOW_FIELD_ADDITION"]` to the expected REST keys.
+This probe constructed configs only; no client, query or cloud request was made.
+It establishes client-side representation, not server acceptance or metadata
+preservation. The remaining design acceptance criteria stay in ROADMAP.md.

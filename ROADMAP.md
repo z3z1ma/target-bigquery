@@ -71,7 +71,7 @@ Acceptance:
 
 ### 2. P0 — overwrite checkpoint durability (#155)
 
-Status: [#156](https://github.com/z3z1ma/target-bigquery/pull/156), head `fd3be44`,
+Status: [#156](https://github.com/z3z1ma/target-bigquery/pull/156), head `a693913`,
 implements [#155](https://github.com/z3z1ma/target-bigquery/issues/155); CI pending.
 171 offline tests passed, 13 skipped; Ruff and mypy pass. Independent review's
 termination finding and signal-test requests are addressed.
@@ -146,7 +146,10 @@ is outside this roadmap execution's authorization.
 
 ### 7. P3 — scoped replacement design spike
 
-Status: research only; no implementation selected.
+Status: research only; no implementation selected. Offline probe confirms the
+locked google-cloud-bigquery 3.42.1 exports `WRITE_TRUNCATE_DATA` and serializes
+it with `ALLOW_FIELD_ADDITION` in QueryJobConfig and LoadJobConfig. Server
+behavior and metadata preservation remain unverified.
 
 Evaluate `WRITE_TRUNCATE_DATA` against current CTAS replacement. The REST API
 preserves destination schema/constraints and supports field addition/relaxation
