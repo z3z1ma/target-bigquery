@@ -217,3 +217,7 @@ Sources reviewed 2026-11-16; conclusions are specific to documented behavior.
 - Inventory after #153/#156: 4 open issues (#134, #141, #148, #150) and the
   original 7 open PRs (#136, #137, #139, #140, #147, #149, #152), excluding
   roadmap publication #154. #143 and #155 are closed by their merged fixes.
+
+- Action refresh implementation: contributor commits from #136/#137/#147 are
+  preserved in `ci/refresh-action-pins`; explicit `prune-cache: true` retains
+  prior cache behavior. Exact-head matrix CI required before merge.
