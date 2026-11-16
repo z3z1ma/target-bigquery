@@ -113,7 +113,7 @@ mutations; the existing schema-only suffixing does not preserve record values.
 Keep original inputs unchanged and protect fixed-schema raw ingestion.
 
 P1 schema/record alignment is implemented on `fix/nested-schema-alignment`,
-pending final independent review and exact-head CI. Local: 336 passed, 13 skipped;
+independently reviewed (109 focused tests), pending exact-head CI. Local: 339 passed, 13 skipped;
 Ruff/mypy pass. Resolved physical RECORD fields
 transform recursively using the record naming rules; SQL quotes are excluded and
 prequoted source names rejected. Preflight requires exact ordered nested

@@ -31,8 +31,9 @@ transport preprocessors; actual batch/GCS compressed payloads; real base
 constructors across append/upsert/overwrite; new and compatible destinations;
 legacy/changed structures; permission errors; immutable schema metadata;
 staging rotation/cache reuse; Singer failure before record/state processing.
-Full suite: 336 passed, 13 skipped; Ruff and mypy pass. Independent review
-required before merge; exact final-head CI evidence belongs to the PR.
+Full suite: 339 passed, 13 skipped; Ruff and mypy pass. Independent review passed 109 focused tests; its backtick-validation clarification
+was addressed with three additional regressions. Exact final-head CI evidence
+belongs to the PR.
 
 [BigQuery schema guidance](https://docs.cloud.google.com/bigquery/docs/managing-table-schemas)
 describes explicit nested schema changes; changing schema does not constitute

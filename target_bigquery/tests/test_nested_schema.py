@@ -89,8 +89,9 @@ def test_nested_period_digit_and_quote_names_use_physical_names():
     assert json_format.ParseDict(record, proto_schema_factory_v2(fields)())._1root.a_b == 3
 
 
-def test_prequoted_physical_names_fail_instead_of_becoming_schema_only_quotes():
-    translator = SchemaTranslator(schema_for({"`key`": {"type": "integer"}}), {"quote": True})
+@pytest.mark.parametrize("name", ["`key`", "`key", "key`", "a`b"])
+def test_prequoted_physical_names_fail_instead_of_becoming_schema_only_quotes(name):
+    translator = SchemaTranslator(schema_for({name: {"type": "integer"}}), {"quote": True})
     with pytest.raises(ValueError, match="backticks"):
         _ = translator.translated_schema_transformed
 

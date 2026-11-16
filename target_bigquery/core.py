@@ -942,7 +942,7 @@ class SchemaTranslator:
         sources: dict[str, str] = {}
         for name in names:
             target = transform_column_name(name, **{**self.transforms, "quote": False})
-            if "`" in target:
+            if "`" in name:
                 raise ValueError(
                     f"Invalid physical column name at {path}: {name!r} contains backticks. "
                     "Rename the source key; column_name_transforms.quote applies to SQL only."
