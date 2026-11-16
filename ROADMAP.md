@@ -30,11 +30,11 @@ Issues, comments, PR diffs, source and tests were inspected; the table records a
 | Item | Classification and evidence | Decision / next action |
 | --- | --- | --- |
 | [#143](https://github.com/z3z1ma/target-bigquery/issues/143) Storage Write state | Confirmed durability bug. `storage_write.py:pre_state_hook` only commits streams; `core.py:pre_state_hook` performs MERGE. `target.py:drain_all` emits state after the sink hook. | P0, implemented in [#153](https://github.com/z3z1ma/target-bigquery/pull/153), merged. Calling the parent alone is insufficient: MERGE rotates staging, so refresh the Storage Write parent before the next batch. Also reject response-level commit errors before clearing streams. |
-| [#148](https://github.com/z3z1ma/target-bigquery/issues/148) cleanup hang | Confirmed unbounded client waits in `core.py:merge_table/clean_up`; upstream reproduction supports the report. The report uses 0.7.2 but the unbounded calls remain on main. | P1, adapt #149 with failure tests and diagnostics. |
+| [#148](https://github.com/z3z1ma/target-bigquery/issues/148) cleanup hang | Confirmed unbounded client waits in `core.py:merge_table/clean_up`; upstream reproduction supports the report. The report uses 0.7.2 but the unbounded calls remain on main. | Done: #157 merged (`9864f87`), including failure tests and diagnostics. |
 | [#141](https://github.com/z3z1ma/target-bigquery/issues/141) JSON | Confirmed compatibility bug, not a configuration misunderstanding. Resolver v2 emits JSON; protobuf expects string; denormalized `process_record` passes dicts to `ParseDict`. | P1, preserve #140 contribution and expand its coverage on current main. |
 | [#134](https://github.com/z3z1ma/target-bigquery/issues/134) overwrite layout | Confirmed regression: initial table creation uses partitioning, replacement CTAS omits it. Separately, deliberately changing a pre-existing physical layout requires migration. | P1, blocked only on the separate #152 live gate. |
 | [#150](https://github.com/z3z1ma/target-bigquery/issues/150) release | Valid maintenance request, not a runtime defect. Package version remains 0.7.2 although main includes later correctness changes. | Prepare evidence/changelog after correctness work; release publication requires separate authorization. No release date promised. |
-| [#149](https://github.com/z3z1ma/target-bigquery/pull/149) `ee32bff2` | Correct direction: submission/result timeout for MERGE/overwrite. Missing timeout-failure/state tests, job-ID diagnostics and config/docs scope. Generated-view query still unbounded. CI run 39289842637 is `action_required`. | Adapt onto current main; do not merge from stale CI. |
+| [#149](https://github.com/z3z1ma/target-bigquery/pull/149) `ee32bff2` | Correct direction: submission/result timeout for MERGE/overwrite. Missing timeout-failure/state tests, job-ID diagnostics and config/docs scope. Generated-view query still unbounded. CI run 39289842637 is `action_required`. | Incorporated with original authorship into merged #157; closed. |
 | [#140](https://github.com/z3z1ma/target-bigquery/pull/140) `1841adf9` | Schema-guided recursive serialization appears sound. Existing tests cover objects, repeated JSON, nested JSON and protobuf parsing. Helper mutates its input. CI run 31814907445 failed. | Add scalar/null/repeated RECORD/transformed-name/fixed-mode tests; establish fresh CI. |
 | [#139](https://github.com/z3z1ma/target-bigquery/pull/139) `b4a5c595` | Valid layout implementation. Validation runs after `create_target` and schema mutation; range partitioning can be mistaken for unpartitioned. Original repeated mock assertion does not execute two cleanup cycles. | Keep open until replacement #152 is validated and merged; preserve contributor attribution. |
 | [#152](https://github.com/z3z1ma/target-bigquery/pull/152) `219efca5` | Follow-up moves compatibility checks before mutations, rejects range partitioning, documents migration and adds two real cleanup calls plus opt-in live tests. | Draft, separate owner. Require two live overwrites for batch_job and Storage Write, verifying rows and layout each time. Offline success does not satisfy this gate. |
@@ -94,9 +94,10 @@ These offline criteria pass. Live failure/restart validation remains outstanding
 
 ### 3. P1 — bounded query waits (#148/#149)
 
-Status: implemented on `fix/query-timeouts`, preserving #149 contributor commit.
-192 passed / 13 skipped; Ruff and mypy pass. Independent review approved pending
-exact-head CI. Views, MERGE and overwrite share bounded waits; invalid timeout
+Status: merged through [#157](https://github.com/z3z1ma/target-bigquery/pull/157)
+as `9864f87`, preserving #149 contributor commit. 192 passed / 13 skipped;
+Ruff/mypy and independent review passed; exact-head Python 3.10–3.12 CI
+run 43935751192 passed. #148 is fixed and #149 closed as incorporated. Views, MERGE and overwrite share bounded waits; invalid timeout
 values fail before submission and failure diagnostics record job ID/location.
 
 Use the existing numeric timeout for submission and result waiting, including
