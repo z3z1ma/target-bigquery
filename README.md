@@ -272,3 +272,8 @@ one atomic transaction.
 The target cannot distinguish a successful upstream snapshot from a failed tap
 that closes its output. The orchestrator must check upstream success; EOF alone
 is not proof of a complete snapshot.
+
+## Maintenance roadmap
+
+See [ROADMAP.md](ROADMAP.md) for audited priorities, acceptance tests, current status,
+and the verification required before each change ships.
