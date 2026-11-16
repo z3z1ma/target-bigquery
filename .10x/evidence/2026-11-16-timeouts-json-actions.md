@@ -62,4 +62,9 @@ this work and are explicitly documented.
 - JSON head a108a53 merges current main f4f9739 (workflow pins only changed
   since its prior code review). The roadmap-only conflict was resolved by
   preserving both delivery records. Combined suite remains 227 passed/13 skipped,
-  Ruff passed; final-head CI run 43938944542 pending.
+  Ruff passed; final-head CI run 43938944542 passed on Python 3.10–3.12.
+  #160 merged as a12cf402a76418dbf592be43e915fba693cabb24; #141 closed
+  and #140 closed as incorporated.
+
+- Main at f4f9739 passed run 43938570012. JSON post-merge main verification
+  is recorded in the PR/final delivery report once terminal.
