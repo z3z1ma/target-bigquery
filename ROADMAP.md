@@ -94,9 +94,10 @@ These offline criteria pass. Live failure/restart validation remains outstanding
 
 ### 3. P0 — transform collision containment (#159)
 
-Status: implemented on `fix/reject-transform-collisions`, awaiting independent
-review and exact-head CI before merge. Local: 260 passed, 13 skipped; Ruff/mypy
-pass. Both resolvers
+Status: implemented in [#162](https://github.com/z3z1ma/target-bigquery/pull/162),
+code head `d8c4605`. Independent review approved; 99 focused tests passed
+independently. Exact-head CI is the remaining merge gate. Local: 260 passed,
+13 skipped; Ruff/mypy pass. Both resolvers
 silently collapse colliding keys before transport. With snake_case, nested
 `CamelKey: 1` and `camel_key: 2` become only `camel_key: 2`; actual protobuf
 parsing succeeds with the first field absent. Top-level fields and transformed
