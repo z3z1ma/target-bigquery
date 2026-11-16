@@ -398,6 +398,11 @@ class BaseBigQuerySink(BatchSink):
             "timestamp_format": self.config.get("timestamp_format"),
         }
         self.table = BigQueryTable(name=self.table_name, **self.table_opts)
+        if self.ingestion_strategy is IngestionStrategy.DENORMALIZED:
+            try:
+                self.table.schema_translator.validate_transform_collisions()
+            except ValueError as exc:
+                raise ValueError(f"Stream {stream_name!r}: {exc}") from exc
         self._input_key_properties = list(key_properties or [])
         self._key_properties = self._target_key_properties(key_properties)
 
@@ -762,7 +767,10 @@ class Denormalized:
     ) -> dict[str, Any]:
         """Preprocess a record before writing it to the sink."""
         sink = cast(BaseBigQuerySink, self)
-        return sink.table.schema_translator.translate_record(record)
+        try:
+            return sink.table.schema_translator.translate_record(record)
+        except ValueError as exc:
+            raise ValueError(f"Stream {sink.stream_name!r}: {exc}") from exc
 
 
 @contextmanager
@@ -862,6 +870,7 @@ class SchemaTranslator:
     def translated_schema_transformed(self) -> list[SchemaField]:
         """Translate the schema into a BigQuery schema using the SchemaTranslator `transforms`."""
         if not self._translated_schema_transformed:
+            self.validate_transform_collisions()
             self._translated_schema_transformed = [
                 self._jsonschema_property_to_bigquery_column(
                     transform_column_name(name, **self.transforms), contents
@@ -869,34 +878,66 @@ class SchemaTranslator:
                 for name, contents in self.schema.get("properties", {}).items()
             ]
 
-        field_name_count: dict[str, int] = {}
-        for f in self._translated_schema_transformed:
-            field_name = f.name
-            count = field_name_count.get(field_name, 0)
-            if count:
-                f._properties["name"] += f"_{count}"
-            field_name_count[field_name] = count + 1
-
         return self._translated_schema_transformed
 
-    def translate_record(self, record: dict) -> dict:
-        """Translate a record using the SchemaTranslator `transforms`."""
+    def _transformed_names(self, names: Iterable[str], path: str) -> dict[str, str]:
+        transformed = {}
+        sources: dict[str, str] = {}
+        for name in names:
+            target = transform_column_name(name, **{**self.transforms, "quote": False})
+            if target in sources:
+                raise ValueError(
+                    f"Column transform collision at {path}: {sources[target]!r} and "
+                    f"{name!r} both map to {target!r}. Rename the source keys or "
+                    "change column_name_transforms."
+                )
+            sources[target] = name
+            transformed[name] = target
+        return transformed
+
+    def validate_transform_collisions(self) -> None:
+        """Reject ambiguous declared names before creating or updating a destination."""
+        if not self.transforms:
+            return
+
+        def validate(schema: Any, path: str) -> None:
+            if not isinstance(schema, dict):
+                return
+            properties = schema.get("properties", {})
+            self._transformed_names(properties, path)
+            for name, child in properties.items():
+                validate(child, f"{path}[{name!r}]")
+            items = schema.get("items")
+            for child in items if isinstance(items, list) else [items]:
+                validate(child, f"{path}[]")
+            for keyword in ("anyOf", "oneOf", "allOf"):
+                for child in schema.get(keyword, []):
+                    validate(child, path)
+            validate(schema.get("additionalProperties"), f"{path}.*")
+
+        validate(self.schema, "$")
+
+    def translate_record(self, record: dict, path: str = "$") -> dict:
+        """Transform record keys, rejecting collisions without changing the input."""
         if not self.transforms:
             return record
-        output = dict(
-            [
-                (transform_column_name(k, **{**self.transforms, "quote": False}), v)
-                for k, v in record.items()
-            ]
-        )
-        for k, v in output.items():
-            if isinstance(v, list):
-                for i, inner in enumerate(v):
-                    if isinstance(inner, dict):
-                        output[k][i] = self.translate_record(inner)
-            if isinstance(v, dict):
-                output[k] = self.translate_record(v)
-        return output
+        names = self._transformed_names(record, path)
+
+        def translate(value: Any, child_path: str) -> Any:
+            if isinstance(value, dict):
+                return self.translate_record(value, child_path)
+            if isinstance(value, list):
+                return [
+                    self.translate_record(item, f"{child_path}[{i}]")
+                    if isinstance(item, dict)
+                    else item
+                    for i, item in enumerate(value)
+                ]
+            return value
+
+        return {
+            names[name]: translate(value, f"{path}[{name!r}]") for name, value in record.items()
+        }
 
     def generate_view_statement(self, table_name: BigQueryTable) -> str:
         """Generate a CREATE VIEW statement for the SchemaTranslator `schema`."""
