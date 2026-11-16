@@ -593,11 +593,12 @@ class BaseBigQuerySink(BatchSink):
         # Create the table
         is_created = self.table.create_table(self.client, self.apply_transforms, **kwargs)
         if self.generate_view:
-            self.client.query(
+            self._run_query(
+                self.client,
                 self.table.schema_translator.generate_view_statement(
                     self.table,
-                )
-            ).result()
+                ),
+            )
 
         return is_created
 
@@ -613,6 +614,23 @@ class BaseBigQuerySink(BatchSink):
             if isinstance(self.client, bigquery.Client)
             else bigquery_client_factory(self._credentials)
         )
+
+    def _run_query(self, client: bigquery.Client, sql: str) -> None:
+        """Submit and wait for DDL/DML using bounded client waits."""
+        timeout = self.config.get("timeout", 600)
+        if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout <= 0:
+            raise ValueError("timeout must be a positive integer number of seconds")
+        job = None
+        try:
+            job = client.query(sql, timeout=timeout)
+            job.result(timeout=timeout)
+        except Exception:
+            self.logger.error(
+                "BigQuery query failed or wait expired (job_id=%s, location=%s). Remote completion may be unknown; state will not advance.",
+                getattr(job, "job_id", "unavailable"),
+                getattr(job, "location", "unavailable"),
+            )
+            raise
 
     def pre_state_hook(self) -> None:
         # if we have a merge_target we need to merge the table before writing out state
@@ -675,14 +693,13 @@ class BaseBigQuerySink(BatchSink):
             f"VALUES ({', '.join(f'source.`{field}`' for field in target_columns)})"
         )
         matched_clause = f"WHEN MATCHED THEN {update_clause} " if update_clause else ""
-        timeout = self.config.get("timeout", 600)
-        bigquery_client.query(
+        self._run_query(
+            bigquery_client,
             f"{ctas_tmp}; {merge_clause} "
             f"{matched_clause}"
             f"WHEN NOT MATCHED THEN {insert_clause}; "
             f"DROP TABLE IF EXISTS {self.table.get_escaped_name()};",
-            timeout=timeout,
-        ).result(timeout=timeout)
+        )
 
     def clean_up(self) -> None:
         """Clean up the target table."""
@@ -696,13 +713,12 @@ class BaseBigQuerySink(BatchSink):
             self.merge_target = None
         elif self.overwrite_target is not None:
             # We must overwrite the target table with the temp table.
-            timeout = self.config.get("timeout", 600)
-            bigquery_client.query(
+            self._run_query(
+                bigquery_client,
                 f"CREATE OR REPLACE TABLE {self.overwrite_target.get_escaped_name()} AS SELECT *"
                 f" FROM {self.table.get_escaped_name()}; DROP TABLE IF EXISTS"
                 f" {self.table.get_escaped_name()};",
-                timeout=timeout,
-            ).result(timeout=timeout)
+            )
             self.table = self.overwrite_target
             self.overwrite_target = None
 

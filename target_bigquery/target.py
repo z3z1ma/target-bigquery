@@ -115,7 +115,7 @@ class TargetBigQuery(Target):
         th.Property(
             "timeout",
             th.IntegerType,
-            description="Default timeout for batch_job and gcs_stage derived LoadJobs.",
+            description="Timeout in seconds for batch_job/gcs_stage LoadJobs and query submission/result waits (views, MERGE, overwrite). Query timeouts must be positive integers; SDK retries can exceed this value; it does not cancel remote jobs or impose a whole-process deadline.",
             default=600,
         ),
         th.Property(

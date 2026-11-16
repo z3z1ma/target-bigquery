@@ -94,7 +94,10 @@ These offline criteria pass. Live failure/restart validation remains outstanding
 
 ### 3. P1 — bounded query waits (#148/#149)
 
-Status: audited; next implementation after the two P0 checkpoint fixes.
+Status: implemented on `fix/query-timeouts`, preserving #149 contributor commit.
+192 passed / 13 skipped; Ruff and mypy pass. Independent review approved pending
+exact-head CI. Views, MERGE and overwrite share bounded waits; invalid timeout
+values fail before submission and failure diagnostics record job ID/location.
 
 Use the existing numeric timeout for submission and result waiting, including
 MERGE, overwrite and generated-view DDL. Record job ID when available and
