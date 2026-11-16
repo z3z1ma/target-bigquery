@@ -31,16 +31,16 @@ Issues, comments, PR diffs, source and tests were inspected; the table records a
 | --- | --- | --- |
 | [#143](https://github.com/z3z1ma/target-bigquery/issues/143) Storage Write state | Confirmed durability bug. `storage_write.py:pre_state_hook` only commits streams; `core.py:pre_state_hook` performs MERGE. `target.py:drain_all` emits state after the sink hook. | P0, implemented in [#153](https://github.com/z3z1ma/target-bigquery/pull/153), merged. Calling the parent alone is insufficient: MERGE rotates staging, so refresh the Storage Write parent before the next batch. Also reject response-level commit errors before clearing streams. |
 | [#148](https://github.com/z3z1ma/target-bigquery/issues/148) cleanup hang | Confirmed unbounded client waits in `core.py:merge_table/clean_up`; upstream reproduction supports the report. The report uses 0.7.2 but the unbounded calls remain on main. | Done: #157 merged (`9864f87`), including failure tests and diagnostics. |
-| [#141](https://github.com/z3z1ma/target-bigquery/issues/141) JSON | Confirmed compatibility bug, not a configuration misunderstanding. Resolver v2 emits JSON; protobuf expects string; denormalized `process_record` passes dicts to `ParseDict`. | P1, preserve #140 contribution and expand its coverage on current main. |
+| [#141](https://github.com/z3z1ma/target-bigquery/issues/141) JSON | Confirmed compatibility bug, not a configuration misunderstanding. Resolver v2 emits JSON; protobuf expects string; denormalized `process_record` passes dicts to `ParseDict`. | Done: #160 merged (`a12cf40`), retaining #140 contribution and expanded coverage. |
 | [#134](https://github.com/z3z1ma/target-bigquery/issues/134) overwrite layout | Confirmed regression: initial table creation uses partitioning, replacement CTAS omits it. Separately, deliberately changing a pre-existing physical layout requires migration. | P1, blocked only on the separate #152 live gate. |
 | [#150](https://github.com/z3z1ma/target-bigquery/issues/150) release | Valid maintenance request, not a runtime defect. Package version remains 0.7.2 although main includes later correctness changes. | Prepare evidence/changelog after correctness work; release publication requires separate authorization. No release date promised. |
 | [#149](https://github.com/z3z1ma/target-bigquery/pull/149) `ee32bff2` | Correct direction: submission/result timeout for MERGE/overwrite. Missing timeout-failure/state tests, job-ID diagnostics and config/docs scope. Generated-view query still unbounded. CI run 39289842637 is `action_required`. | Incorporated with original authorship into merged #157; closed. |
-| [#140](https://github.com/z3z1ma/target-bigquery/pull/140) `1841adf9` | Schema-guided recursive serialization appears sound. Existing tests cover objects, repeated JSON, nested JSON and protobuf parsing. Helper mutates its input. CI run 31814907445 failed. | Add scalar/null/repeated RECORD/transformed-name/fixed-mode tests; establish fresh CI. |
+| [#140](https://github.com/z3z1ma/target-bigquery/pull/140) `1841adf9` | Schema-guided recursive serialization appears sound. Existing tests cover objects, repeated JSON, nested JSON and protobuf parsing. Helper mutates its input. CI run 31814907445 failed. | Incorporated with original authorship into merged #160; closed. Separate nested-name/collision work is #159. |
 | [#139](https://github.com/z3z1ma/target-bigquery/pull/139) `b4a5c595` | Valid layout implementation. Validation runs after `create_target` and schema mutation; range partitioning can be mistaken for unpartitioned. Original repeated mock assertion does not execute two cleanup cycles. | Keep open until replacement #152 is validated and merged; preserve contributor attribution. |
 | [#152](https://github.com/z3z1ma/target-bigquery/pull/152) `219efca5` | Follow-up moves compatibility checks before mutations, rejects range partitioning, documents migration and adds two real cleanup calls plus opt-in live tests. | Draft, separate owner. Require two live overwrites for batch_job and Storage Write, verifying rows and layout each time. Offline success does not satisfy this gate. |
-| [#136](https://github.com/z3z1ma/target-bigquery/pull/136) `865a01be` | Pinned checkout patch update; escaping/whitespace fixes. No PR workflow run returned during audit. | P2, refresh on main and run Python 3.10–3.12 CI. |
-| [#137](https://github.com/z3z1ma/target-bigquery/pull/137) `d829210c` | Pinned setup-python major update; removed `pip-install` input is unused here. No PR workflow run returned. | P2, preserve offline workflow and verify supported runtime matrix. |
-| [#147](https://github.com/z3z1ma/target-bigquery/pull/147) `2ef432c9` | Pinned setup-uv major update; v9 changes cache pruning default to false. v10 sensitive-event cache rules do not affect current triggers. No PR workflow run returned. | P2, preserve prior cache behavior with `prune-cache: true`, then matrix CI. |
+| [#136](https://github.com/z3z1ma/target-bigquery/pull/136) `865a01be` | Pinned checkout patch update; escaping/whitespace fixes. No PR workflow run returned during audit. | Done: incorporated into #158 (`f4f9739`); current-head matrix passed. |
+| [#137](https://github.com/z3z1ma/target-bigquery/pull/137) `d829210c` | Pinned setup-python major update; removed `pip-install` input is unused here. No PR workflow run returned. | Done: incorporated into #158 (`f4f9739`); current-head matrix passed. |
+| [#147](https://github.com/z3z1ma/target-bigquery/pull/147) `2ef432c9` | Pinned setup-uv major update; v9 changes cache pruning default to false. v10 sensitive-event cache rules do not affect current triggers. No PR workflow run returned. | Done: #158 (`f4f9739`) retains `prune-cache: true`; matrix passed. |
 
 PR mergeability snapshots reported false on the five stale-base proposals; refresh
 Git refs before classifying that as a real conflict. No issue above is closed
@@ -92,7 +92,39 @@ Documentation must explain replay, lack of cross-table atomicity, temporary-tabl
 expiration and upstream success checks (a failed tap closing stdin looks like EOF).
 These offline criteria pass. Live failure/restart validation remains outstanding.
 
-### 3. P1 — bounded query waits (#148/#149)
+### 3. P0 next — transform collision containment (#159)
+
+Status: investigated offline, implementation not yet started. Both resolvers
+silently collapse colliding keys before transport. With snake_case, nested
+`CamelKey: 1` and `camel_key: 2` become only `camel_key: 2`; actual protobuf
+parsing succeeds with the first field absent. Top-level fields and transformed
+JSON keys are also affected. All four denormalized methods share this path.
+This data-integrity risk takes priority over further feature work.
+
+First deliver fail-fast collision detection before dictionary construction and
+buffering/state, with path/source-name diagnostics. Cover top-level, nested and
+repeated RECORDs, legacy-transformed JSON objects, case/punctuation collisions,
+and already-existing suffix names. Validate schema ambiguity before destination
+mutations; the existing schema-only suffixing does not preserve record values.
+Keep original inputs unchanged and protect fixed-schema raw ingestion.
+
+Then deliver P1 schema/record alignment with one explicit naming contract.
+Nested RECORD schemas currently retain raw child names while records transform
+recursively. This blocks Storage Write; batch/GCS submit mismatched names with
+`ignore_unknown_values=True`, an additional discard risk not tested live.
+Existing-table preflight must identify incompatible nested names before staging,
+schema/view writes and explain migration. Do not silently recreate tables.
+
+Acceptance: both resolvers, all denormalized preprocessing paths, every transform,
+actual protobuf and captured other-method payloads; stable schema cache; collision
+rejection with no data/state advancement; explicit legacy-table compatibility;
+consistent scalar/STRUCT/repeated view aliases while preserving source JSON paths.
+Choose JSON document-key behavior separately from physical column naming and
+keep SQL quoting separate from logical names. Migration/server validation remains
+subject to separate cloud authorization. See [#159](https://github.com/z3z1ma/target-bigquery/issues/159)
+and [.10x/research/2026-11-16-transform-impact.md](.10x/research/2026-11-16-transform-impact.md).
+
+### 4. P1 — bounded query waits (#148/#149)
 
 Status: merged through [#157](https://github.com/z3z1ma/target-bigquery/pull/157)
 as `9864f87`, preserving #149 contributor commit. 192 passed / 13 skipped;
@@ -110,12 +142,13 @@ cleared on failure; diagnostic contains job ID without record payloads. Document
 RPC/retry/wait scope rather than promising a strict wall-clock process deadline.
 Capture the original contribution when adapting #149.
 
-### 4. P1 — JSON transport compatibility (#141/#140)
+### 5. P1 — JSON transport compatibility (#141/#140)
 
-Status: implemented on `fix/storage-json-compatibility`, preserving #140 author
-and original commit. Added nonmutating serialization, explicit numeric rejection
-and expanded protobuf round-trip coverage. Independent review approved (62 focused tests passed). Combined suite: 227 passed,
-13 skipped; Ruff/mypy pass. Final CI against the new action pins pending.
+Status: merged through [#160](https://github.com/z3z1ma/target-bigquery/pull/160)
+as `a12cf40`, preserving #140 author/commit. Final head `a108a53` passed
+Python 3.10–3.12 CI run 43938944542 after reconciliation with current main.
+227 local tests passed, 13 skipped; Ruff/mypy and independent review passed.
+#141 is fixed and #140 closed as incorporated. No live server test claimed.
 
 Serialize only fields resolved as BigQuery JSON, recursively within RECORD and
 repeated RECORD. Specify that Python strings are JSON scalar strings, not
@@ -129,7 +162,7 @@ input mutation. Test non-finite numbers and integer boundaries with an explicit
 reject-or-preserve policy: a valid protobuf string does not establish BigQuery
 JSON acceptance. Full offline suite and current-head matrix CI before merge.
 
-### 5. P1 — layout-safe overwrite (#134/#139/#152)
+### 6. P1 — layout-safe overwrite (#134/#139/#152)
 
 Status: blocked on the separate owner's bounded live-test authorization.
 
@@ -141,7 +174,7 @@ only through its owner. Migration instructions must cover legacy unpartitioned
 tables and dataset expiration defaults. Close #139 as superseded only after the
 replacement lands.
 
-### 6. P2 — maintenance and capability documentation
+### 7. P2 — maintenance and capability documentation
 
 Status: dependency PRs #136/#137/#147 incorporated into merged #158 (`f4f9739`),
 with all original commits preserved and current-head Python 3.10–3.12 CI green.
@@ -154,7 +187,7 @@ which features are cloud-verified versus offline-only. Prepare #150 release note
 from merged commits only, with migration and known-limit sections. Publishing
 is outside this roadmap execution's authorization.
 
-### 7. P3 — scoped replacement design spike
+### 8. P3 — scoped replacement design spike
 
 Status: research only; no implementation selected. Offline probe confirms the
 locked google-cloud-bigquery 3.42.1 exports `WRITE_TRUNCATE_DATA` and serializes
@@ -236,3 +269,10 @@ Sources reviewed 2026-11-16; conclusions are specific to documented behavior.
   preserved in `ci/refresh-action-pins`; explicit `prune-cache: true` retains
   prior cache behavior. Merged as #158 (`f4f9739`) after exact-head
   Python 3.10–3.12 CI run 43936552874 passed. Original PRs closed as incorporated.
+
+- Follow-up delivery: #157 timeout (`9864f87`), #158 actions (`f4f9739`), and
+  #160 JSON (`a12cf40`) merged after independent review and exact-head matrix CI.
+  Original #149/#136/#137/#147/#140 closed as incorporated with attribution.
+- Current backlog after those merges: 3 issues (#134, #150, #159) and 2 original
+  PRs (#139/#152), excluding this documentation PR. #159 collision containment
+  is the next P0; broader schema/migration work is P1. No release performed.
