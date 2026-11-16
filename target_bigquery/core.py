@@ -139,6 +139,8 @@ class TableLayout:
 
     def matches_table(self, table: bigquery.Table) -> bool:
         """Return whether an existing table has this exact physical layout."""
+        if table.range_partitioning is not None:
+            return False
         partitioning = table.time_partitioning
         if self.is_partitioned != (partitioning is not None):
             return False
@@ -472,26 +474,27 @@ class BaseBigQuerySink(BatchSink):
         self._input_key_properties = list(key_properties or [])
         self._key_properties = self._target_key_properties(key_properties)
 
-        created = self.create_target(key_properties=self.key_properties)
-        if not created:
-            self.update_schema()
-
         self.merge_target: BigQueryTable | None = None
         self.overwrite_target: BigQueryTable | None = None
-        # In absence of dedupe or overwrite candidacy, we append to the target table directly
-        # If the stream is marked for one of these strategies, we create a temporary table instead
-        # and merge or overwrite the target table with the temporary table after the ingest.
+        # Upsert takes precedence over overwrite. Validate an existing overwrite
+        # destination before create_target can refresh a view or update its schema.
         if (
             self.key_properties
             and self.ingestion_strategy is IngestionStrategy.DENORMALIZED
             and self._is_upsert_candidate()
         ):
             self.merge_target = copy(self.table)
-            self._create_overwrite_table()
         elif self._is_overwrite_candidate():
             self.overwrite_target = copy(self.table)
-            if not created:
+            with suppress(NotFound):
                 self._assert_overwrite_layout_compatible()
+
+        created = self.create_target(key_properties=self.key_properties)
+        if not created:
+            if self.overwrite_target is not None:
+                self._assert_overwrite_layout_compatible()
+            self.update_schema()
+        if self.merge_target is not None or self.overwrite_target is not None:
             self._create_overwrite_table()
 
         self.global_par_typ = target.par_typ
@@ -579,7 +582,7 @@ class BaseBigQuerySink(BatchSink):
         if not layout.matches_table(existing):
             raise RuntimeError(
                 f"Cannot overwrite {target}: its existing BigQuery partitioning or clustering "
-                "does not match the configured layout. BigQuery requires an explicit table "
+                "does not match the configured layout. This target requires an explicit table "
                 "migration for physical layout changes. Migrate (or intentionally drop and "
                 "recreate) the destination table, then rerun the pipeline."
             )

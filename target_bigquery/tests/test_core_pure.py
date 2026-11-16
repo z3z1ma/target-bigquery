@@ -20,6 +20,7 @@ from target_bigquery.batch_job import (
 )
 from target_bigquery.constants import DEFAULT_SCHEMA
 from target_bigquery.core import (
+    BaseBigQuerySink,
     BigQueryTable,
     Compressor,
     IngestionStrategy,
@@ -458,7 +459,7 @@ def test_overwrite_ddl_for_unpartitioned_table_omits_partition_by():
     assert "CLUSTER BY `_sdc_batched_at`" in ddl
 
 
-def test_monthly_layout_matches_table_after_consecutive_overwrites():
+def test_monthly_layout_matches_existing_table():
     layout = TableLayout("month", None, ("_sdc_batched_at",))
     existing = bigquery.Table(make_bigquery_table().as_ref())
     existing.time_partitioning = bigquery.table.TimePartitioning(
@@ -467,7 +468,6 @@ def test_monthly_layout_matches_table_after_consecutive_overwrites():
     )
     existing.clustering_fields = ("_sdc_batched_at",)
 
-    assert layout.matches_table(existing)
     assert layout.matches_table(existing)
 
 
@@ -835,3 +835,81 @@ def test_unknown_ingestion_strategy_is_rejected():
 def test_schema_resolver_version_string_matches_wire_value():
     assert str(SchemaResolverVersion.V1) == "1"
     assert str(SchemaResolverVersion.V2) == "2"
+
+
+@pytest.mark.parametrize("existing_kind", ["unpartitioned", "range", "expiration", "clustering"])
+def test_overwrite_constructor_rejects_layout_before_any_mutation(monkeypatch, existing_kind):
+    from unittest.mock import Mock
+
+    from target_bigquery.target import TargetBigQuery
+
+    existing = bigquery.Table("project.analytics.orders")
+    existing.time_partitioning = bigquery.TimePartitioning(
+        type_="MONTH", field="_sdc_batched_at"
+    )
+    existing.clustering_fields = ["_sdc_batched_at"]
+    if existing_kind == "unpartitioned":
+        existing.time_partitioning = None
+    elif existing_kind == "range":
+        existing.time_partitioning = None
+        existing.range_partitioning = bigquery.RangePartitioning(
+            field="id", range_=bigquery.PartitionRange(start=0, end=100, interval=10)
+        )
+    elif existing_kind == "expiration":
+        existing.time_partitioning = bigquery.TimePartitioning(
+            type_="MONTH", field="_sdc_batched_at", expiration_ms=86400000
+        )
+    else:
+        existing.clustering_fields = ["id"]
+    client = SimpleNamespace(get_table=lambda _: existing)
+    monkeypatch.setattr("target_bigquery.core.bigquery_client_factory", lambda _: client)
+    monkeypatch.setattr(BaseBigQuerySink, "_get_bigquery_client", lambda _: client)
+    create = Mock()
+    update = Mock()
+    stage = Mock()
+    monkeypatch.setattr(BaseBigQuerySink, "create_target", create)
+    monkeypatch.setattr(BigQueryBatchJobDenormalizedSink, "update_schema", update)
+    monkeypatch.setattr(BaseBigQuerySink, "_create_overwrite_table", stage)
+    target = TargetBigQuery(config={"project": "project", "dataset": "analytics", "overwrite": True})
+    with pytest.raises(RuntimeError, match="explicit table migration"):
+        BigQueryBatchJobDenormalizedSink(
+            target, "orders", {"type": "object", "properties": {"id": {"type": "integer"}}}, []
+        )
+    create.assert_not_called()
+    update.assert_not_called()
+    stage.assert_not_called()
+
+
+def test_unpartitioned_layout_rejects_range_partitioning():
+    existing = bigquery.Table("project.analytics.orders")
+    existing.range_partitioning = bigquery.RangePartitioning(
+        field="id", range_=bigquery.PartitionRange(start=0, end=100, interval=10)
+    )
+    assert not TableLayout("none", None, ()).matches_table(existing)
+
+
+def test_two_overwrite_cleanup_cycles_submit_layout_ddl_and_restore_destination(monkeypatch):
+    from singer_sdk.sinks import BatchSink
+
+    monkeypatch.setattr(BatchSink, "clean_up", lambda _: None)
+    destination = make_bigquery_table()
+    client = FakeBigQueryClient(bigquery.Table(destination.as_ref()))
+    for run in range(2):
+        sink = make_sink({"partition_granularity": "month", "partition_expiration_days": 7})
+        sink._key_properties = []
+        sink.merge_target = None
+        sink.overwrite_target = destination
+        sink.table = make_bigquery_table(name=f"orders__run{run}")
+        sink._get_bigquery_client = lambda: client
+        sink.clean_up()
+        assert sink.table is destination
+        assert sink.overwrite_target is None
+        assert client.queries[run] == (
+            "CREATE OR REPLACE TABLE `project`.`analytics`.`orders`\n"
+            "PARTITION BY TIMESTAMP_TRUNC(`_sdc_batched_at`, MONTH)\n"
+            "CLUSTER BY `_sdc_batched_at`\n"
+            "OPTIONS(partition_expiration_days=7)\n"
+            f"AS SELECT * FROM `project`.`analytics`.`orders__run{run}`; "
+            f"DROP TABLE IF EXISTS `project`.`analytics`.`orders__run{run}`;"
+        )
+    assert len(client.queries) == 2
