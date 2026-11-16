@@ -92,16 +92,18 @@ Documentation must explain replay, lack of cross-table atomicity, temporary-tabl
 expiration and upstream success checks (a failed tap closing stdin looks like EOF).
 These offline criteria pass. Live failure/restart validation remains outstanding.
 
-### 3. P0 next — transform collision containment (#159)
+### 3. P0 — transform collision containment (#159)
 
-Status: investigated offline, implementation not yet started. Both resolvers
+Status: implemented on `fix/reject-transform-collisions`, awaiting independent
+review and exact-head CI before merge. Local: 260 passed, 13 skipped; Ruff/mypy
+pass. Both resolvers
 silently collapse colliding keys before transport. With snake_case, nested
 `CamelKey: 1` and `camel_key: 2` become only `camel_key: 2`; actual protobuf
 parsing succeeds with the first field absent. Top-level fields and transformed
 JSON keys are also affected. All four denormalized methods share this path.
 This data-integrity risk takes priority over further feature work.
 
-First deliver fail-fast collision detection before dictionary construction and
+Implemented fail-fast collision detection before dictionary construction and
 buffering/state, with path/source-name diagnostics. Cover top-level, nested and
 repeated RECORDs, legacy-transformed JSON objects, case/punctuation collisions,
 and already-existing suffix names. Validate schema ambiguity before destination
@@ -275,4 +277,11 @@ Sources reviewed 2026-11-16; conclusions are specific to documented behavior.
   Original #149/#136/#137/#147/#140 closed as incorporated with attribution.
 - Current backlog after those merges: 3 issues (#134, #150, #159) and 2 original
   PRs (#139/#152), excluding this documentation PR. #159 collision containment
-  is the next P0; broader schema/migration work is P1. No release performed.
+  is implemented pending review/CI; broader schema/migration work is P1. No release performed.
+
+- #159 P0 containment: shared translator rejects collisions with stream/path/source
+  diagnostics; schema preflight runs before destination creation/update. Removed
+  schema-only suffixing and preserve input containers on failure. Added 33 offline
+  cases across both resolvers, all four denormalized transports and real Singer
+  message processing, including no buffering/state after collision. Fixed raw
+  ingestion is unchanged. Nested schema naming/migration remains open as P1.

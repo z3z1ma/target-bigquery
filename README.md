@@ -298,3 +298,15 @@ Nested RECORD names must already match the selected column-name transforms:
 record preprocessing transforms them recursively, but the current schema resolver
 transforms schema names only at the top level. The JSON transport fix does not
 change existing nested table schemas.
+
+### Column transform collisions
+
+Denormalized loads reject distinct sibling keys that transform to the same name,
+such as `CamelKey` and `camel_key` with snake_case enabled. Declared schema
+collisions fail before destination creation/update. Dynamic keys, including keys
+inside JSON documents, are checked during record preprocessing before buffering;
+the error includes the stream, object path and conflicting source names. Rename
+the source keys or change the transform configuration before retrying. Automatic
+schema suffixes are no longer used because they did not preserve record values.
+Fixed-schema raw ingestion keeps original document keys. This containment does
+not migrate nested RECORD schemas or recover values lost by earlier runs.
