@@ -112,8 +112,10 @@ Capture the original contribution when adapting #149.
 
 ### 4. P1 — JSON transport compatibility (#141/#140)
 
-Status: audited; follows checkpoint correctness, can proceed independently of
-live-overwrite approval.
+Status: implemented on `fix/storage-json-compatibility`, preserving #140 author
+and original commit. Added nonmutating serialization, explicit numeric rejection
+and expanded protobuf round-trip coverage. Independent review approved (62 focused tests passed). Combined suite: 227 passed,
+13 skipped; Ruff/mypy pass. Final CI against the new action pins pending.
 
 Serialize only fields resolved as BigQuery JSON, recursively within RECORD and
 repeated RECORD. Specify that Python strings are JSON scalar strings, not
@@ -127,7 +129,21 @@ input mutation. Test non-finite numbers and integer boundaries with an explicit
 reject-or-preserve policy: a valid protobuf string does not establish BigQuery
 JSON acceptance. Full offline suite and current-head matrix CI before merge.
 
-### 5. P1 — layout-safe overwrite (#134/#139/#152)
+### 5. P1 — nested RECORD transform compatibility (#159)
+
+Reproduced by an actual protobuf parse while extending JSON tests: with snake_case,
+PacketData.JsonPayload schema becomes packet_data.JsonPayload, but record
+preprocessing produces packet_data.json_payload. This predates #140.
+[Issue #159](https://github.com/z3z1ma/target-bigquery/issues/159) tracks the fix.
+
+Acceptance: define compatibility for tables already created with untransformed
+nested names; align nested/repeated RECORD schema and record transformations;
+test v1/v2 resolvers, name collisions and unchanged fixed-schema views. Decide
+JSON document-key transformation explicitly. A schema-only change without a
+migration/rejection policy is insufficient. The JSON transport fix documents
+this existing limitation and does not claim nested-name transform support.
+
+### 6. P1 — layout-safe overwrite (#134/#139/#152)
 
 Status: blocked on the separate owner's bounded live-test authorization.
 
@@ -139,9 +155,11 @@ only through its owner. Migration instructions must cover legacy unpartitioned
 tables and dataset expiration defaults. Close #139 as superseded only after the
 replacement lands.
 
-### 6. P2 — maintenance and capability documentation
+### 7. P2 — maintenance and capability documentation
 
-Status: queued. Dependencies #136/#137/#147 can proceed without cloud access.
+Status: dependency PRs #136/#137/#147 incorporated into merged #158 (`f4f9739`),
+with all original commits preserved and current-head Python 3.10–3.12 CI green.
+Capability documentation and release preparation remain queued.
 
 Keep the Python 3.10–3.12 offline matrix and locked installs green. Add a tested
 method × fixed/denormalized × append/upsert/overwrite × JSON support matrix,
@@ -150,7 +168,7 @@ which features are cloud-verified versus offline-only. Prepare #150 release note
 from merged commits only, with migration and known-limit sections. Publishing
 is outside this roadmap execution's authorization.
 
-### 7. P3 — scoped replacement design spike
+### 8. P3 — scoped replacement design spike
 
 Status: research only; no implementation selected. Offline probe confirms the
 locked google-cloud-bigquery 3.42.1 exports `WRITE_TRUNCATE_DATA` and serializes
@@ -222,16 +240,13 @@ Sources reviewed 2026-11-16; conclusions are specific to documented behavior.
   original 7 open PRs (#136, #137, #139, #140, #147, #149, #152), excluding
   roadmap publication #154. #143 and #155 are closed by their merged fixes.
 
-### Next P1 — nested RECORD transform compatibility (#159)
+- JSON regression work reproduced a pre-existing nested RECORD transform mismatch:
+  schema transformation changes top-level names only, while record preprocessing
+  transforms recursively. Tracked as [#159](https://github.com/z3z1ma/target-bigquery/issues/159), P1 with existing-table migration
+  requirements; the JSON fix supports transformed top-level names and canonical
+  nested names and explicitly documents this limit.
 
-Reproduced by an actual protobuf parse while extending JSON tests: with snake_case,
-PacketData.JsonPayload schema becomes packet_data.JsonPayload, but record
-preprocessing produces packet_data.json_payload. This predates #140.
-[Issue #159](https://github.com/z3z1ma/target-bigquery/issues/159) tracks the fix.
-
-Acceptance: define compatibility for tables already created with untransformed
-nested names; align nested/repeated RECORD schema and record transformations;
-test v1/v2 resolvers, name collisions and unchanged fixed-schema views. Decide
-JSON document-key transformation explicitly. A schema-only change without a
-migration/rejection policy is insufficient. The JSON transport fix documents
-this existing limitation and does not claim nested-name transform support.
+- Action refresh implementation: contributor commits from #136/#137/#147 are
+  preserved in `ci/refresh-action-pins`; explicit `prune-cache: true` retains
+  prior cache behavior. Merged as #158 (`f4f9739`) after exact-head
+  Python 3.10–3.12 CI run 43936552874 passed. Original PRs closed as incorporated.
