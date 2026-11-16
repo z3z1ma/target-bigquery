@@ -174,7 +174,10 @@ JSON acceptance. Full offline suite and current-head matrix CI before merge.
 
 ### 6. P1 — layout-safe overwrite (#134/#139/#152)
 
-Status: blocked on the separate owner's bounded live-test authorization.
+Status: #152 reconciled with main9e7a99e locally; 383 tests passed, 15 skipped,
+Ruff/mypy passed. Layout-preserving overwrite DDL now uses the bounded query
+helper. Current checkpoint and nested-schema guarantees are retained.
+Independent review/current-head CI precede the still-pending live gate.
 
 Acceptance: existing compatible layout and new destination succeed; incompatible
 partition field/type/expiration, ordered clustering and range partitions fail
