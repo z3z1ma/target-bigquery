@@ -409,6 +409,8 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
                     write_streams=[name for name, _ in self.open_streams],
                 )
             )
+            if write.stream_errors:
+                raise RuntimeError(f"Storage Write batch commit failed: {write.stream_errors}")
             self.logger.info(f"Batch commit time: {write.commit_time}")
             self.logger.info(f"Batch commit errors: {write.stream_errors}")
             self.logger.info(f"Writes to streams: '{self.open_streams}' have been committed.")
@@ -420,6 +422,12 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
 
     def pre_state_hook(self) -> None:
         self.commit_streams()
+        super().pre_state_hook()
+        # A successful merge rotates the staging table. New jobs must use it,
+        # rather than the old table which merge_table has dropped.
+        self.parent = BigQueryWriteClient.table_path(
+            self.table.project, self.table.dataset, self.table.name
+        )
 
 
 class BigQueryStorageWriteDenormalizedSink(Denormalized, BigQueryStorageWriteSink):
