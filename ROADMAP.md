@@ -108,8 +108,9 @@ Capture the original contribution when adapting #149.
 
 ### 4. P1 — JSON transport compatibility (#141/#140)
 
-Status: audited; follows checkpoint correctness, can proceed independently of
-live-overwrite approval.
+Status: implemented on `fix/storage-json-compatibility`, preserving #140 author
+and original commit. Added nonmutating serialization, explicit numeric rejection
+and expanded protobuf round-trip coverage. Independent review and CI pending.
 
 Serialize only fields resolved as BigQuery JSON, recursively within RECORD and
 repeated RECORD. Specify that Python strings are JSON scalar strings, not
@@ -217,3 +218,9 @@ Sources reviewed 2026-11-16; conclusions are specific to documented behavior.
 - Inventory after #153/#156: 4 open issues (#134, #141, #148, #150) and the
   original 7 open PRs (#136, #137, #139, #140, #147, #149, #152), excluding
   roadmap publication #154. #143 and #155 are closed by their merged fixes.
+
+- JSON regression work reproduced a pre-existing nested RECORD transform mismatch:
+  schema transformation changes top-level names only, while record preprocessing
+  transforms recursively. Tracked as [#159](https://github.com/z3z1ma/target-bigquery/issues/159), P1 with existing-table migration
+  requirements; the JSON fix supports transformed top-level names and canonical
+  nested names and explicitly documents this limit.

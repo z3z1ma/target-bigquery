@@ -11,9 +11,11 @@
 """BigQuery Storage Write Sink."""
 
 import logging
+import math
 import os
 from collections.abc import Callable, Iterable
 from contextlib import suppress
+from decimal import Decimal
 from multiprocessing import Process
 from multiprocessing.connection import Connection
 from multiprocessing.dummy import Process as _Thread
@@ -130,28 +132,49 @@ def _localize_nested_type_names(descriptor: Any) -> None:
         _localize_nested_type_names(nested)
 
 
+def _normalize_json_value(value: Any) -> Any:
+    """Normalize Decimal values without silently replacing non-finite numbers."""
+    if isinstance(value, Decimal):
+        if not value.is_finite():
+            raise ValueError("BigQuery JSON does not support non-finite numbers")
+        value = make_json_compatible(value)
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError("BigQuery JSON does not support non-finite numbers")
+    if isinstance(value, dict):
+        return {key: _normalize_json_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_normalize_json_value(item) for item in value]
+    return value
+
+
 def serialize_json_fields(record: dict[str, Any], schema: Iterable[SchemaField]) -> dict[str, Any]:
-    """Serialize BigQuery JSON fields to the string representation required by Protobuf."""
+    """Copy record containers and encode JSON fields as protobuf strings."""
+    record = record.copy()
     for field in schema:
         value = record.get(field.name)
         if value is None:
             continue
-
+        if (
+            field.mode.upper() == "REPEATED"
+            and field.field_type.upper() in {"JSON", "RECORD"}
+            and not isinstance(value, (list, tuple))
+        ):
+            raise TypeError(f"Repeated field {field.name!r} requires an array")
         if field.field_type.upper() == "JSON":
             if field.mode.upper() == "REPEATED":
                 record[field.name] = [
-                    orjson.dumps(make_json_compatible(item)).decode("utf-8") for item in value
+                    orjson.dumps(_normalize_json_value(item)).decode("utf-8") for item in value
                 ]
             else:
-                record[field.name] = orjson.dumps(make_json_compatible(value)).decode("utf-8")
+                record[field.name] = orjson.dumps(_normalize_json_value(value)).decode("utf-8")
         elif field.field_type.upper() == "RECORD":
             if field.mode.upper() == "REPEATED":
-                for item in value:
-                    if isinstance(item, dict):
-                        serialize_json_fields(item, field.fields)
+                record[field.name] = [
+                    serialize_json_fields(item, field.fields) if isinstance(item, dict) else item
+                    for item in value
+                ]
             elif isinstance(value, dict):
-                serialize_json_fields(value, field.fields)
-
+                record[field.name] = serialize_json_fields(value, field.fields)
     return record
 
 
@@ -389,9 +412,7 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
     @property
     def proto_schema(self) -> type[message.Message]:
         if not hasattr(self, "_proto_schema"):
-            self._proto_schema = proto_schema_factory_v2(
-                self.resolved_schema
-            )
+            self._proto_schema = proto_schema_factory_v2(self.resolved_schema)
         return cast(type[message.Message], self._proto_schema)
 
     def start_batch(self, context: dict[str, Any]) -> None:
