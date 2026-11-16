@@ -52,7 +52,8 @@ merely because a patch exists.
 
 Status: [#153](https://github.com/z3z1ma/target-bigquery/pull/153), head `cca0eeb`.
 163 offline tests passed, 13 skipped; Ruff and mypy pass. Independent review
-completed and requested test additions addressed. Exact-head merged.
+completed and requested test additions addressed. Python 3.10–3.12 CI passed
+at the exact head (run 43932834199); merged as `8038818`.
 
 Required ordering: completed appends → successful finalize/commit → successful
 MERGE → usable next staging destination → emitted STATE. Cover default and
@@ -72,7 +73,8 @@ Acceptance:
 ### 2. P0 — overwrite checkpoint durability (#155)
 
 Status: [#156](https://github.com/z3z1ma/target-bigquery/pull/156), head `a693913`,
-implements [#155](https://github.com/z3z1ma/target-bigquery/issues/155); CI pending.
+fixes [#155](https://github.com/z3z1ma/target-bigquery/issues/155); merged as `cac1981`
+after exact-head Python 3.10–3.12 CI run 43934050631 passed.
 171 offline tests passed, 13 skipped; Ruff and mypy pass. Independent review's
 termination finding and signal-test requests are addressed.
 
@@ -209,4 +211,9 @@ Sources reviewed 2026-11-16; conclusions are specific to documented behavior.
 
 - #153 merged as `8038818` after exact-head CI run 43932834199 succeeded.
 - #155: offline reproduction confirms intermediate state precedes overwrite
-  publication; implemented in #156 (`fd3be44`), 171 passed / 13 skipped, Ruff/mypy pass; CI pending.
+  publication; #156 (`a693913`) merged as `cac1981` after CI run 43934050631
+  passed. Local results: 171 passed / 13 skipped, Ruff/mypy pass.
+
+- Inventory after #153/#156: 4 open issues (#134, #141, #148, #150) and the
+  original 7 open PRs (#136, #137, #139, #140, #147, #149, #152), excluding
+  roadmap publication #154. #143 and #155 are closed by their merged fixes.

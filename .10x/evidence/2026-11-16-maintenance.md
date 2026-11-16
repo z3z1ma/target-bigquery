@@ -68,3 +68,12 @@ and `schema_update_options=["ALLOW_FIELD_ADDITION"]` to the expected REST keys.
 This probe constructed configs only; no client, query or cloud request was made.
 It establishes client-side representation, not server acceptance or metadata
 preservation. The remaining design acceptance criteria stay in ROADMAP.md.
+
+## Final implementation gates
+
+#156 final head `a693913` passed Python 3.10–3.12 in
+[run 43934050631](https://github.com/z3z1ma/target-bigquery/actions/runs/43934050631).
+Main was refreshed at `8038818` immediately before merge. Merge commit:
+`cac1981f269fbca6427ebc07189860825160460f`. Both #143 and #155 are closed.
+The roadmap branch was merged with this current main, resolving README additions
+by preserving both checkpoint documentation and the roadmap link.

@@ -19,6 +19,7 @@ import time
 import uuid
 from collections.abc import Callable, Sequence
 from importlib import metadata
+from types import FrameType
 from typing import (
     Any,
     cast,
@@ -603,9 +604,28 @@ class TargetBigQuery(Target):
             self._join_workers()
             self._handle_worker_error()
             self._run_pre_state_hooks()
-        if state:
+        # Overwrite staging is published only at EOF. Singer state is global, so
+        # defer it while any sink still has an unpublished replacement.
+        if state and not self._has_pending_overwrite():
             self._write_state_message(state)
         self._reset_max_record_age()
+
+    def _has_pending_overwrite(self) -> bool:
+        return any(
+            getattr(sink, "overwrite_target", None) is not None
+            for sink in self._sinks_active.values()
+        )
+
+    def _handle_termination(self, signum: int, frame: FrameType | None) -> None:
+        if self._has_pending_overwrite():
+            self.logger.warning(
+                "Interrupted overwrite: leaving staging unpublished and withholding state."
+            )
+            try:
+                self._shutdown_workers()
+            finally:
+                raise SystemExit(128 + signum)
+        super()._handle_termination(signum, frame)
 
     def _shutdown_workers(self) -> None:
         """Send poison pills to live workers, then join and clear the pool."""

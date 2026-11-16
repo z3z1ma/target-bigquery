@@ -259,6 +259,20 @@ checkpoint. After a merge rotates the staging table, subsequent batches use the
 new table. This does not provide end-to-end exactly-once delivery: replay after
 an ambiguous failure still requires stable upsert keys.
 
+When any stream uses overwrite mode, intermediate Singer state is deferred until
+all staged replacements are published at end of input. This applies to the whole
+state message, including other streams. A failure before EOF or a handled termination signal retains the last published
+checkpoint. Handled termination does not initiate publication or emit state, and exits
+nonzero. A replacement query already submitted can still complete remotely.
+Temporary tables remain subject to their configured expiration.
+Append-only streams in a mixed run may replay rows; use stable upsert keys where
+replay must be idempotent. Overwrites across several destination tables are not
+one atomic transaction.
+
+The target cannot distinguish a successful upstream snapshot from a failed tap
+that closes its output. The orchestrator must check upstream success; EOF alone
+is not proof of a complete snapshot.
+
 ## Maintenance roadmap
 
 See [ROADMAP.md](ROADMAP.md) for audited priorities, acceptance tests, current status,
