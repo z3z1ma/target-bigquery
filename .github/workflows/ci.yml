@@ -7,12 +7,14 @@ on:
       - "**.py"
       - "pyproject.toml"
       - "uv.lock"
+      - ".github/workflows/ci.yml"
   push:
     branches: [main]
     paths:
       - "**.py"
       - "pyproject.toml"
       - "uv.lock"
+      - ".github/workflows/ci.yml"
   workflow_dispatch:
     inputs: {}
 
@@ -34,10 +36,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PYTHON_VERSION: ${{ matrix.py_version }}
-      BQ_PROJECT: ${{ secrets.BQ_PROJECT }}
-      BQ_DATASET: ${{ secrets.BQ_DATASET }}
-      BQ_CREDS: ${{ secrets.BQ_CREDS }}
-      GCS_BUCKET: ${{ secrets.GCS_BUCKET }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
       - name: Setup Python ${{ matrix.py_version }}
@@ -48,9 +46,7 @@ jobs:
         uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39
       - name: Install Target Bigquery
         run: uv sync --frozen
-      - name: Run SDK Tests
-        run: uv run --frozen pytest -k test_core
-      - name: Run Bigquery Unit Tests
-        run: uv run --frozen pytest -k test_utils
-      - name: Run Bigquery Integration Tests
-        run: uv run --frozen pytest -k test_sync
+      - name: Lint
+        run: uv run --frozen ruff check .
+      - name: Run complete offline suite
+        run: uv run --frozen pytest --benchmark-disable
