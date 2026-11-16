@@ -401,6 +401,7 @@ class BaseBigQuerySink(BatchSink):
         if self.ingestion_strategy is IngestionStrategy.DENORMALIZED:
             try:
                 self.table.schema_translator.validate_transform_collisions()
+                self._validate_existing_nested_schema()
             except ValueError as exc:
                 raise ValueError(f"Stream {stream_name!r}: {exc}") from exc
         self._input_key_properties = list(key_properties or [])
@@ -429,6 +430,51 @@ class BaseBigQuerySink(BatchSink):
         self.global_par_typ = target.par_typ
         self.global_queue = target.queue
         self.increment_jobs_enqueued = target.increment_jobs_enqueued
+
+    def _validate_existing_nested_schema(self) -> None:
+        """Check existing nested fields before destination or staging mutations."""
+        self.table.get_resolved_schema(self.apply_transforms)
+        try:
+            existing = self._get_bigquery_client().get_table(self.table.as_ref())
+        except NotFound:
+            return
+        self._validate_nested_schema(existing.schema)
+
+    def _validate_nested_schema(self, existing: Sequence[SchemaField]) -> None:
+        expected = self.table.get_resolved_schema(self.apply_transforms)
+        aliases = {"STRUCT": "RECORD", "INT64": "INTEGER", "FLOAT64": "FLOAT", "BOOL": "BOOLEAN"}
+
+        def field_type(field: SchemaField) -> str:
+            return aliases.get(field.field_type.upper(), field.field_type.upper())
+
+        def mismatch(path: str, detail: str) -> None:
+            raise ValueError(
+                f"Destination {self.table}: incompatible nested schema at {path}: {detail}. "
+                "No automatic nested rename or backfill is performed. Migrate to a compatible "
+                "table or reload into a new destination; see README 'Nested schema migration'."
+            )
+
+        def compare(wanted: SchemaField, actual: SchemaField, path: str) -> None:
+            if (field_type(wanted), wanted.mode) != (field_type(actual), actual.mode):
+                mismatch(
+                    path,
+                    f"expected {wanted.field_type}/{wanted.mode}, "
+                    f"found {actual.field_type}/{actual.mode}",
+                )
+            wanted_names = [child.name for child in wanted.fields]
+            actual_names = [child.name for child in actual.fields]
+            if wanted_names != actual_names:
+                mismatch(
+                    path, f"expected ordered children {wanted_names!r}, found {actual_names!r}"
+                )
+            for child, current in zip(wanted.fields, actual.fields, strict=True):
+                compare(child, current, f"{path}[{child.name!r}]")
+
+        current_fields = {field.name: field for field in existing}
+        for wanted in expected:
+            actual = current_fields.get(wanted.name)
+            if actual is not None and "RECORD" in (field_type(wanted), field_type(actual)):
+                compare(wanted, actual, f"$[{wanted.name!r}]")
 
     def _create_overwrite_table(self) -> None:
         expiration_hours = self.config.get("temporary_table_expiration_hours", 7 * 24)
@@ -747,6 +793,7 @@ class Denormalized:
         sink = cast(BaseBigQuerySink, self)
         bigquery_client = sink._get_bigquery_client()
         table = bigquery_client.get_table(sink.table.as_ref())
+        sink._validate_nested_schema(table.schema)
         current_schema = table.schema[:]
         mut_schema = table.schema[:]
         for expected_field in sink.table.get_resolved_schema(sink.apply_transforms):
@@ -871,12 +918,22 @@ class SchemaTranslator:
         """Translate the schema into a BigQuery schema using the SchemaTranslator `transforms`."""
         if not self._translated_schema_transformed:
             self.validate_transform_collisions()
-            self._translated_schema_transformed = [
-                self._jsonschema_property_to_bigquery_column(
-                    transform_column_name(name, **self.transforms), contents
-                )
-                for name, contents in self.schema.get("properties", {}).items()
-            ]
+
+            def transform(fields: Sequence[SchemaField], path: str) -> list[SchemaField]:
+                names = self._transformed_names((field.name for field in fields), path)
+                result = []
+                for field in fields:
+                    definition = dict(field.to_api_repr())
+                    definition["name"] = names[field.name]
+                    if field.fields:
+                        definition["fields"] = [
+                            child.to_api_repr()
+                            for child in transform(field.fields, f"{path}[{field.name!r}]")
+                        ]
+                    result.append(SchemaField.from_api_repr(definition))
+                return result
+
+            self._translated_schema_transformed = transform(self.translated_schema, "$")
 
         return self._translated_schema_transformed
 
@@ -885,6 +942,11 @@ class SchemaTranslator:
         sources: dict[str, str] = {}
         for name in names:
             target = transform_column_name(name, **{**self.transforms, "quote": False})
+            if "`" in name:
+                raise ValueError(
+                    f"Invalid physical column name at {path}: {name!r} contains backticks. "
+                    "Rename the source key; column_name_transforms.quote applies to SQL only."
+                )
             if target in sources:
                 raise ValueError(
                     f"Column transform collision at {path}: {sources[target]!r} and "

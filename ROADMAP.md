@@ -112,19 +112,25 @@ and already-existing suffix names. Validate schema ambiguity before destination
 mutations; the existing schema-only suffixing does not preserve record values.
 Keep original inputs unchanged and protect fixed-schema raw ingestion.
 
-Then deliver P1 schema/record alignment with one explicit naming contract.
-Nested RECORD schemas currently retain raw child names while records transform
-recursively. This blocks Storage Write; batch/GCS submit mismatched names with
-`ignore_unknown_values=True`, an additional discard risk not tested live.
-Existing-table preflight must identify incompatible nested names before staging,
-schema/view writes and explain migration. Do not silently recreate tables.
+P1 schema/record alignment is implemented on `fix/nested-schema-alignment`,
+independently reviewed (109 focused tests), pending exact-head CI. Local: 339 passed, 13 skipped;
+Ruff/mypy pass. Resolved physical RECORD fields
+transform recursively using the record naming rules; SQL quotes are excluded and
+prequoted source names rejected. Preflight requires exact ordered nested
+structures before destination/staging mutations in append/upsert/overwrite, and
+rechecks before top-level schema updates. New top-level fields remain supported;
+nested changes require explicit migration. README documents new-destination
+reload or backfill/cutover, including historical loss and metadata risks. JSON-key
+transforms and fixed-mode view aliases deliberately retain existing behavior.
 
 Acceptance: both resolvers, all denormalized preprocessing paths, every transform,
 actual protobuf and captured other-method payloads; stable schema cache; collision
 rejection with no data/state advancement; explicit legacy-table compatibility;
 consistent scalar/STRUCT/repeated view aliases while preserving source JSON paths.
-Choose JSON document-key behavior separately from physical column naming and
-keep SQL quoting separate from logical names. Migration/server validation remains
+JSON document-key behavior remains legacy-compatible in this delivery; any
+future change requires a separate compatibility decision. Fixed-mode repeated
+view aliases remain a separate documentation/capability follow-up. Keep SQL
+quoting separate from logical physical names. Migration/server validation remains
 subject to separate cloud authorization. See [#159](https://github.com/z3z1ma/target-bigquery/issues/159)
 and [.10x/research/2026-11-16-transform-impact.md](.10x/research/2026-11-16-transform-impact.md).
 
@@ -293,3 +299,12 @@ Sources reviewed 2026-11-16; conclusions are specific to documented behavior.
   its terminal result is linked from #162. Remaining inventory: issues #134,
   #150, #159 and protected PRs #139/#152. Next unblocked correctness work is
   #159 P1 schema/record alignment with an explicit existing-table migration plan.
+
+- #159 P1 implementation: recursive physical RECORD names now align with records;
+  existing nested schemas are checked before mutations. Missing/renamed/extra,
+  reordered, type/mode-changed nested fields require explicit migration. No
+  automatic nested evolution, JSON-key policy change or fixed-view change.
+  Offline tests include actual protobuf round-trips, all transport preprocessing,
+  real constructor preflight for append/upsert/overwrite, staging-cache reuse,
+  metadata preservation and Singer failure before data/state. Live migration
+  validation remains separate and unauthorized.
