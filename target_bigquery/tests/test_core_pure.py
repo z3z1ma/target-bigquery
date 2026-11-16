@@ -913,3 +913,32 @@ def test_two_overwrite_cleanup_cycles_submit_layout_ddl_and_restore_destination(
             f"DROP TABLE IF EXISTS `project`.`analytics`.`orders__run{run}`;"
         )
     assert len(client.queries) == 2
+
+
+@pytest.mark.parametrize("missing", [False, True])
+def test_overwrite_constructor_accepts_matching_or_new_destination(monkeypatch, missing):
+    from unittest.mock import Mock
+
+    from target_bigquery.target import TargetBigQuery
+
+    existing = bigquery.Table("project.analytics.orders")
+    existing.time_partitioning = bigquery.TimePartitioning(type_="MONTH", field="_sdc_batched_at")
+    existing.clustering_fields = ["_sdc_batched_at"]
+    get_table = Mock(side_effect=NotFound("missing")) if missing else Mock(return_value=existing)
+    client = SimpleNamespace(get_table=get_table)
+    monkeypatch.setattr("target_bigquery.core.bigquery_client_factory", lambda _: client)
+    monkeypatch.setattr(BaseBigQuerySink, "_get_bigquery_client", lambda _: client)
+    create = Mock(return_value=missing)
+    update = Mock()
+    stage = Mock()
+    monkeypatch.setattr(BaseBigQuerySink, "create_target", create)
+    monkeypatch.setattr(BigQueryBatchJobDenormalizedSink, "update_schema", update)
+    monkeypatch.setattr(BaseBigQuerySink, "_create_overwrite_table", stage)
+    target = TargetBigQuery(config={"project": "project", "dataset": "analytics", "overwrite": True})
+    sink = BigQueryBatchJobDenormalizedSink(
+        target, "orders", {"type": "object", "properties": {"id": {"type": "integer"}}}, []
+    )
+    assert sink.overwrite_target is not None
+    create.assert_called_once()
+    assert update.call_count == (0 if missing else 1)
+    stage.assert_called_once()
