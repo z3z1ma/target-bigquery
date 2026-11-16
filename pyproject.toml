@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "z3-target-bigquery"
-version = "0.7.2"
+version = "0.8.0"
 description = "z3-target-bigquery is a Singer target for BigQuery. It supports storage write, GCS, streaming, and batch load methods. Built with the Meltano SDK."
 readme = "README.md"
 requires-python = ">=3.10"

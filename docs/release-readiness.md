@@ -1,10 +1,13 @@
-# Unreleased maintenance candidate
+# 0.8.0 release candidate — publication blocked
 
-Prepared 2026-11-16 from merged main `7e45c6e`. This is release preparation for
-[#150](https://github.com/z3z1ma/target-bigquery/issues/150), not a published release
-or a version selection. The latest public release remains `0.7.2` (published 2024-07-02).
-Package metadata also remains 0.7.2; local artifacts with that version are only
-build checks and must not be uploaded as a replacement release.
+Publication to PyPI (`z3-target-bigquery`) and GitHub is authorized only after
+validation passes. This branch prepares version0.8.0; it is not a release.
+The required live overwrite regression remains blocked on separate authorization
+for generated data, temporary BigQuery tables and up to $1 usage. #152 must be
+reconciled with current main, tested twice for batch_job and storage_write_api,
+and verified for rows/layout after each overwrite before inclusion and release.
+Current main still has #134's default partitioned-overwrite failure. Do not publish
+this candidate with that known regression. Rebuild artifacts after the fix lands.
 
 ## Merged changes to include in release notes
 
