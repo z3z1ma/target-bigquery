@@ -60,6 +60,8 @@ class PendingAppend(NamedTuple):
     future: writer.AppendRowsFuture
     stream: str
     timeout: float
+    offset: int | None
+    row_count: int
 
 
 def _completion_timeout(value: Any) -> float:
@@ -263,14 +265,18 @@ class StorageWriteBatchWorker(BaseWorker):
         """Send a job to the storage write API and return the stream path."""
         write_stream, _, dispatch = self._get_stream_components_for_job(client, job)
         request = self._generate_request_for_job(job, write_stream)
+        offset = None if write_stream.endswith("_default") else self.offsets[job.parent]
+        row_count = len(job.data.serialized_rows)
+        identity = f"stream={write_stream}, offset={offset}, row_count={row_count}"
+        self.logger.info("Submitting Storage Write append (%s).", identity)
         try:
             future = dispatch(request)
         except Exception as exc:
             raise AppendDispatchError(
-                f"Storage Write dispatch failed for stream={write_stream}. "
+                f"Storage Write dispatch failed for {identity}. "
                 f"Remote completion may be unknown; reconcile before replay. {exc}"
             ) from exc
-        self.awaiting.append(PendingAppend(future, write_stream, job.timeout))
+        self.awaiting.append(PendingAppend(future, write_stream, job.timeout, offset, row_count))
         return write_stream
 
     def _get_stream_components_for_job(
@@ -349,9 +355,11 @@ class StorageWriteBatchWorker(BaseWorker):
             try:
                 response = pending.future.result(timeout=pending.timeout)
                 self._raise_for_append_response(response)
+                self._validate_append_identity(pending, response)
             except Exception as exc:
                 diagnostic = (
-                    f"Storage Write append failed for stream={pending.stream}. "
+                    f"Storage Write append failed for stream={pending.stream}, "
+                    f"offset={pending.offset}, row_count={pending.row_count}. "
                     "Remote completion may be unknown; reconcile before replay.\n"
                     + self.serialize_exception(exc)
                 )
@@ -359,6 +367,27 @@ class StorageWriteBatchWorker(BaseWorker):
             finally:
                 # This counts completed local work, not durable delivery.
                 self.job_notifier.send(True)
+
+    @staticmethod
+    def _validate_append_identity(
+        pending: PendingAppend, response: types.AppendRowsResponse | None
+    ) -> None:
+        if (
+            response is not None
+            and response.write_stream
+            and response.write_stream != pending.stream
+        ):
+            raise RuntimeError(
+                f"Storage Write response stream mismatch: expected {pending.stream}, "
+                f"received {response.write_stream}"
+            )
+        if pending.offset is not None:
+            actual = response.append_result.offset if response is not None else None
+            if actual != pending.offset:
+                raise RuntimeError(
+                    f"Storage Write response offset mismatch: expected {pending.offset}, "
+                    f"received {actual}"
+                )
 
     @staticmethod
     def _raise_for_append_response(response: types.AppendRowsResponse | None) -> None:

@@ -588,7 +588,8 @@ def test_wait_reports_success_and_serializes_future_errors():
     worker = object.__new__(storage_write.StorageWriteBatchWorker)
     exc = RuntimeError("append failed")
     worker.awaiting = [
-        storage_write.PendingAppend(f, "stream-a", 7) for f in [FakeFuture(), FakeFuture(exc)]
+        storage_write.PendingAppend(f, "stream-a", 7, None, 1)
+        for f in [FakeFuture(), FakeFuture(exc)]
     ]
     worker.error_notifier = FakeNotifier()
     worker.job_notifier = FakeNotifier()
@@ -606,7 +607,9 @@ def test_wait_reports_success_and_serializes_future_errors():
 def test_wait_reports_append_response_errors():
     worker = object.__new__(storage_write.StorageWriteBatchWorker)
     response = types.AppendRowsResponse(error={"code": 3, "message": "nested row rejected"})
-    worker.awaiting = [storage_write.PendingAppend(FakeFuture(response=response), "stream-a", 7)]
+    worker.awaiting = [
+        storage_write.PendingAppend(FakeFuture(response=response), "stream-a", 7, None, 1)
+    ]
     worker.error_notifier = FakeNotifier()
     worker.job_notifier = FakeNotifier()
     worker.ext_id = "worker-a"

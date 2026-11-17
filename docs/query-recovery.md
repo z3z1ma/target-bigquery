@@ -111,3 +111,25 @@ no payload has been sent. Some dispatch failures that previously recovered now
 require reconciliation. The SDK's internal connection management is unchanged.
 A future design may recover pending writes on the same stream and offset, but the
 target does not claim that guarantee across worker retries or fresh streams.
+
+
+## Pending append acknowledgement identity
+
+Each dispatch now logs its stream, requested offset (or `None` for the default
+stream), and row count before sending. Keep these INFO logs when investigating
+uncertain writes. The same captured identity accompanies completion errors, even
+after later batches have advanced the worker's offset counter. Payloads are not
+included in these identity logs; the identity is not a durable payload journal.
+
+A successful pending-stream response must contain the requested append offset.
+Zero is a valid offset. A missing or different offset, or a different returned
+stream when supplied, triggers the existing failure/state gate. Default-stream
+responses do not require an offset. Server errors are checked first;
+`ALREADY_EXISTS` and `OUT_OF_RANGE` still stop the target because it has not
+established an identical-payload replay protocol. An offset alone cannot establish
+which payload occupied it. No automatic replay or remote rollback is introduced.
+
+This validates the [documented append response contract](https://docs.cloud.google.com/bigquery/docs/reference/storage/rpc/google.cloud.bigquery.storage.v1#appendrowsresponse).
+It is an invariant check and recovery prerequisite, not a claim that the service
+has returned incorrect offsets in a live run. Automatic recovery remains gated on
+retained payload identity, stream ownership, and ordering across in-flight writes.
