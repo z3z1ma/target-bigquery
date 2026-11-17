@@ -49,3 +49,20 @@ new live-cloud validation.
 
 References: [Client.query](https://docs.cloud.google.com/python/docs/reference/bigquery/latest/google.cloud.bigquery.client.Client),
 [QueryJob](https://docs.cloud.google.com/python/docs/reference/bigquery/latest/google.cloud.bigquery.job.QueryJob).
+
+
+## Batch file loads
+
+Batch loads assign a UUID before uploading and retain it through submission
+retries, including process workers. Logs identify the job and destination; use
+the destination dataset location when reconciling. A conflict or error after the
+client returns a load job stops the worker without acknowledging the batch.
+With the default `fail_fast: true`, the target withholds STATE and publication.
+Do not disable fail-fast when durable checkpoints are required.
+
+`timeout` (default 600 seconds) applies separately to submission and result waits
+and must be positive and finite. Submission retries reuse the same ID; result
+failures do not re-upload. Timeouts do not cancel server jobs. Reconcile the remote
+outcome before restarting: a fresh run creates fresh IDs and replayed append rows
+can still duplicate. These guarantees cover worker retries, not end-to-end
+exactly-once delivery. Validation uses simulated servers without cloud writes.
