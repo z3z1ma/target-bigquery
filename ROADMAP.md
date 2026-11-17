@@ -447,14 +447,23 @@ Next: audit Storage Write retry/stream lifecycle against ambiguous completion;
 keep new write modes and metadata-preserving overwrite gated on scoped evidence.
 
 
-### Next — Storage Write completion deadlines
+### In progress — Storage Write completion deadlines (#173)
 
-Code inspection after #172 found `StorageWriteBatchWorker.wait` calls append
-future `.result()` without a timeout. Pending-stream finalize and batch commit
-also receive no configured timeout. Investigate the locked client's actual
-retry/deadline semantics before changing them. Reproduce a non-completing append
-with an offline future, then require a bounded wait and diagnostic stream identity,
-with no STATE or MERGE/publication after failure. Cover both default and pending
-streams and explicit server rejection. Do not recycle ambiguous append operations
-onto a fresh stream or claim per-stream offsets provide end-to-end exactly-once.
-This is an upcoming implementation item, not a completed guarantee.
+The configured timeout now travels with each queued job through serialization to
+append future waits. Pending finalize/commit use the same timeout and `retry=None`
+to avoid the locked client's independent 600-second retry window. Errors retain
+stream diagnostics, pending stream identities and default fail-fast STATE gates.
+No append retry/reconnection changes or end-to-end exactly-once guarantees.
+
+Seventeen regression cases failed against `6839381` (old main), covering timeout
+wiring, validation and finalize/commit bounds. New tests also exercise a real
+unfinished installed-client future, successful/rejected append responses, default
+stream exclusion, checkpoint/EOF failure and process serialization. Per-operation
+limits, total-drain limitations, and transient-error recovery tradeoffs are in
+`docs/query-recovery.md`. No cloud operations. Independent review and exact-head
+Python 3.10–3.12 CI required before integration.
+
+Next priority: isolate ambiguous synchronous append dispatch/reconnect failures
+with an offline accepted-but-response-lost server model. Distinguish safe retries
+on the same pending stream and offset from default-stream replay and fresh-stream
+creation; do not change retry policy without reproductions and compatibility tests.

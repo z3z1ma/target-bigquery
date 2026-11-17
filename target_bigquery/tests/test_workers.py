@@ -92,12 +92,15 @@ class FakeStorageCommitter:
         self.finalized: list[str] = []
         self.committed: list[list[str]] = []
 
-    def finalize_write_stream(self, name: str) -> None:
+    def finalize_write_stream(self, name: str, *, timeout, retry) -> None:
         self.finalized.append(name)
 
     def batch_commit_write_streams(
         self,
         request: types.BatchCommitWriteStreamsRequest,
+        *,
+        timeout,
+        retry,
     ) -> SimpleNamespace:
         self.committed.append(list(request.write_streams))
         return SimpleNamespace(commit_time="now", stream_errors=[])
@@ -138,7 +141,7 @@ class FakeFuture:
         self.response = response
         self.results = 0
 
-    def result(self) -> types.AppendRowsResponse | None:
+    def result(self, *, timeout) -> types.AppendRowsResponse | None:
         self.results += 1
         if self.exc is not None:
             raise self.exc
@@ -584,7 +587,9 @@ def test_record_dispatch_success_advances_offsets_and_applies_backpressure():
 def test_wait_reports_success_and_serializes_future_errors():
     worker = object.__new__(storage_write.StorageWriteBatchWorker)
     exc = RuntimeError("append failed")
-    worker.awaiting = [FakeFuture(), FakeFuture(exc)]
+    worker.awaiting = [
+        storage_write.PendingAppend(f, "stream-a", 7) for f in [FakeFuture(), FakeFuture(exc)]
+    ]
     worker.error_notifier = FakeNotifier()
     worker.job_notifier = FakeNotifier()
     worker.ext_id = "worker-a"
@@ -601,7 +606,7 @@ def test_wait_reports_success_and_serializes_future_errors():
 def test_wait_reports_append_response_errors():
     worker = object.__new__(storage_write.StorageWriteBatchWorker)
     response = types.AppendRowsResponse(error={"code": 3, "message": "nested row rejected"})
-    worker.awaiting = [FakeFuture(response=response)]
+    worker.awaiting = [storage_write.PendingAppend(FakeFuture(response=response), "stream-a", 7)]
     worker.error_notifier = FakeNotifier()
     worker.job_notifier = FakeNotifier()
     worker.ext_id = "worker-a"
@@ -651,6 +656,7 @@ def test_close_cached_streams_tolerates_already_closed_stream():
 
 def test_storage_write_commit_streams_tolerates_already_closed_stream(monkeypatch):
     sink = object.__new__(storage_write.BigQueryStorageWriteSink)
+    sink._config = {}
     stream_name = "projects/p/datasets/d/tables/t/streams/s"
     sink.open_streams = set()
     sink.stream_notification = FakeStreamNotification((stream_name, AlreadyClosedStream()))
@@ -674,6 +680,7 @@ def test_storage_write_commit_streams_tolerates_already_closed_stream(monkeypatc
 @pytest.mark.parametrize("endofpipe", [False, True])
 def test_storage_write_commit_failure_retains_streams(monkeypatch, failure, endofpipe):
     sink = object.__new__(storage_write.BigQueryStorageWriteSink)
+    sink._config = {}
     stream_name = "projects/p/datasets/d/tables/t/streams/s"
     stream = AlreadyClosedStream()
     sink.open_streams = set()
@@ -686,7 +693,7 @@ def test_storage_write_commit_failure_retains_streams(monkeypatch, failure, endo
         if failure == "finalize":
             raise RuntimeError("finalize failed")
 
-    def commit(request):
+    def commit(request, *, timeout, retry):
         if failure == "commit":
             raise RuntimeError("commit failed")
         return types.BatchCommitWriteStreamsResponse(

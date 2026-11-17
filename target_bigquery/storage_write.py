@@ -23,6 +23,7 @@ from queue import Empty
 from time import sleep
 from typing import (
     Any,
+    NamedTuple,
     cast,
 )
 
@@ -50,6 +51,23 @@ MAX_IN_FLIGHT = 15
 
 Dispatcher = Callable[[types.AppendRowsRequest], writer.AppendRowsFuture]
 StreamComponents = tuple[str, writer.AppendRowsStream, Dispatcher]
+
+
+class PendingAppend(NamedTuple):
+    future: writer.AppendRowsFuture
+    stream: str
+    timeout: float
+
+
+def _completion_timeout(value: Any) -> float:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+        or value <= 0
+    ):
+        raise ValueError("timeout must be a positive finite number of seconds")
+    return value
 
 
 def get_application_stream(client: BigQueryWriteClient, job: "Job") -> StreamComponents:
@@ -190,7 +208,9 @@ class Job:
         template: types.AppendRowsRequest,
         stream_notifier: Connection,
         data: types.ProtoRows,
+        timeout: float = 600,
     ) -> None:
+        self.timeout = _completion_timeout(timeout)
         self.parent = parent
         self.template = template
         self.stream_notifier = stream_notifier
@@ -204,7 +224,7 @@ class StorageWriteBatchWorker(BaseWorker):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.get_stream_components = get_application_stream
-        self.awaiting: list[writer.AppendRowsFuture] = []
+        self.awaiting: list[PendingAppend] = []
         self.cache: dict[str, StreamComponents] = {}
         self.max_errors_before_recycle = 5
         self.offsets: dict[str, int] = {}
@@ -248,7 +268,7 @@ class StorageWriteBatchWorker(BaseWorker):
         """Send a job to the storage write API and return the stream path."""
         write_stream, _, dispatch = self._get_stream_components_for_job(client, job)
         request = self._generate_request_for_job(job, write_stream)
-        self.awaiting.append(dispatch(request))
+        self.awaiting.append(PendingAppend(dispatch(request), write_stream, job.timeout))
         return write_stream
 
     def _get_stream_components_for_job(
@@ -319,12 +339,19 @@ class StorageWriteBatchWorker(BaseWorker):
     def wait(self, drain: bool = False) -> None:
         """Wait for in-flight requests to complete."""
         while self.awaiting and ((len(self.awaiting) > MAX_IN_FLIGHT // 2) or drain):
+            pending = self.awaiting.pop(0)
             try:
-                response = self.awaiting.pop(0).result()
+                response = pending.future.result(timeout=pending.timeout)
                 self._raise_for_append_response(response)
             except Exception as exc:
-                self.error_notifier.send((exc, self.serialize_exception(exc)))
+                diagnostic = (
+                    f"Storage Write append failed for stream={pending.stream}. "
+                    "Remote completion may be unknown; reconcile before replay.\n"
+                    + self.serialize_exception(exc)
+                )
+                self.error_notifier.send((exc, diagnostic))
             finally:
+                # This counts completed local work, not durable delivery.
                 self.job_notifier.send(True)
 
     @staticmethod
@@ -444,6 +471,7 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
                 template=self.template,
                 data=self.proto_rows,
                 stream_notifier=self.stream_notifier,
+                timeout=self.config.get("timeout", 600),
             )
         )
         self.increment_jobs_enqueued()
@@ -459,16 +487,25 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
             (name, stream) for name, stream in self.open_streams if not name.endswith("_default")
         }
         if self.open_streams:
+            timeout = _completion_timeout(self.config.get("timeout", 600))
             committer = storage_client_factory(self._credentials)
             for name, stream in self.open_streams:
                 with suppress(exceptions.StreamClosedError):
                     stream.close()
-                committer.finalize_write_stream(name=name)
+                self.logger.info("Finalizing Storage Write stream=%s", name)
+                committer.finalize_write_stream(name=name, timeout=timeout, retry=None)
+            self.logger.info(
+                "Committing Storage Write parent=%s streams=%s",
+                self.parent,
+                [name for name, _ in self.open_streams],
+            )
             write = committer.batch_commit_write_streams(
                 types.BatchCommitWriteStreamsRequest(
                     parent=self.parent,
                     write_streams=[name for name, _ in self.open_streams],
-                )
+                ),
+                timeout=timeout,
+                retry=None,
             )
             if write.stream_errors:
                 raise RuntimeError(f"Storage Write batch commit failed: {write.stream_errors}")
