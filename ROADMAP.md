@@ -421,7 +421,7 @@ Validation: 461 passed, 15 cloud skips; Ruff/mypy passed. Independent review
 approved with 33 focused tests passed. #170 merged as `b8ef5d6`; exact-head
 CI44018227854 and merged-main CI44018868355 passed on Python 3.10–3.12.
 
-### In progress — batch append retry identity and bounded waits (#171)
+### Completed — batch append retry identity and bounded waits (#171, #172)
 
 Lost submission/poll responses previously caused three successful appends under
 fresh server IDs in the offline reproduction. Each queued batch now carries one
@@ -433,7 +433,28 @@ exactly-once, cancel remote jobs, or impose a whole-process deadline.
 
 Acceptance covers accepted-but-response-lost submission, polling failure,
 pre-acceptance retry success, configuration wiring, process serialization, and
-real target drain withholding STATE/publication on worker error. Review and
-exact-head matrix CI are required before integration. No cloud operations.
+real target drain withholding STATE/publication on worker error. 474 offline tests
+passed, 15 cloud tests skipped; Ruff/mypy clean. Independent review passed with
+172 focused tests. Tested head `3621719` passed Python 3.10–3.12
+[CI44019395931](https://github.com/z3z1ma/target-bigquery/actions/runs/44019395931).
+Merged as `52a81a1`; merged-main
+[CI44019569618](https://github.com/z3z1ma/target-bigquery/actions/runs/44019569618)
+also passed all three versions. No cloud operations.
+
+Post-merge inventory: zero open PRs; #150 is the sole open issue, blocked on
+PyPI authentication and the existing publication approval-review denial.
 Next: audit Storage Write retry/stream lifecycle against ambiguous completion;
 keep new write modes and metadata-preserving overwrite gated on scoped evidence.
+
+
+### Next — Storage Write completion deadlines
+
+Code inspection after #172 found `StorageWriteBatchWorker.wait` calls append
+future `.result()` without a timeout. Pending-stream finalize and batch commit
+also receive no configured timeout. Investigate the locked client's actual
+retry/deadline semantics before changing them. Reproduce a non-completing append
+with an offline future, then require a bounded wait and diagnostic stream identity,
+with no STATE or MERGE/publication after failure. Cover both default and pending
+streams and explicit server rejection. Do not recycle ambiguous append operations
+onto a fresh stream or claim per-stream offsets provide end-to-end exactly-once.
+This is an upcoming implementation item, not a completed guarantee.
