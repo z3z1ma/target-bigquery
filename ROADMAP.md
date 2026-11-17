@@ -33,12 +33,12 @@ Issues, comments, PR diffs, source and tests were inspected; the table records a
 | [#143](https://github.com/z3z1ma/target-bigquery/issues/143) Storage Write state | Confirmed durability bug. `storage_write.py:pre_state_hook` only commits streams; `core.py:pre_state_hook` performs MERGE. `target.py:drain_all` emits state after the sink hook. | P0, implemented in [#153](https://github.com/z3z1ma/target-bigquery/pull/153), merged. Calling the parent alone is insufficient: MERGE rotates staging, so refresh the Storage Write parent before the next batch. Also reject response-level commit errors before clearing streams. |
 | [#148](https://github.com/z3z1ma/target-bigquery/issues/148) cleanup hang | Confirmed unbounded client waits in `core.py:merge_table/clean_up`; upstream reproduction supports the report. The report uses 0.7.2 but the unbounded calls remain on main. | Done: #157 merged (`9864f87`), including failure tests and diagnostics. |
 | [#141](https://github.com/z3z1ma/target-bigquery/issues/141) JSON | Confirmed compatibility bug, not a configuration misunderstanding. Resolver v2 emits JSON; protobuf expects string; denormalized `process_record` passes dicts to `ParseDict`. | Done: #160 merged (`a12cf40`), retaining #140 contribution and expanded coverage. |
-| [#134](https://github.com/z3z1ma/target-bigquery/issues/134) overwrite layout | Confirmed regression: initial table creation uses partitioning, replacement CTAS omits it. Separately, deliberately changing a pre-existing physical layout requires migration. | P1, blocked only on the separate #152 live gate. |
-| [#150](https://github.com/z3z1ma/target-bigquery/issues/150) release | Valid maintenance request, not a runtime defect. Package version remains 0.7.2 although main includes later correctness changes. | Prepare evidence/changelog after correctness work; release publication requires separate authorization. No release date promised. |
+| [#134](https://github.com/z3z1ma/target-bigquery/issues/134) overwrite layout | Confirmed regression: initial table creation uses partitioning, replacement CTAS omits it. Separately, deliberately changing a pre-existing physical layout requires migration. | Done: #152 merged as e9709ec after live gate and exact-head CI passed. |
+| [#150](https://github.com/z3z1ma/target-bigquery/issues/150) release | Valid maintenance request, not a runtime defect. Package version remains 0.7.2 although main includes later correctness changes. | 0.8.0 prepared in #166; publication authorized after validation. PyPI authentication remains unresolved; keep open until published. |
 | [#149](https://github.com/z3z1ma/target-bigquery/pull/149) `ee32bff2` | Correct direction: submission/result timeout for MERGE/overwrite. Missing timeout-failure/state tests, job-ID diagnostics and config/docs scope. Generated-view query still unbounded. CI run 39289842637 is `action_required`. | Incorporated with original authorship into merged #157; closed. |
 | [#140](https://github.com/z3z1ma/target-bigquery/pull/140) `1841adf9` | Schema-guided recursive serialization appears sound. Existing tests cover objects, repeated JSON, nested JSON and protobuf parsing. Helper mutates its input. CI run 31814907445 failed. | Incorporated with original authorship into merged #160; closed. Separate nested-name/collision work is #159. |
-| [#139](https://github.com/z3z1ma/target-bigquery/pull/139) `b4a5c595` | Valid layout implementation. Validation runs after `create_target` and schema mutation; range partitioning can be mistaken for unpartitioned. Original repeated mock assertion does not execute two cleanup cycles. | Keep open until replacement #152 is validated and merged; preserve contributor attribution. |
-| [#152](https://github.com/z3z1ma/target-bigquery/pull/152) `219efca5` | Follow-up moves compatibility checks before mutations, rejects range partitioning, documents migration and adds two real cleanup calls plus opt-in live tests. | Draft, separate owner. Require two live overwrites for batch_job and Storage Write, verifying rows and layout each time. Offline success does not satisfy this gate. |
+| [#139](https://github.com/z3z1ma/target-bigquery/pull/139) `b4a5c595` | Valid layout implementation. Validation runs after `create_target` and schema mutation; range partitioning can be mistaken for unpartitioned. Original repeated mock assertion does not execute two cleanup cycles. | Closed as incorporated through merged #152; contributor commits retained. |
+| [#152](https://github.com/z3z1ma/target-bigquery/pull/152) `219efca5` | Follow-up moves compatibility checks before mutations, rejects range partitioning, documents migration and adds two real cleanup calls plus opt-in live tests. | Merged as e9709ec after independent review, both live tests, and exact-head CI43993914278. |
 | [#136](https://github.com/z3z1ma/target-bigquery/pull/136) `865a01be` | Pinned checkout patch update; escaping/whitespace fixes. No PR workflow run returned during audit. | Done: incorporated into #158 (`f4f9739`); current-head matrix passed. |
 | [#137](https://github.com/z3z1ma/target-bigquery/pull/137) `d829210c` | Pinned setup-python major update; removed `pip-install` input is unused here. No PR workflow run returned. | Done: incorporated into #158 (`f4f9739`); current-head matrix passed. |
 | [#147](https://github.com/z3z1ma/target-bigquery/pull/147) `2ef432c9` | Pinned setup-uv major update; v9 changes cache pruning default to false. v10 sensitive-event cache rules do not affect current triggers. No PR workflow run returned. | Done: #158 (`f4f9739`) retains `prune-cache: true`; matrix passed. |
@@ -185,14 +185,13 @@ reusing a deleted staging name produced an empty second Storage Write overwrite.
 Distinct staging names passed both transports. Require UUID-bearing templates
 for streaming upsert/overwrite before destination mutation; append paths and
 job-based custom templates retain their behavior. Final UUID-template live validation passed both methods (2 tests); all six tables
-were verified absent. Offline: 421 passed, 15 skipped; Ruff/mypy pass. Exact-head
-CI remains required before merge. See [live evidence](docs/live-overwrite-validation.md).
+were verified absent. Offline: 421 passed, 15 skipped; Ruff/mypy pass. Exact-head CI43993914278 passed; merged as e9709ec. See [live evidence](docs/live-overwrite-validation.md).
 
 Acceptance: existing compatible layout and new destination succeed; incompatible
 partition field/type/expiration, ordered clustering and range partitions fail
 before destination mutation; two overwrite runs each replace rows and retain
 layout. Test batch_job and Storage Write. Reconcile #152 with then-current main
-only through its owner. Migration instructions must cover legacy unpartitioned
+with current main. Migration instructions must cover legacy unpartitioned
 tables and dataset expiration defaults. Close #139 as superseded only after the
 replacement lands.
 
@@ -329,3 +328,11 @@ Sources reviewed 2026-11-16; conclusions are specific to documented behavior.
 - #164 merged after explicit maintainer authorization; #159 implementation is complete.
   #165 adds repeated-view alias consistency, capability documentation and release
   preparation. #139/#152 still await live-test authorization; no release performed.
+
+- 2026-11-17: authorized live overwrite gate passed for both methods. Reused
+  streaming staging names reproduced silent loss; UUID-template containment and
+  38 offline regressions added. Final local suite421 passed/15 skipped. See live
+  evidence and release-readiness docs. Release0.8.0 remains unpublished.
+
+- #152 merged as e9709ec; #134 resolved and #139 closed as incorporated.
+  Remaining inventory: release request #150 and candidate PR#166.
