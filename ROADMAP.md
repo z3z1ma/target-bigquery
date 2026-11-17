@@ -355,3 +355,22 @@ Sources reviewed 2026-11-16; conclusions are specific to documented behavior.
 3. Evaluate metadata preservation for WRITE_TRUNCATE_DATA with a documented
    compatibility matrix before any implementation. Live experiments beyond the
    completed overwrite gate remain separately scoped.
+
+
+### In progress — query outcome reconciliation and restart coverage
+
+Implemented on `fix/recovery-diagnostics`: assign query IDs before submission,
+log them before the RPC and on failure, report actual client/job location, and
+disable automatic failed-query resubmission. Explicit IDs also propagate Conflict
+instead of automatic lookup; transport retries remain. This availability tradeoff
+is documented in [query recovery](docs/query-recovery.md).
+
+The deterministic post-staging harness runs real drain/cleanup paths across lost
+submission/poll responses, partial multi-table publication, remote completion on
+either side of timeout, and full-snapshot restart with fresh staging. A separate
+case proves why unresolved old jobs must finish before replay: a late old overwrite
+can replace a newer snapshot. Installed-client Conflict behavior is tested offline.
+
+Local acceptance:428 passed,15 cloud skips;Ruff/mypy passed. Independent review
+approved with35 focused tests passed. Exact-head CI pending. No new cloud operations or package publication.
+Existing0.8.0 tag/assets remain unchanged. #150 still waits on authentication.

@@ -813,15 +813,26 @@ class BaseBigQuerySink(BatchSink):
         timeout = self.config.get("timeout", 600)
         if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout <= 0:
             raise ValueError("timeout must be a positive integer number of seconds")
+        job_id = f"target_bigquery_{uuid.uuid4().hex}"
+        project = getattr(client, "project", "unavailable")
+        location = getattr(client, "location", None) or "unavailable"
+        self.logger.info(
+            "Submitting BigQuery query (job_id=%s, project=%s, location=%s).",
+            job_id,
+            project,
+            location,
+        )
         job = None
         try:
-            job = client.query(sql, timeout=timeout)
+            # A known ID permits reconciliation even when submission loses its response.
+            job = client.query(sql, job_id=job_id, job_retry=None, timeout=timeout)
             job.result(timeout=timeout)
         except Exception:
             self.logger.error(
-                "BigQuery query failed or wait expired (job_id=%s, location=%s). Remote completion may be unknown; state will not advance.",
-                getattr(job, "job_id", "unavailable"),
-                getattr(job, "location", "unavailable"),
+                "BigQuery query failed or wait expired (job_id=%s, project=%s, location=%s). Remote completion may be unknown; reconcile this job before restarting. State will not advance.",
+                getattr(job, "job_id", job_id),
+                project,
+                getattr(job, "location", None) or location,
             )
             raise
 

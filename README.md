@@ -280,7 +280,10 @@ successful merge into the destination before emitting Singer state. Pending
 streams are finalized and committed first. Commit or merge failures stop the
 checkpoint. After a merge rotates the staging table, subsequent batches use the
 new table. This does not provide end-to-end exactly-once delivery: replay after
-an ambiguous failure still requires stable upsert keys.
+an ambiguous failure still requires stable upsert keys. Query jobs use explicit
+IDs and do not automatically resubmit failed mutations. Reconcile uncertain jobs
+before restarting; see [query recovery](docs/query-recovery.md) for the procedure
+and retry-policy tradeoffs.
 
 When any stream uses overwrite mode, intermediate Singer state is deferred until
 all staged replacements are published at end of input. This applies to the whole
