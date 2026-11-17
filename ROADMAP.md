@@ -447,7 +447,7 @@ Next: audit Storage Write retry/stream lifecycle against ambiguous completion;
 keep new write modes and metadata-preserving overwrite gated on scoped evidence.
 
 
-### In progress — Storage Write completion deadlines (#173)
+### Completed — Storage Write completion deadlines (#173, #174)
 
 The configured timeout now travels with each queued job through serialization to
 append future waits, replacing the locked SDK’s inherited 900-second polling limit. Pending finalize/commit use the same timeout and `retry=None`
@@ -461,7 +461,9 @@ unfinished installed-client future, successful/rejected append responses, defaul
 stream exclusion, checkpoint/EOF failure and process serialization. Per-operation
 limits, total-drain limitations, and transient-error recovery tradeoffs are in
 `docs/query-recovery.md`. No cloud operations. Independent review and exact-head
-Python 3.10–3.12 CI required before integration. Full offline suite: 495 passed,
+Python 3.10–3.12 exact-head CI44020496027 passed at `9b18de7`; #174 merged
+as `d329809` and merged-main CI44021808296 passed all three versions.
+Full offline suite: 495 passed,
 15 cloud skips; Ruff/mypy clean. Initial CI exposed a Python 3.10 test-only
 exception-class mismatch; use concurrent.futures.TimeoutError consistently.
 
@@ -469,3 +471,24 @@ Next priority: isolate ambiguous synchronous append dispatch/reconnect failures
 with an offline accepted-but-response-lost server model. Distinguish safe retries
 on the same pending stream and offset from default-stream replay and fresh-stream
 creation; do not change retry policy without reproductions and compatibility tests.
+
+
+### In progress — ambiguous append dispatch containment (#175)
+
+Real installed SDK connection setup plus simulated transport acceptance reproduces
+lost-response duplication on the default stream. Including the connector's nested
+send/worker retries produces 13 dispatch attempts; pending same-stream offsets
+can deduplicate, but fresh streams lose that identity. Independent reproduction
+confirmed the default-stream risk without mocking SDK send/open methods.
+
+The containment removes send-level retries and marks errors after entering dispatch
+as potentially accepted. Those errors stop the worker without queue replay; stream
+setup failures before dispatch retain bounded retries. Tests use real SDK setup
+with fake transport and deterministic connection-renewal scheduling, model pending
+stream deduplication, and cover checkpoint/EOF failure, both stream types and safe
+setup recovery. Four regression cases fail against `d329809`.
+
+No cloud writes or end-to-end exactly-once claim. Independent review, full suite,
+and current-head matrix CI are required. Next: design explicit pending-stream
+recovery by stream/offset identity, with durable diagnostics and fault-injection
+acceptance criteria before introducing any automatic replay.

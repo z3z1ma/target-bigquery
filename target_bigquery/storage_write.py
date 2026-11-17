@@ -31,7 +31,6 @@ import orjson
 from google.cloud.bigquery import SchemaField
 from google.cloud.bigquery_storage_v1 import BigQueryWriteClient, exceptions, types, writer
 from google.protobuf import json_format, message
-from tenacity import retry, stop_after_attempt, wait_fixed
 
 from target_bigquery.core import (
     BaseBigQuerySink,
@@ -51,6 +50,10 @@ MAX_IN_FLIGHT = 15
 
 Dispatcher = Callable[[types.AppendRowsRequest], writer.AppendRowsFuture]
 StreamComponents = tuple[str, writer.AppendRowsStream, Dispatcher]
+
+
+class AppendDispatchError(RuntimeError):
+    """An append may have reached the server before dispatch raised."""
 
 
 class PendingAppend(NamedTuple):
@@ -79,11 +82,7 @@ def get_application_stream(client: BigQueryWriteClient, job: "Job") -> StreamCom
     append_rows_stream = writer.AppendRowsStream(client, job.template)
     rv = (write_stream.name, append_rows_stream)
     job.stream_notifier.send(rv)
-    return *rv, retry(
-        wait=wait_fixed(2),
-        stop=stop_after_attempt(5),
-        reraise=True,
-    )(append_rows_stream.send)
+    return *rv, append_rows_stream.send
 
 
 def get_default_stream(client: BigQueryWriteClient, job: "Job") -> StreamComponents:
@@ -94,11 +93,7 @@ def get_default_stream(client: BigQueryWriteClient, job: "Job") -> StreamCompone
     append_rows_stream = writer.AppendRowsStream(client, job.template)
     rv = (job.template.write_stream, append_rows_stream)
     job.stream_notifier.send(rv)
-    return *rv, retry(
-        wait=wait_fixed(2),
-        stop=stop_after_attempt(5),
-        reraise=True,
-    )(append_rows_stream.send)
+    return *rv, append_rows_stream.send
 
 
 def generate_request(
@@ -268,7 +263,14 @@ class StorageWriteBatchWorker(BaseWorker):
         """Send a job to the storage write API and return the stream path."""
         write_stream, _, dispatch = self._get_stream_components_for_job(client, job)
         request = self._generate_request_for_job(job, write_stream)
-        self.awaiting.append(PendingAppend(dispatch(request), write_stream, job.timeout))
+        try:
+            future = dispatch(request)
+        except Exception as exc:
+            raise AppendDispatchError(
+                f"Storage Write dispatch failed for stream={write_stream}. "
+                f"Remote completion may be unknown; reconcile before replay. {exc}"
+            ) from exc
+        self.awaiting.append(PendingAppend(future, write_stream, job.timeout))
         return write_stream
 
     def _get_stream_components_for_job(
@@ -289,7 +291,11 @@ class StorageWriteBatchWorker(BaseWorker):
         return generate_request(job.data, offset=self.offsets[job.parent])
 
     def _handle_dispatch_error(self, job: Job, exc: Exception) -> None:
-        """Handle a failed append dispatch by retrying or recycling the stream."""
+        """Retry setup failures; stop after any potentially accepted dispatch."""
+        if isinstance(exc, AppendDispatchError):
+            self.error_notifier.send((exc, self.serialize_exception(exc)))
+            self.close_cached_streams()
+            raise exc
         job.attempts += 1
         self.logger.info(f"job.attempts : {job.attempts}")
         self.max_errors_before_recycle -= 1

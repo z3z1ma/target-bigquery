@@ -74,7 +74,7 @@ exactly-once delivery. Validation uses simulated servers without cloud writes.
 finalize/commit RPC. It must be positive and finite. Finalize/commit use no automatic
 RPC retry, so transient errors now require operator reconciliation and replay.
 The client's former retry window was independent of the configured timeout.
-Append dispatch/reconnection behavior is unchanged; this change adds no retries.
+Append completion failures add no retries. See the dispatch policy below.
 
 Append errors identify the stream; finalize/commit log stream identities before
 calling the server. Failed commit attempts retain the pending stream list. With
@@ -94,3 +94,20 @@ The locked client's unfinished `AppendRowsFuture`, completed/rejected responses,
 and real target drain paths are tested offline. No live cloud validation is
 claimed. See the official [Storage Write client reference](https://docs.cloud.google.com/python/docs/reference/bigquerystorage/latest/google.cloud.bigquery_storage_v1.client.BigQueryWriteClient)
 for pending/default visibility and per-stream offsets.
+
+
+## Ambiguous Storage Write dispatch
+
+An exception from `AppendRowsStream.send` can occur after the server accepts its
+initial request. The target therefore stops that worker, logs the stream identity,
+and does not automatically retry or requeue that payload. This applies to both
+default and pending streams. Already submitted work can still finish remotely;
+closing client streams is not rollback. Default fail-fast handling prevents hooks
+and STATE after this error.
+
+Stream setup failures before dispatch retain the existing bounded queue retries.
+This distinction avoids replaying an uncertain append while allowing recovery when
+no payload has been sent. Some dispatch failures that previously recovered now
+require reconciliation. The SDK's internal connection management is unchanged.
+A future design may recover pending writes on the same stream and offset, but the
+target does not claim that guarantee across worker retries or fresh streams.
