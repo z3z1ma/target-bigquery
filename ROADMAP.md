@@ -1,6 +1,6 @@
 # Maintained roadmap
 
-Updated: 2026-11-16. Owner: repository maintainer (execution delegated to Codex).
+Updated: 2026-11-17. Owner: repository maintainer (execution delegated to Codex).
 Baseline: `c0acf83` on main. This replaces the July zero-open snapshot as the
 current work queue; the historical `.10x` records remain evidence for that date.
 
@@ -16,9 +16,10 @@ adapting their work. Refresh main and rerun affected checks before merging.
 
 Priority follows data durability, blocked ingestion, operability, then features.
 Offline failures must be reproducible without credentials. Live verification is
-separate evidence and requires authorization. This maintenance pass authorizes
-no BigQuery queries, writes, setup, spending, or release publication. The separate
-live-overwrite task owns #139/#152; their branches remain untouched here.
+separate evidence. The owner authorized two generated-data overwrite tests in the
+existing CI dataset, cleanup of their temporary tables, and up to $1 usage.
+Version 0.8.0 publication to PyPI and GitHub is authorized after validation.
+Other cloud experiments remain outside this scope.
 
 ## Current inventory and disposition
 
@@ -177,7 +178,15 @@ JSON acceptance. Full offline suite and current-head matrix CI before merge.
 Status: #152 reconciled with main9e7a99e locally; 383 tests passed, 15 skipped,
 Ruff/mypy passed. Layout-preserving overwrite DDL now uses the bounded query
 helper. Current checkpoint and nested-schema guarantees are retained.
-Independent review/current-head CI precede the still-pending live gate.
+Independent review approved the reconciliation. Exact-head CI aabc5de passed
+(run43982654420). Live validation exposed two fixture/configuration hazards:
+monthly partitions require retention beyond the current month boundary, and
+reusing a deleted staging name produced an empty second Storage Write overwrite.
+Distinct staging names passed both transports. Require UUID-bearing templates
+for streaming upsert/overwrite before destination mutation; append paths and
+job-based custom templates retain their behavior. Final UUID-template live validation passed both methods (2 tests); all six tables
+were verified absent. Offline: 421 passed, 15 skipped; Ruff/mypy pass. Exact-head
+CI remains required before merge. See [live evidence](docs/live-overwrite-validation.md).
 
 Acceptance: existing compatible layout and new destination succeed; incompatible
 partition field/type/expiration, ordered clustering and range partitions fail
@@ -203,8 +212,7 @@ Keep the Python 3.10–3.12 offline matrix and locked installs green. Add a test
 method × fixed/denormalized × append/upsert/overwrite × JSON support matrix,
 including schema-change limits, replay behavior and staging cleanup. Record
 which features are cloud-verified versus offline-only. Prepare #150 release notes
-from merged commits only, with migration and known-limit sections. Publishing
-is outside this roadmap execution's authorization.
+from merged commits only, with migration and known-limit sections. Publishing is authorized after required validation succeeds.
 
 ### 8. P3 — scoped replacement design spike
 

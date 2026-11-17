@@ -36,6 +36,7 @@ from io import BytesIO
 from multiprocessing import Process, Queue
 from multiprocessing.connection import Connection
 from pathlib import Path
+from string import Formatter
 from subprocess import PIPE, Popen
 from tempfile import TemporaryFile
 from textwrap import dedent, indent
@@ -495,6 +496,9 @@ class BaseBigQuerySink(BatchSink):
             with suppress(NotFound):
                 self._assert_overwrite_layout_compatible()
 
+        if self.merge_target is not None or self.overwrite_target is not None:
+            self._validate_staging_template()
+
         created = self.create_target(key_properties=self.key_properties)
         if not created:
             if self.overwrite_target is not None:
@@ -636,6 +640,24 @@ class BaseBigQuerySink(BatchSink):
                 "does not match the configured layout. This target requires an explicit table "
                 "migration for physical layout changes. Migrate (or intentionally drop and "
                 "recreate) the destination table, then rerun the pipeline."
+            )
+
+    def _validate_staging_template(self) -> None:
+        """Prevent streaming to a deleted and immediately recreated staging table."""
+        if self.config.get("method", "storage_write_api") not in {
+            "storage_write_api", "streaming_insert"
+        }:
+            return
+        template = self.config.get(
+            "temporary_table_name_template", "{table_name}__{timestamp}__{uuid}"
+        )
+        if not any(
+            field == "uuid" and not spec and conversion is None
+            for _, field, spec, conversion in Formatter().parse(template)
+        ):
+            raise ValueError(
+                "Streaming upsert/overwrite temporary_table_name_template must include "
+                "an unmodified {uuid} placeholder to prevent staging-table name reuse."
             )
 
     def _temporary_table_name(self) -> str:

@@ -201,7 +201,7 @@ def test_two_overwrites_preserve_monthly_layout_and_replace_rows(method, bigquer
     import json
 
     table_name = f"overwrite_layout_{uuid.uuid4().hex}"
-    staging_name = f"{table_name}__stage"
+    staging_names = []
     config = {
         **bigquery_config,
         "method": method,
@@ -209,15 +209,15 @@ def test_two_overwrites_preserve_monthly_layout_and_replace_rows(method, bigquer
         "overwrite": True,
         "generate_view": False,
         "partition_granularity": "month",
-        "partition_expiration_days": 7,
+        # Monthly expiration starts at the month boundary, not the insertion time.
+        "partition_expiration_days": 40,
         "clustering_fields": ["_sdc_batched_at"],
-        "temporary_table_name_template": staging_name,
+        "temporary_table_name_template": f"{table_name}__stage_{{uuid}}",
     }
     client = bigquery_client_factory(
         BigQueryCredentials(None, config["credentials_json"], config["project"])
     )
     destination = f"{config['project']}.{config['dataset']}.{table_name}"
-    staging = f"{config['project']}.{config['dataset']}.{staging_name}"
     try:
         for ids in ([1, 2], [3]):
             messages = [
@@ -233,15 +233,22 @@ def test_two_overwrites_preserve_monthly_layout_and_replace_rows(method, bigquer
             )
             messages.append({"type": "STATE", "value": {"run": ids[-1]}})
             target = TargetBigQuery(config=config)
+            sink = target.get_sink(
+                table_name, schema=messages[0]["schema"], key_properties=[]
+            )
+            staging_names.append(sink.table.name)
             target.listen(
                 io.StringIO("\n".join(json.dumps(message) for message in messages) + "\n")
             )
             table = client.get_table(destination)
             assert table.time_partitioning.type_ == "MONTH"
             assert table.time_partitioning.field == "_sdc_batched_at"
-            assert table.time_partitioning.expiration_ms == 7 * 86400000
+            assert table.time_partitioning.expiration_ms == 40 * 86400000
             assert table.clustering_fields == ["_sdc_batched_at"]
             assert sorted(row["id"] for row in client.list_rows(table)) == ids
     finally:
-        client.delete_table(staging, not_found_ok=True)
+        for staging_name in staging_names:
+            client.delete_table(
+                f"{config['project']}.{config['dataset']}.{staging_name}", not_found_ok=True
+            )
         client.delete_table(destination, not_found_ok=True)
