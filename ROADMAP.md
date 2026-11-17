@@ -403,7 +403,7 @@ Merged-main Python3.10–3.12 CI[44017467345](https://github.com/z3z1ma/target-b
 passed at `11da304`. No open PRs; #150 remains the publishing-authentication issue.
 
 
-### In progress — P0 GCS checkpoint durability (#169)
+### Completed — P0 GCS checkpoint durability (#169, #170)
 
 Offline reproduction against18dcbee showed append STATE without a BigQuery load,
 and upsert MERGE/rotation before loading uploaded GCS objects. GCS previously
@@ -417,10 +417,23 @@ Mixed-stream and load/merge failure tests protect global STATE. GCS objects rema
 subject to the user's retention policy; more frequent load jobs may affect quotas
 and latency. No live cloud validation or expenditure is included.
 
-Next confirmed reliability gap: `batch_job` still waits on LoadJob.result without
-a timeout and retries append loads under fresh server-generated IDs. Investigate
-bounded waits and stable job identity before enabling further retry behavior;
-reproduce a lost response after a completed append and prove no duplicate retry.
+Validation: 461 passed, 15 cloud skips; Ruff/mypy passed. Independent review
+approved with 33 focused tests passed. #170 merged as `b8ef5d6`; exact-head
+CI44018227854 and merged-main CI44018868355 passed on Python 3.10–3.12.
 
-Validation:461 passed,15 cloud skips;Ruff/mypy passed. Independent review
-approved with33 focused tests passed. Exact-head CI required before merging.
+### In progress — batch append retry identity and bounded waits (#171)
+
+Lost submission/poll responses previously caused three successful appends under
+fresh server IDs in the offline reproduction. Each queued batch now carries one
+UUID through submission retries and process serialization. Conflict or failure
+after a returned job stops without acknowledgement; operators reconcile the
+logged ID before replay. The configured timeout reaches submission and result
+waits; invalid values cannot enqueue a batch. This does not make source replay
+exactly-once, cancel remote jobs, or impose a whole-process deadline.
+
+Acceptance covers accepted-but-response-lost submission, polling failure,
+pre-acceptance retry success, configuration wiring, process serialization, and
+real target drain withholding STATE/publication on worker error. Review and
+exact-head matrix CI are required before integration. No cloud operations.
+Next: audit Storage Write retry/stream lifecycle against ambiguous completion;
+keep new write modes and metadata-preserving overwrite gated on scoped evidence.

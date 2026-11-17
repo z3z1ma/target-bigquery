@@ -559,6 +559,7 @@ def test_matches_table_respects_disabled_clustering():
 
 def test_batch_job_process_batch_enqueues_compressed_json_job():
     sink, queue, increments = prepare_buffered_sink(BigQueryBatchJobSink)
+    sink._config = {}
 
     sink.process_record({"id": Decimal("1"), "amount": Decimal("12.5")}, {})
     sink.process_batch({})

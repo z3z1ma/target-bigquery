@@ -167,12 +167,14 @@ class FakeLoadClient:
         table: bigquery.TableReference,
         *,
         num_retries: int,
+        job_id: str,
         timeout: float | None,
         job_config: bigquery.LoadJobConfig,
     ) -> SimpleNamespace:
         self.calls.append(
             {
                 "data": file_obj.read(),
+                "job_id": job_id,
                 "table": table,
                 "num_retries": num_retries,
                 "timeout": timeout,
@@ -181,7 +183,7 @@ class FakeLoadClient:
         )
         if self.failures:
             raise self.failures.pop(0)
-        return SimpleNamespace(result=lambda: None)
+        return SimpleNamespace(result=lambda *, timeout: None)
 
 
 class FakeStreamingClient:

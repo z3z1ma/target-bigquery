@@ -10,7 +10,10 @@
 # substantial portions of the Software.
 """BigQuery Batch Job Sink."""
 
+import logging
+import math
 import os
+import uuid
 from io import BytesIO
 from mmap import mmap
 from multiprocessing import Process
@@ -19,6 +22,7 @@ from queue import Empty
 from typing import Any, cast
 
 import orjson
+from google.api_core.exceptions import Conflict
 from google.cloud import bigquery
 
 from target_bigquery.core import (
@@ -38,8 +42,16 @@ class Job:
         data: memoryview | bytes | mmap,
         table: bigquery.TableReference,
         config: dict[str, Any],
-        timeout: float | None = 600.0,
+        timeout: float = 600.0,
     ) -> None:
+        if (
+            isinstance(timeout, bool)
+            or not isinstance(timeout, (int, float))
+            or not math.isfinite(timeout)
+            or timeout <= 0
+        ):
+            raise ValueError("timeout must be a positive finite number of seconds")
+        self.job_id = f"target_bigquery_load_{uuid.uuid4().hex}"
         self.data = data
         self.table = table
         self.config = config
@@ -60,23 +72,34 @@ class BatchJobWorker(BaseWorker):
                 break
             if job is None:
                 break
+            submitted = False
+            logging.getLogger(__name__).info(
+                "Submitting batch load (job_id=%s, destination=%s).", job.job_id, job.table
+            )
             try:
-                client.load_table_from_file(
+                load_job = client.load_table_from_file(
                     BytesIO(job.data),
                     job.table,
+                    job_id=job.job_id,
                     num_retries=3,
                     timeout=job.timeout,
                     job_config=bigquery.LoadJobConfig(**job.config),
-                ).result()
+                )
+                submitted = True
+                load_job.result(timeout=job.timeout)
             except Exception as exc:
                 job.attempt += 1
-                if job.attempt > 3:
-                    # TODO: add a metric for this + a DLQ & wrap exception type
-                    self.error_notifier.send((exc, self.serialize_exception(exc)))
+                diagnostic = (
+                    f"Load job_id={job.job_id}, destination={job.table}. "
+                    "Remote completion may be unknown; reconcile before restarting.\n"
+                    + self.serialize_exception(exc)
+                )
+                if submitted or isinstance(exc, Conflict) or job.attempt > 3:
+                    self.error_notifier.send((exc, diagnostic))
                     raise
                 else:
                     self.queue.put(job)
-                    self.log_notifier.send(self.serialize_exception(exc))
+                    self.log_notifier.send(diagnostic)
             else:
                 self.job_notifier.send(True)
                 self.log_notifier.send(
@@ -134,6 +157,7 @@ class BigQueryBatchJobSink(BaseBigQuerySink):
                 ),
                 table=self.table.as_ref(),
                 config=self.job_config,
+                timeout=self.config.get("timeout", 600),
             ),
         )
         self.increment_jobs_enqueued()
