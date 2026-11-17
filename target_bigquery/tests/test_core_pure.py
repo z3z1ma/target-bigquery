@@ -980,3 +980,129 @@ def test_overwrite_constructor_accepts_matching_or_new_destination(monkeypatch, 
     create.assert_called_once()
     assert update.call_count == (0 if missing else 1)
     stage.assert_called_once()
+
+
+@pytest.fixture
+def staging_template_constructor(monkeypatch):
+    """Exercise real staging selection with cloud operations replaced by sentinels."""
+    from unittest.mock import Mock
+
+    from target_bigquery.target import TargetBigQuery
+
+    client = SimpleNamespace(get_table=Mock(side_effect=NotFound("missing")))
+    monkeypatch.setattr("target_bigquery.core.bigquery_client_factory", lambda _: client)
+    create = Mock(return_value=True)
+    update = Mock()
+    stage = Mock()
+    monkeypatch.setattr(BaseBigQuerySink, "create_target", create)
+    monkeypatch.setattr(BaseBigQuerySink, "_create_overwrite_table", stage)
+
+    def construct(method, strategy, template=None):
+        config = {
+            "project": "project",
+            "dataset": "analytics",
+            "credentials_json": "{}",
+            "method": method,
+            "denormalized": True,
+            "upsert": strategy == "upsert",
+            "overwrite": strategy == "overwrite",
+        }
+        if template is not None:
+            config["temporary_table_name_template"] = template
+        target = TargetBigQuery(config=config)
+        sink_class = target.get_sink_class()
+        monkeypatch.setattr(sink_class, "update_schema", update)
+        sink = object.__new__(sink_class)
+        BaseBigQuerySink.__init__(
+            sink,
+            target,
+            "orders",
+            {"type": "object", "properties": {"id": {"type": "integer"}}},
+            ["id"],
+        )
+        return sink
+
+    return construct, create, update, stage
+
+
+@pytest.mark.parametrize("method", ["storage_write_api", "streaming_insert"])
+@pytest.mark.parametrize("strategy", ["upsert", "overwrite"])
+@pytest.mark.parametrize(
+    "template",
+    [
+        "static_stage",
+        "{table_name}__{timestamp}",
+        "stage_{{uuid}}",
+        "stage_{uuid:.8}",
+        "stage_{uuid[0]}",
+        "stage_{uuid!s}",
+    ],
+)
+def test_streaming_staging_rejects_reusable_templates_before_mutation(
+    staging_template_constructor, method, strategy, template
+):
+    construct, create, update, stage = staging_template_constructor
+    with pytest.raises(ValueError, match=r"unmodified \{uuid\}"):
+        construct(method, strategy, template)
+    create.assert_not_called()
+    update.assert_not_called()
+    stage.assert_not_called()
+
+
+@pytest.mark.parametrize("method", ["storage_write_api", "streaming_insert"])
+def test_streaming_append_does_not_validate_unused_staging_template(
+    staging_template_constructor, method
+):
+    construct, create, _, stage = staging_template_constructor
+    sink = construct(method, "append", "static_stage")
+    assert sink.merge_target is sink.overwrite_target is None
+    create.assert_called_once()
+    stage.assert_not_called()
+
+
+@pytest.mark.parametrize("method", ["storage_write_api", "streaming_insert"])
+@pytest.mark.parametrize("strategy", ["upsert", "overwrite"])
+@pytest.mark.parametrize("template", [None, "custom_{table_name}_{uuid}"])
+def test_streaming_staging_accepts_default_and_full_uuid_templates(
+    staging_template_constructor, method, strategy, template
+):
+    construct, create, _, stage = staging_template_constructor
+    sink = construct(method, strategy, template)
+    assert (sink.merge_target is not None) == (strategy == "upsert")
+    assert (sink.overwrite_target is not None) == (strategy == "overwrite")
+    create.assert_called_once()
+    stage.assert_called_once()
+
+
+@pytest.mark.parametrize("method", ["batch_job", "gcs_stage"])
+def test_load_job_staging_keeps_custom_template_compatibility(staging_template_constructor, method):
+    construct, create, _, stage = staging_template_constructor
+    construct(method, "overwrite", "static_stage")
+    create.assert_called_once()
+    stage.assert_called_once()
+
+
+@pytest.mark.parametrize("method", ["storage_write_api", "streaming_insert"])
+def test_default_staging_rotations_generate_new_full_uuid_names(monkeypatch, method):
+    sink = make_sink({"method": method})
+    sink.table_opts = {
+        "project": "project",
+        "dataset": "analytics",
+        "jsonschema": {"type": "object", "properties": {}},
+        "ingestion_strategy": IngestionStrategy.FIXED,
+    }
+    sink._get_bigquery_client = lambda: None
+    identifiers = [character * 32 for character in "abc"]
+    generated = iter(identifiers)
+    monkeypatch.setattr(core_uuid, "uuid4", lambda: SimpleNamespace(hex=next(generated)))
+    monkeypatch.setattr(core_time, "strftime", lambda _: "20261117000000")
+    monkeypatch.setattr(core_time, "sleep", lambda _: None)
+    created = []
+    monkeypatch.setattr(
+        BigQueryTable, "create_table", lambda instance, *args, **kwargs: created.append(instance.name)
+    )
+    sink._validate_staging_template()
+    for _ in identifiers:
+        sink._create_overwrite_table()
+    assert created == [f"orders__20261117000000__{identifier}" for identifier in identifiers]
+    assert len(set(created)) == 3
