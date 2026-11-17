@@ -21,7 +21,9 @@ class Client:
     def get_table(self, ref):
         return bigquery.Table(ref, schema=[bigquery.SchemaField("id", "INTEGER")])
 
-    def query(self, sql, *, timeout):
+    def query(self, sql, *, timeout, job_id, job_retry):
+        self.job_id = job_id
+        assert job_retry is None
         self.calls.append(("submit", timeout))
         if self.failure == "submit":
             raise TimeoutError("submit timeout")
@@ -85,7 +87,9 @@ def test_query_failure_does_not_emit_state_or_clear_staging(
     with pytest.raises(TimeoutError, match=failure):
         target.drain_all(is_endofpipe=endofpipe)
     assert (sink.table, sink.merge_target, sink.overwrite_target) == (staging, merge, overwrite)
-    assert ("job-123" if failure == "result" else "unavailable") in caplog.text
+    assert client.job_id.startswith("target_bigquery_")
+    assert client.job_id in caplog.text
+    assert "reconcile this job before restarting" in caplog.text
 
 
 @pytest.mark.parametrize("timeout", [None, True, 0, -1, float("inf"), float("nan"), 1.5, "600"])

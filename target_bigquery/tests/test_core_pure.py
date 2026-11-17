@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gzip
+import logging
 from decimal import Decimal
 from multiprocessing import Process
 from types import SimpleNamespace
@@ -72,7 +73,9 @@ class FakeBigQueryClient:
         self.updated.append((table, fields))
         return table
 
-    def query(self, sql: str, *, timeout: int | None = None) -> FakeBigQueryJob:
+    def query(
+        self, sql: str, *, timeout: int | None = None, job_id: str, job_retry: None
+    ) -> FakeBigQueryJob:
         self.queries.append(sql)
         self.query_timeouts.append(timeout)
         job = FakeBigQueryJob()
@@ -154,6 +157,7 @@ class FakeLogger:
 def make_sink(config: dict[str, Any], *, stream_name: str = "orders") -> BigQueryBatchJobSink:
     sink = object.__new__(BigQueryBatchJobSink)
     sink._config = config
+    sink.logger = logging.getLogger("sink-test")
     sink.stream_name = stream_name
     return sink
 
@@ -193,6 +197,7 @@ def make_merge_sink(
     source_properties: dict[str, dict[str, Any]],
 ) -> BigQueryBatchJobDenormalizedSink:
     sink = object.__new__(BigQueryBatchJobDenormalizedSink)
+    sink.logger = logging.getLogger("sink-test")
     sink._config = {"dedupe_before_upsert": False}
     sink.stream_name = "orders"
     sink._key_properties = ["id"]
