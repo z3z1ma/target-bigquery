@@ -348,18 +348,17 @@ Sources reviewed 2026-11-16; conclusions are specific to documented behavior.
 1. Complete PyPI publication of the already validated0.8.0 artifacts once an
    authorized upload credential or trusted publisher is available; verify hashes
    and installation from PyPI, then close#150. Do not rebuild from later main.
-2. Add a deterministic offline failure/restart harness covering ambiguous query
-   completion and replay after partial multi-table publication; preserve the UUID
-   staging and checkpoint guarantees already shipped. Acceptance: no premature
-   STATE, explicit unknown outcomes, replay routes only to fresh staging tables.
+2. Completed in [#167](https://github.com/z3z1ma/target-bigquery/pull/167):
+   deterministic failure/restart harness, known query IDs across submission errors,
+   and explicit reconciliation guidance. See the delivery entry below.
 3. Evaluate metadata preservation for WRITE_TRUNCATE_DATA with a documented
    compatibility matrix before any implementation. Live experiments beyond the
    completed overwrite gate remain separately scoped.
 
 
-### In progress — query outcome reconciliation and restart coverage
+### Delivered — query outcome reconciliation and restart coverage (#167)
 
-Implemented on `fix/recovery-diagnostics`: assign query IDs before submission,
+Merged as `b136c04` from reviewed head `41ace9c`: assign query IDs before submission,
 log them before the RPC and on failure, report actual client/job location, and
 disable automatic failed-query resubmission. Explicit IDs also propagate Conflict
 instead of automatic lookup; transport retries remain. This availability tradeoff
@@ -372,5 +371,10 @@ case proves why unresolved old jobs must finish before replay: a late old overwr
 can replace a newer snapshot. Installed-client Conflict behavior is tested offline.
 
 Local acceptance:428 passed,15 cloud skips;Ruff/mypy passed. Independent review
-approved with35 focused tests passed. Exact-head CI pending. No new cloud operations or package publication.
+approved with35 focused tests passed. Exact-head Python3.10–3.12
+CI[44016740919](https://github.com/z3z1ma/target-bigquery/actions/runs/44016740919) passed. No new cloud operations or package publication.
 Existing0.8.0 tag/assets remain unchanged. #150 still waits on authentication.
+
+Merged-main Python3.10–3.12 CI[44016846704](https://github.com/z3z1ma/target-bigquery/actions/runs/44016846704)
+passed at `b136c04`. Remaining inventory:1 open issue (#150),0 open PRs.
+Next independent work is the scoped WRITE_TRUNCATE_DATA compatibility spike.
