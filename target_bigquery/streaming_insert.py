@@ -10,16 +10,19 @@
 # substantial portions of the Software.
 """BigQuery Streaming Insert Sink."""
 
+import logging
+import math
 import os
+import uuid
 from multiprocessing import Process
 from multiprocessing.dummy import Process as _Thread
 from queue import Empty
+from time import sleep
 from typing import Any, cast
 
 import orjson
-from google.api_core.exceptions import GatewayTimeout, NotFound
+from google.api_core.exceptions import NotFound
 from google.cloud import _http, bigquery
-from tenacity import retry, retry_if_exception_type, stop_after_delay, wait_fixed
 
 from target_bigquery.core import (
     BaseBigQuerySink,
@@ -37,7 +40,18 @@ class Job:
         self,
         table: bigquery.TableReference,
         records: list[dict[str, Any]],
+        timeout: float = 600,
     ) -> None:
+        if (
+            isinstance(timeout, bool)
+            or not isinstance(timeout, (int, float))
+            or not math.isfinite(timeout)
+            or timeout <= 0
+        ):
+            raise ValueError("timeout must be a positive finite number of seconds")
+        self.timeout = timeout
+        self.batch_id = uuid.uuid4().hex
+        self.row_ids = [f"{self.batch_id}-{index}" for index in range(len(records))]
         self.table = table
         self.records = records
         self.attempt = 1
@@ -58,24 +72,30 @@ class StreamingInsertWorker(BaseWorker):
                 break
             if job is None:
                 break
+            identity = f"batch_id={job.batch_id}, destination={job.table}"
+            logging.getLogger(__name__).info("Submitting streaming insert (%s).", identity)
             try:
-                errors = retry(
-                    retry=retry_if_exception_type(
-                        (ConnectionError, TimeoutError, NotFound, GatewayTimeout)
-                    ),
-                    wait=wait_fixed(1),
-                    stop=stop_after_delay(10),
-                    reraise=True,
-                )(client.insert_rows_json)(table=job.table, json_rows=job.records)
+                errors = client.insert_rows_json(
+                    table=job.table,
+                    json_rows=job.records,
+                    row_ids=job.row_ids,
+                    timeout=job.timeout,
+                    retry=None,  # type: ignore[arg-type]  # Supported by SDK runtime.
+                )
                 if errors:
                     raise RuntimeError(f"BigQuery streaming insert returned row errors: {errors}")
             except Exception as exc:
                 job.attempt += 1
-                if job.attempt > 3:
-                    # TODO: add a metric for this + a DLQ & wrap exception type
-                    self.error_notifier.send((exc, self.serialize_exception(exc)))
+                if not isinstance(exc, NotFound) or job.attempt > 3:
+                    diagnostic = (
+                        f"Streaming insert failed for {identity}. "
+                        "Rows may already be present; reconcile before replay.\n"
+                        + self.serialize_exception(exc)
+                    )
+                    self.error_notifier.send((exc, diagnostic))
                     raise
                 else:
+                    sleep(1)
                     self.queue.put(job)
             else:
                 self.job_notifier.send(True)
@@ -119,7 +139,13 @@ class BigQueryStreamingInsertSink(BaseBigQuerySink):
         self.records_to_drain.append(make_json_compatible(record))
 
     def process_batch(self, context: dict[str, Any]) -> None:
-        self.global_queue.put(Job(table=self.table.as_ref(), records=self.records_to_drain.copy()))
+        self.global_queue.put(
+            Job(
+                table=self.table.as_ref(),
+                records=self.records_to_drain.copy(),
+                timeout=self.config.get("timeout", 600),
+            )
+        )
         self.increment_jobs_enqueued()
         self.records_to_drain = []
 

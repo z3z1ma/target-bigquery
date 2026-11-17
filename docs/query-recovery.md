@@ -133,3 +133,29 @@ This validates the [documented append response contract](https://docs.cloud.goog
 It is an invariant check and recovery prerequisite, not a claim that the service
 has returned incorrect offsets in a live run. Automatic recovery remains gated on
 retained payload identity, stream ownership, and ordering across in-flight writes.
+
+
+## Streaming insert partial outcomes
+
+`streaming_insert` now gives each queued batch an ID and explicit row IDs of the
+form `<batch-id>-<zero-based-index>`. Logs identify the batch and destination
+before submission. IDs survive worker retries/process serialization but are new
+on source replay. BigQuery insert-ID deduplication is best effort, not a guarantee.
+
+A returned row error can accompany successfully inserted rows. The target stops
+without retrying the entire batch on any row error or uncertain RPC exception.
+SDK and connector transient-error retries are disabled. Only a request-level
+`NotFound` is retried, at most three attempts one second apart, with identical IDs
+and payloads. A row-level `notFound` is still a partial-response failure. This
+shorter retry policy may require operator recovery for table propagation delays
+or transient failures that previously recovered automatically.
+
+The positive finite `timeout` applies to each insert request (default 600 seconds).
+With default `fail_fast: true`, a terminal error prevents STATE, MERGE and overwrite
+publication. It does not undo rows already accepted. Reconcile partial or unknown
+outcomes before replay; fresh runs can duplicate append rows. No automatic
+failed-row retry, remote rollback or whole-process deadline is provided.
+
+See Google's [partial-success and deduplication guidance](https://docs.cloud.google.com/bigquery/docs/troubleshoot-storage-api).
+Offline tests use the installed client request builder and simulated acceptance;
+no live cloud test is claimed.
