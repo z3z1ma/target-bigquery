@@ -215,10 +215,11 @@ from merged commits only, with migration and known-limit sections. Publishing is
 
 ### 8. P3 — scoped replacement design spike
 
-Status: research only; no implementation selected. Offline probe confirms the
-locked google-cloud-bigquery 3.42.1 exports `WRITE_TRUNCATE_DATA` and serializes
-it with `ALLOW_FIELD_ADDITION` in QueryJobConfig and LoadJobConfig. Server
-behavior and metadata preservation remain unverified.
+Status: offline spike completed in #168 (`11da304`). Eight maintained tests
+verify query/load configuration and the actual client request boundary, including
+a counterexample showing serialization is not server validation. Retain CTAS;
+see [compatibility decision](docs/overwrite-compatibility.md) for the proposed
+publisher lifecycle and schema/metadata server-acceptance matrix.
 
 Evaluate `WRITE_TRUNCATE_DATA` against current CTAS replacement. The REST API
 preserves destination schema/constraints and supports field addition/relaxation
@@ -351,9 +352,9 @@ Sources reviewed 2026-11-16; conclusions are specific to documented behavior.
 2. Completed in [#167](https://github.com/z3z1ma/target-bigquery/pull/167):
    deterministic failure/restart harness, known query IDs across submission errors,
    and explicit reconciliation guidance. See the delivery entry below.
-3. Evaluate metadata preservation for WRITE_TRUNCATE_DATA with a documented
-   compatibility matrix before any implementation. Live experiments beyond the
-   completed overwrite gate remain separately scoped.
+3. Offline compatibility spike completed in #168. Adoption of a destination-query
+   publisher requires the documented server-acceptance matrix; experiments beyond
+   the completed overwrite gate remain separately scoped.
 
 
 ### Delivered — query outcome reconciliation and restart coverage (#167)
@@ -377,10 +378,10 @@ Existing0.8.0 tag/assets remain unchanged. #150 still waits on authentication.
 
 Merged-main Python3.10–3.12 CI[44016846704](https://github.com/z3z1ma/target-bigquery/actions/runs/44016846704)
 passed at `b136c04`. Remaining inventory:1 open issue (#150),0 open PRs.
-Next independent work is the scoped WRITE_TRUNCATE_DATA compatibility spike.
+The subsequent offline WRITE_TRUNCATE_DATA spike is recorded below.
 
 
-### In progress — overwrite publication compatibility decision
+### Delivered — overwrite publication compatibility decision (#168)
 
 The offline WRITE_TRUNCATE_DATA spike is implemented in
 [the compatibility decision](docs/overwrite-compatibility.md) and eight API-contract
@@ -393,5 +394,10 @@ The decision defines schema evolution, metadata, cleanup/STATE and unknown-outco
 acceptance cases for a later destination-SELECT publisher. Updated capabilities
 now reflect merged layout/nested/view work and the completed focused live gate.
 Local validation:436 passed,15 cloud skips;Ruff/mypy passed. Independent review
-approved with8 focused tests passed. Exact-head CI precedes integration. No cloud
+approved with8 focused tests passed. Exact-head Python3.10–3.12
+CI[44017370018](https://github.com/z3z1ma/target-bigquery/actions/runs/44017370018) passed;
+merged as `11da304`. No cloud
 operations, credentials changes, release or publishing attempts are included.
+
+Merged-main Python3.10–3.12 CI[44017467345](https://github.com/z3z1ma/target-bigquery/actions/runs/44017467345)
+passed at `11da304`. No open PRs; #150 remains the publishing-authentication issue.
