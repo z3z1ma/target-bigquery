@@ -510,7 +510,7 @@ recovery remains separately scoped because it cannot use per-stream offsets to
 deduplicate. Keep fail-closed behavior until these cases are proven.
 
 
-### In progress — pending append acknowledgement identity (#177)
+### Completed — pending append acknowledgement identity (#177, #178)
 
 Before adding replay, retain stream/requested offset/row count per append and
 verify successful pending responses against the captured offset. Log the identity
@@ -524,9 +524,14 @@ success; absent/wrong offset or returned stream; default success without offsets
 ALREADY_EXISTS/OUT_OF_RANGE remain failures; checkpoint/EOF suppress publication;
 pre-dispatch identity logging excludes payloads. Installed-client futures are used
 offline. Full suite: 515 passed, 15 cloud skips; Ruff/mypy clean. Eleven initial
-regression cases failed against `ebc8d92`. Independent review and exact-head
-matrix CI are required before integration. No automatic retry, cloud operations,
-or persistent payload journal.
+regression cases failed against `ebc8d92`. Independent review passed 104 focused
+tests. Exact head `e4e657e` passed Python 3.10–3.12
+[CI44030226420](https://github.com/z3z1ma/target-bigquery/actions/runs/44030226420).
+Merged as `5235560`; merged-main
+[CI44030360891](https://github.com/z3z1ma/target-bigquery/actions/runs/44030360891)
+also passed all three versions. No automatic retry, cloud operations, or persistent
+payload journal. Post-merge inventory: zero open PRs; only publishing issue #150
+remains, with its existing authentication/approval-review block unchanged.
 
 Next: design retained payload identity and ordered pending-stream replay. A bounded
 same-stream/offset recovery policy must distinguish already accepted data, gaps,
