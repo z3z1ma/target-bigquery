@@ -591,6 +591,7 @@ def test_batch_job_worker_factory_composes_executor_class():
 
 def test_streaming_insert_preprocess_serializes_fixed_schema_data_as_json():
     sink = object.__new__(BigQueryStreamingInsertSink)
+    sink._config = {}
     record = {"id": Decimal("1"), "amount": Decimal("12.5"), "_sdc_sequence": 7}
 
     transformed = sink.preprocess_record(record, {})

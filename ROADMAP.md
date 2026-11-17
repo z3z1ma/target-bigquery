@@ -536,3 +536,36 @@ remains, with its existing authentication/approval-review block unchanged.
 Next: design retained payload identity and ordered pending-stream replay. A bounded
 same-stream/offset recovery policy must distinguish already accepted data, gaps,
 unknown commit outcomes and lost process state before any implementation is enabled.
+
+
+### In progress — streaming insert partial/unknown outcome containment (#181)
+
+Daily inventory found new dependency PRs #179/#180 and existing publishing block
+#150. A higher-priority runtime gap emerged in `streaming_insert`: returned row
+errors and uncertain RPC errors caused whole-batch replay with fresh auto-generated
+insert IDs. Installed-client/fake-server tests accepted one row three times;
+four regression cases fail on `214f686`.
+
+The fix stops on returned row errors or ambiguous RPC exceptions, disables SDK
+retries, and retains limited request-level NotFound recovery (three attempts, one
+second apart). Queued batch-derived row IDs survive process serialization; the
+configured positive finite timeout reaches each request. Stable IDs do not make
+best-effort BigQuery deduplication a guarantee. Default fail-fast suppresses STATE
+and publication; source replay can still duplicate previously accepted rows.
+
+Acceptance covers partial success, lost response, actual client request IDs/retry
+settings, safe NotFound recovery/exhaustion, configuration validation and process
+serialization, plus checkpoint/EOF suppression. 531 offline tests passed, 15 cloud
+skips; Ruff/mypy clean. Independent review passed 199 focused tests; exact-head CI
+required before integration. No cloud
+operations. This confirmed duplicate-write defect takes priority over speculative
+pending-stream replay; the latter's retained-payload/ordering requirements remain.
+
+### Maintenance — action pins (#179, #180)
+
+Independent research verified official setup-uv 10.3.3 and setup-python 7.1.0 pins,
+with no relevant input migration. Existing prune-cache remains true. #179 passed
+exact-head matrix CI44104425569 and merged as `483e0bc`; #180 is refreshed on that
+base; combined matrix CI44114311813 passed at `26dca3c` before merge. Original
+bot commits are preserved. #179 merged-main CI44114224407 passed. Final main CI
+and inventory remain to be verified.

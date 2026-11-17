@@ -199,6 +199,9 @@ class FakeStreamingClient:
         *,
         table: bigquery.TableReference,
         json_rows: list[dict[str, object]],
+        row_ids: list[str],
+        timeout: float,
+        retry: None,
     ) -> list[dict[str, object]]:
         self.calls.append({"table": table, "json_rows": json_rows})
         return self.results.pop(0) if self.results else []
@@ -306,26 +309,20 @@ def test_batch_job_worker_reports_terminal_load_failures(monkeypatch):
     assert worker.queue.task_done_count == 1
 
 
-def test_streaming_insert_worker_requeues_returned_row_errors(monkeypatch):
+def test_streaming_insert_worker_stops_on_returned_row_errors(monkeypatch):
     client = FakeStreamingClient([{"index": 0, "errors": [{"reason": "invalid"}]}], [])
-    monkeypatch.setattr(
-        streaming_insert,
-        "bigquery_client_factory",
-        lambda credentials: client,
+    monkeypatch.setattr(streaming_insert, "bigquery_client_factory", lambda _: client)
+    job = streaming_insert.Job(
+        bigquery.TableReference.from_string("project.dataset.orders"), [{"id": 1}]
     )
-    table = bigquery.TableReference.from_string("project.dataset.orders")
-    job = streaming_insert.Job(table, [{"id": 1}])
     worker = make_worker(streaming_insert.StreamingInsertWorker, job)
-
-    worker.run()
-
-    assert len(client.calls) == 2
-    assert job.attempt == 2
-    assert worker.queue.requeued == [job]
-    assert worker.queue.task_done_count == 2
-    assert worker.job_notifier.messages == [True]
-    assert worker.error_notifier.messages == []
-    assert cast(str, worker.log_notifier.messages[0]).startswith("[worker-a] Inserted")
+    with pytest.raises(RuntimeError, match="returned row errors"):
+        worker.run()
+    assert len(client.calls) == 1
+    assert worker.queue.requeued == []
+    assert worker.queue.task_done_count == 1
+    assert worker.job_notifier.messages == []
+    assert len(worker.error_notifier.messages) == 1
 
 
 def test_streaming_insert_worker_reports_terminal_row_errors(monkeypatch):

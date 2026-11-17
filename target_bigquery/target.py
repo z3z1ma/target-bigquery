@@ -115,7 +115,7 @@ class TargetBigQuery(Target):
         th.Property(
             "timeout",
             th.IntegerType,
-            description="Timeout in seconds for batch_job/gcs_stage LoadJobs, query submission/result waits (views, MERGE, overwrite), and each Storage Write append completion/finalize/commit wait. Query timeouts must be positive integers. Storage Write finalize/commit RPC retries are disabled; other SDK retries can exceed this value. It does not cancel remote operations or impose a whole-process deadline.",
+            description="Timeout in seconds for batch_job/gcs_stage LoadJobs, streaming_insert requests, query submission/result waits (views, MERGE, overwrite), and each Storage Write append completion/finalize/commit wait. Query timeouts must be positive integers. Storage Write finalize/commit RPC retries are disabled; other SDK retries can exceed this value. It does not cancel remote operations or impose a whole-process deadline.",
             default=600,
         ),
         th.Property(
