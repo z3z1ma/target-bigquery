@@ -332,7 +332,26 @@ Sources reviewed 2026-11-16; conclusions are specific to documented behavior.
 - 2026-11-17: authorized live overwrite gate passed for both methods. Reused
   streaming staging names reproduced silent loss; UUID-template containment and
   38 offline regressions added. Final local suite421 passed/15 skipped. See live
-  evidence and release-readiness docs. Release0.8.0 remains unpublished.
+  evidence and release-readiness docs. Release0.8.0 preparation merged; publication status is recorded below.
 
 - #152 merged as e9709ec; #134 resolved and #139 closed as incorporated.
-  Remaining inventory: release request #150 and candidate PR#166.
+  Remaining inventory: release request #150; no open PRs. #166 merged as964fe9a.
+
+- 2026-11-17: [GitHub0.8.0](https://github.com/z3z1ma/target-bigquery/releases/tag/0.8.0)
+  published from964fe9a after main Tests run43994530095 passed Python3.10–3.12.
+  Wheel/sdist match the fresh-install-tested artifacts and their published SHA256
+  digests. PyPI0.8.0 returns404; upload authentication is unavailable. #150 remains
+  open for this concrete distribution blocker. Inventory:1 issue,0 PRs.
+
+### Next executable roadmap work
+
+1. Complete PyPI publication of the already validated0.8.0 artifacts once an
+   authorized upload credential or trusted publisher is available; verify hashes
+   and installation from PyPI, then close#150. Do not rebuild from later main.
+2. Add a deterministic offline failure/restart harness covering ambiguous query
+   completion and replay after partial multi-table publication; preserve the UUID
+   staging and checkpoint guarantees already shipped. Acceptance: no premature
+   STATE, explicit unknown outcomes, replay routes only to fresh staging tables.
+3. Evaluate metadata preservation for WRITE_TRUNCATE_DATA with a documented
+   compatibility matrix before any implementation. Live experiments beyond the
+   completed overwrite gate remain separately scoped.
