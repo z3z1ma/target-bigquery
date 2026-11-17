@@ -1,10 +1,10 @@
 # Ingestion capabilities and validation boundaries
 
-This describes the source tree containing this guide, including the repeated-view
-alias correction below, not the published 0.7.2 package. Until this candidate
-is merged, main does not include that alias correction. Configured paths below are supported by implementation
-and offline tests; this maintenance pass has not certified them against live
-BigQuery. Use the linked tests and outstanding gates when selecting a method.
+This guide describes current main. GitHub release0.8.0 includes the layout,
+nested-name and view-alias fixes; #167 query recovery is subsequent work on main.
+Most evidence is offline. The focused two-pass overwrite gate passed for
+batch_job and storage_write_api; see [live evidence](live-overwrite-validation.md).
+This is not full transport/schema cloud certification.
 
 ## Transport and schema choices
 
@@ -25,7 +25,7 @@ These are layered offline checks, not an end-to-end cloud certification matrix.
 | --- | --- | --- | --- |
 | Append | Supported | Supported | Default when no selected overwrite/upsert applies. Successful drain is required before STATE. Replays can duplicate rows. |
 | Upsert | Not selected | Selected only with tap `key_properties` | Takes precedence over overwrite. Staging must merge before STATE; rotated staging is used by subsequent writes. Without keys, upsert is not selected and append or selected overwrite applies. |
-| Overwrite | Implemented; layout gate | Implemented; layout gate | Partitioned/layout-preserving overwrite remains gated by #134/#152. Staging publishes at EOF. Any pending overwrite defers global STATE, including mixed streams. Multiple table replacements are not one atomic transaction. |
+| Overwrite | Supported; layout preflight | Supported; layout preflight | Configured layout is retained; incompatible existing layouts require migration. Staging publishes at EOF. Any pending overwrite defers global STATE, including mixed streams. Multiple table replacements are not one atomic transaction. |
 
 An upsert flag on a fixed-schema stream does not turn raw JSON into a merge key.
 Selection strings/patterns are tested in `test_core_pure.py`; checkpoint ordering
@@ -72,7 +72,9 @@ escaping have not been validated in this pass.
 
 Keep `fail_fast` enabled to surface worker failures. Query timeout bounds client
 submission/result waits, not a strict whole-process deadline; a remote job may
-complete after a local timeout. Job ID/location diagnostics support reconciliation.
+complete after a local timeout. Known query IDs and actual job/client location support reconciliation, including
+lost submission responses. Failed mutation jobs are not automatically resubmitted;
+see [recovery procedure and retry tradeoffs](query-recovery.md).
 Default-stream retries and source replay can duplicate rows. Pending-stream
 offsets apply per stream, not to subsequent MERGE or multi-table publication.
 Google's [Storage Write best practices](https://docs.cloud.google.com/bigquery/docs/write-api-best-practices)
@@ -81,11 +83,13 @@ unmeasured throughput advantage or end-to-end exactly-once delivery.
 
 Temporary BigQuery tables have configurable expiration. Failed-run staging and
 GCS objects need an operator retention policy; this target does not promise that
-all failed-run artifacts are deleted. Overwrite layout preservation is still
-tracked by #134/#139/#152 and awaits authorized two-pass live tests. No cloud
-writes or spending were performed for this guide.
+all failed-run artifacts are deleted. Streaming upsert/overwrite templates require
+an unmodified `{uuid}` placeholder; reusing deleted staging names is unsafe.
+The live layout gate passed in #152. Nested migrations, legacy streaming inserts,
+GCS and general failure/restart behavior still lack equivalent live validation.
 
-The next acceptance work is explicit in [ROADMAP.md](../ROADMAP.md): live layout
-validation, approved nested-schema delivery, release preparation, and a scoped
-WRITE_TRUNCATE_DATA design spike. A proposed API feature is not support until its
-schema/metadata/failure behavior is verified.
+The [overwrite compatibility decision](overwrite-compatibility.md) completes the
+offline WRITE_TRUNCATE_DATA spike. The client can encode a future destination-query
+publisher, but its schema/metadata/lifecycle acceptance matrix still needs separately
+scoped server validation. Production continues to use CTAS. Follow [ROADMAP.md](../ROADMAP.md)
+for sequencing and current status.

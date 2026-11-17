@@ -378,3 +378,20 @@ Existing0.8.0 tag/assets remain unchanged. #150 still waits on authentication.
 Merged-main Python3.10–3.12 CI[44016846704](https://github.com/z3z1ma/target-bigquery/actions/runs/44016846704)
 passed at `b136c04`. Remaining inventory:1 open issue (#150),0 open PRs.
 Next independent work is the scoped WRITE_TRUNCATE_DATA compatibility spike.
+
+
+### In progress — overwrite publication compatibility decision
+
+The offline WRITE_TRUNCATE_DATA spike is implemented in
+[the compatibility decision](docs/overwrite-compatibility.md) and eight API-contract
+probes. Query and load configuration preserve the intended fields; a real client
+query reaches an intercepted jobs.insert boundary. A copy-job counterexample
+proves SDK serialization alone does not validate server support. Production CTAS
+is retained; no experimental runtime flag or speculative publisher is introduced.
+
+The decision defines schema evolution, metadata, cleanup/STATE and unknown-outcome
+acceptance cases for a later destination-SELECT publisher. Updated capabilities
+now reflect merged layout/nested/view work and the completed focused live gate.
+Local validation:436 passed,15 cloud skips;Ruff/mypy passed. Independent review
+approved with8 focused tests passed. Exact-head CI precedes integration. No cloud
+operations, credentials changes, release or publishing attempts are included.
