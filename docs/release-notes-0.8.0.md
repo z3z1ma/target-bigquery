@@ -1,9 +1,4 @@
-# 0.8.0 candidate release notes
-
-Unpublished. Publication remains gated by live overwrite validation and final
-artifact checks. This candidate combines main9e7a99e with reconciled draft #152 (aabc5de).
-Its proposed layout preservation is included for validation, not a claim of
-completed live verification or merged support.
+# 0.8.0 release notes
 
 ## Upgrade requirements
 
@@ -18,15 +13,19 @@ completed live verification or merged support.
   rename/backfill is performed.
 - Generated repeated-field view aliases now follow column transforms. Update
   downstream references that relied on the old raw aliases when views regenerate.
+- Streaming upsert/overwrite staging templates must contain an unmodified
+  `{uuid}` placeholder. Fixed or timestamp-only names now fail before table
+  mutations because rapid reuse can silently lose streaming data. The default
+  template already meets this requirement.
 - Overwrite checkpoints wait until successful EOF publication. Coordinate source
   success checks and replay; multiple table replacements are not atomic together.
 
-## Proposed overwrite fix — live validation pending
+## Layout-safe overwrite
 
 - Preserve configured partitioning, expiration and clustering during overwrite.
 - Reject incompatible layouts before destination mutation; retain bounded query
   waits, deferred overwrite checkpoints and nested-schema compatibility checks.
-- Per-stream layout overrides and unpartitioned mode are included in the candidate.
+- Per-stream layout overrides and unpartitioned mode are supported.
 
 ## Fixes and capabilities
 
@@ -42,9 +41,14 @@ completed live verification or merged support.
 - Capability, migration and operational guides now distinguish offline evidence
   from cloud validation. Original contributor attribution is retained in history.
 
-## Validation required before publication
+## Validation
 
-Pass exact-release-head Python3.10–3.12 CI, rebuild wheel/sdist from that commit,
-check metadata and install/CLI behavior from the artifacts, finalize the changelog,
-and complete the separately authorized two-pass overwrite tests. Until then,
-#150 remains open and no tag, GitHub release or package upload should be created.
+The offline suite passed 421 tests, with 15 credential-gated tests skipped;
+Ruff and mypy passed. Both batch-job and Storage Write live two-pass overwrite
+tests passed, checking exact rows, partitioning, expiration, and clustering after
+each pass. All generated tables were verified deleted. See
+[live evidence](live-overwrite-validation.md). Other transport/migration live
+scenarios remain outside this verification scope.
+
+Final release CI and artifact metadata/install checks are recorded in
+[release readiness](release-readiness.md).
