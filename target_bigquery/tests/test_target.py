@@ -389,6 +389,7 @@ def test_storage_checkpoint_merges_before_state_and_rotates_destination(monkeypa
 
     events = []
     sink = object.__new__(BigQueryStorageWriteDenormalizedSink)
+    sink._config = {}
     sink.table = SimpleNamespace(project="p", dataset="d", name="stage0")
     sink.parent = "projects/p/datasets/d/tables/stage0"
     sink.merge_target = object()

@@ -66,3 +66,31 @@ failures do not re-upload. Timeouts do not cancel server jobs. Reconcile the rem
 outcome before restarting: a fresh run creates fresh IDs and replayed append rows
 can still duplicate. These guarantees cover worker retries, not end-to-end
 exactly-once delivery. Validation uses simulated servers without cloud writes.
+
+
+## Storage Write completion waits
+
+`timeout` also bounds each append future completion wait and each pending-stream
+finalize/commit RPC. It must be positive and finite. Finalize/commit use no automatic
+RPC retry, so transient errors now require operator reconciliation and replay.
+The client's former retry window was independent of the configured timeout.
+Append dispatch/reconnection behavior is unchanged; this change adds no retries.
+
+Append errors identify the stream; finalize/commit log stream identities before
+calling the server. Failed commit attempts retain the pending stream list. With
+`fail_fast: true` (the default), worker failures prevent checkpoint hooks, MERGE,
+overwrite publication and STATE. Worker completion notifications are local work
+accounting and do not assert successful delivery. Disabling fail-fast can permit
+STATE despite an error and is unsuitable for durable checkpoints.
+
+A timeout does not cancel or roll back a remote append/commit. Reconcile the
+logged streams and destination before replay. Default-stream rows can already be
+visible, and an uncertain pending commit may have succeeded. Replaying can duplicate
+rows; per-stream offsets do not provide end-to-end exactly-once delivery. These
+are per-wait/RPC limits: queueing, multiple outstanding futures, stream creation,
+connection management and shutdown can make total elapsed time longer.
+
+The locked client's unfinished `AppendRowsFuture`, completed/rejected responses,
+and real target drain paths are tested offline. No live cloud validation is
+claimed. See the official [Storage Write client reference](https://docs.cloud.google.com/python/docs/reference/bigquerystorage/latest/google.cloud.bigquery_storage_v1.client.BigQueryWriteClient)
+for pending/default visibility and per-stream offsets.
