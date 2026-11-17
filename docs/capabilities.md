@@ -12,7 +12,7 @@ This is not full transport/schema cloud certification.
 | --- | --- | --- | --- |
 | `storage_write_api` (default) | JSON text in protobuf `data` | Generated protobuf; resolved JSON fields serialized recursively | Actual protobuf tests in `test_json_transport.py`; stream rotation, append errors and commit errors in `test_workers.py` and `test_target.py`. Default stream by default; optional pending-stream batch mode. |
 | `batch_job` | Compressed JSON lines with `data` | Compressed JSON lines with resolved columns | Payload/job configuration tests in `test_core_pure.py`; load-job errors in `test_workers.py`. Denormalized jobs allow field addition and ignore unknown values, so schema/name agreement matters. |
-| `gcs_stage` | Compressed JSON objects staged in a bucket | Same staging with resolved columns | Upload/load notification and cleanup tests in `test_core_pure.py`. Requires bucket access as well as BigQuery access. Nested unknown-value risk matches batch jobs. |
+| `gcs_stage` | Compressed JSON objects staged in a bucket | Same staging with resolved columns | Loads complete at each nonempty checkpoint before STATE/MERGE; successful URIs are not reloaded at EOF. Failure/order tests in `test_gcs_checkpoints.py`. Requires bucket access as well as BigQuery access. Nested unknown-value risk matches batch jobs. |
 | `streaming_insert` | JSON text in the raw `data` field | JSON-compatible row dictionaries | Row-error and payload tests in `test_workers.py` and `test_core_pure.py`. Uses the legacy insert API; not claimed to provide exactly-once delivery. |
 
 See [dispatch tests](../target_bigquery/tests/test_target.py),

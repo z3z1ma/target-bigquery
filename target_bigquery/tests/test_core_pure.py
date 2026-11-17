@@ -93,6 +93,7 @@ class FakeBigQueryUriClient:
         table_ref: bigquery.TableReference,
         *,
         timeout: int,
+        job_id: str,
         job_config: bigquery.LoadJobConfig,
     ) -> FakeBigQueryJob:
         self.calls.append(
@@ -651,6 +652,7 @@ def test_gcs_staging_clean_up_loads_notified_uris(monkeypatch):
     sink = object.__new__(BigQueryGcsStagingSink)
     sink.gcs_notification = FakeNotification("gs://bucket/path/a.jsonl.gz")
     sink.uris = []
+    sink._load_job_id = None
     sink.logger = FakeLogger()
     sink._credentials = object()
     sink._config = {"timeout": 123}

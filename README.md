@@ -299,10 +299,27 @@ The target cannot distinguish a successful upstream snapshot from a failed tap
 that closes its output. The orchestrator must check upstream success; EOF alone
 is not proof of a complete snapshot.
 
+### GCS checkpoint durability
+
+With `gcs_stage`, each nonempty checkpoint waits for the uploaded objects to load
+into BigQuery before acknowledging STATE. Upsert loads finish before MERGE and
+staging rotation; overwrite loads accumulate in staging while STATE remains
+withheld until successful EOF publication. Load submission and result waits use
+`timeout`. Failed loads retain their job ID and pending URI list for diagnosis;
+reconcile an unknown outcome before restarting.
+
+This creates load jobs at checkpoints instead of only at EOF, increasing job
+frequency and latency; consider BigQuery load-job quotas when choosing checkpoint
+cadence. Successfully loaded URIs leave the in-memory pending list and are not
+loaded again at EOF. GCS objects are not deleted by this change: retain your bucket
+lifecycle policy. Replays can still duplicate append data. This behavior is tested
+offline; no new GCS live validation is claimed.
+
 ## Maintenance roadmap
 
 See [ROADMAP.md](ROADMAP.md) for audited priorities, acceptance tests, current status,
 and the verification required before each change ships.
+
 
 ### Denormalized Storage Write JSON fields
 

@@ -13,6 +13,7 @@
 import os
 import shutil
 import time
+import uuid
 from collections.abc import Sequence
 from io import BytesIO
 from mmap import mmap
@@ -145,6 +146,7 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
         self.buffer = Compressor()
         self.gcs_notification, self.gcs_notifier = target.pipe_cls(False)
         self.uris: list[str] = []
+        self._load_job_id: str | None = None
         self.increment_jobs_enqueued = target.increment_jobs_enqueued
 
     @staticmethod
@@ -186,23 +188,49 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
         self.increment_jobs_enqueued()
         self.buffer = Compressor()
 
-    def clean_up(self) -> None:
+    def _load_pending_uris(self) -> None:
+        """Commit uploaded objects to BigQuery before acknowledging a checkpoint."""
         while self.gcs_notification.poll():
             self.uris.append(self.gcs_notification.recv())
-        # Anything in the queue at this point can be considered now a DLQ
-        if self.uris:
-            self.logger.info("Loading data into BigQuery from GCS stage...")
-            self.logger.info("URIs: %s", ", ".join(self.uris))
-            client = bigquery_client_factory(self._credentials)
-            client.load_table_from_uri(
+        if not self.uris:
+            return
+        timeout = self.config.get("timeout", 600)
+        if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout <= 0:
+            raise ValueError("timeout must be a positive integer number of seconds")
+        if self._load_job_id is None:
+            self._load_job_id = f"target_bigquery_load_{uuid.uuid4().hex}"
+        client = bigquery_client_factory(self._credentials)
+        self.logger.info("Loading GCS stage (job_id=%s).", self._load_job_id)
+        job = None
+        try:
+            job = client.load_table_from_uri(
                 self.uris,
                 self.table.as_ref(),
-                timeout=self.config.get("timeout", 600),
+                job_id=self._load_job_id,
+                timeout=timeout,
                 job_config=bigquery.LoadJobConfig(**self.job_config),
-            ).result()
-            self.logger.info("Data loaded successfully")
-        else:
-            self.logger.info("No data to load")
+            )
+            job.result(timeout=timeout)
+        except Exception:
+            self.logger.error(
+                "GCS load failed (job_id=%s, project=%s, location=%s). Remote completion may be unknown; reconcile before restarting. State will not advance.",
+                self._load_job_id,
+                getattr(client, "project", "unavailable"),
+                getattr(job, "location", None)
+                or getattr(client, "location", None)
+                or "unavailable",
+            )
+            raise
+        self.uris = []
+        self._load_job_id = None
+        self.logger.info("Data loaded successfully")
+
+    def pre_state_hook(self) -> None:
+        self._load_pending_uris()
+        super().pre_state_hook()
+
+    def clean_up(self) -> None:
+        self._load_pending_uris()
         super().clean_up()
 
     def as_bucket(self, **kwargs) -> storage.Bucket:

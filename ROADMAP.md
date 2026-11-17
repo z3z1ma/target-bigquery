@@ -401,3 +401,26 @@ operations, credentials changes, release or publishing attempts are included.
 
 Merged-main Python3.10–3.12 CI[44017467345](https://github.com/z3z1ma/target-bigquery/actions/runs/44017467345)
 passed at `11da304`. No open PRs; #150 remains the publishing-authentication issue.
+
+
+### In progress — P0 GCS checkpoint durability (#169)
+
+Offline reproduction against18dcbee showed append STATE without a BigQuery load,
+and upsert MERGE/rotation before loading uploaded GCS objects. GCS previously
+loaded only in EOF cleanup. Seven initial regression cases failed on old main.
+
+The fix loads and waits before the base pre-state hook and EOF cleanup. It clears
+only successfully loaded URI batches, preserves upsert rotation and overwrite EOF
+publication, bounds load result waits, and retains an explicit job ID after failure.
+Further checkpoints create new load IDs; empty EOF does not reload earlier files.
+Mixed-stream and load/merge failure tests protect global STATE. GCS objects remain
+subject to the user's retention policy; more frequent load jobs may affect quotas
+and latency. No live cloud validation or expenditure is included.
+
+Next confirmed reliability gap: `batch_job` still waits on LoadJob.result without
+a timeout and retries append loads under fresh server-generated IDs. Investigate
+bounded waits and stable job identity before enabling further retry behavior;
+reproduce a lost response after a completed append and prove no duplicate retry.
+
+Validation:461 passed,15 cloud skips;Ruff/mypy passed. Independent review
+approved with33 focused tests passed. Exact-head CI required before merging.
