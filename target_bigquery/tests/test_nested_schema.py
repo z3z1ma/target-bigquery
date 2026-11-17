@@ -189,6 +189,10 @@ def test_legacy_destination_rejected_before_any_mutation(monkeypatch, sink_class
 def test_new_or_compatible_destination_can_proceed(monkeypatch, mode, existing):
     fields = SchemaTranslator(SOURCE_SCHEMA, {"snake_case": True}).translated_schema_transformed
     client = Client(fields if existing else None)
+    if existing:
+        table = client.tables["orders"]
+        table.time_partitioning = bigquery.TimePartitioning(type_="MONTH", field="_sdc_batched_at")
+        table.clustering_fields = ["_sdc_batched_at"]
     sink = construct(monkeypatch, client, mode=mode)
     assert sink.table.get_resolved_schema(True)[0].fields[0].name == "child_value"
     assert ("get", "orders") in client.events

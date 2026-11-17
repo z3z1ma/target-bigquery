@@ -70,6 +70,23 @@ There are 2 resolver versions. The config option `schema_resolver_version` lets 
 
 Sometimes you want to overwrite a table on every load. This can be achieved by either setting `overwrite: true` which will full refresh ALL tables **or** setting `overwrite: [table1, table2, table_*_other, !table_v1_other]` which will only overwrite the specified tables and supports pattern matching. String booleans and comma-separated string patterns are also accepted for env-based configuration. This is useful if you have a table which is a lookup table and you want to overwrite it on every load. You can also set `overwrite: false` which will append to the table. This is the default behavior.
 
+Overwrite preserves the configured partitioning and clustering using `CREATE OR REPLACE TABLE`.
+An existing destination must match **all** of these settings: time partition type,
+partition field (`_sdc_batched_at`), partition expiration (including no expiration),
+and clustering fields in order. Range-partitioned and ingestion-time-partitioned tables
+are incompatible. The target checks compatibility before schema updates or staging.
+
+For older tables that lost their layout during overwrite, either configure
+`partition_granularity: none` and `clustering_fields: []` to retain an unpartitioned,
+unclustered table, or migrate the destination separately to the desired layout.
+For a monthly table, use `partition_granularity: month` and its existing clustering
+and expiration settings. Per-stream overrides allow mixed layouts. Dataset default
+partition expiration can affect newly created tables; set `partition_expiration_days`
+explicitly to match it. Changing expiration or clustering is also rejected by this
+conservative target policy, even where BigQuery can alter the setting separately.
+Back up needed data and coordinate a migration before rerunning; the target never
+automatically drops the destination to resolve a mismatch.
+
 ### Upsert (aka Merge)
 
 If you want to merge data into a table, you can set `upsert: true` which will use the `MERGE` statement to upsert data. This supports pattern matching like the above setting, including comma-separated string patterns for env-based configuration. It requires `denormalized: true` and takes precedence over `overwrite`. It will only work on tables which have a primary key as defined by the `key_properties` sent by the tap. There is a supporting config option called `dedupe_before_upsert` which will dedupe the data before upserting. This is useful if you are replicating data which has a primary key but is not unique. This occurs when you are replicating data from a source which has a primary key but does not enforce it. This is the case for MongoDB. It can also happen when moving data from a data lake in S3/GCS to a database. This is not the default behavior because it is slower and requires more resources.
@@ -144,11 +161,13 @@ First a valid example to give context to the below including a nested key exampl
 | overwrite                                          |  False   |       False       | Determines if the target table should be overwritten on load. Defaults to false. A value of true will write to a temporary table and then atomically replace the target table with `CREATE OR REPLACE TABLE`. A value of false will write to the target table directly (append). String booleans are accepted for env-based configuration. A string or array of strings will evaluate the strings in order using fnmatch. At the end of the array, the value of the last match will be used. If not matched, the default value is false. This is mutually exclusive with the `upsert` option. If both are set, `upsert` will take precedence. |
 | dedupe_before_upsert                               |  False   |       False       | This option is only used if `upsert` is enabled for a stream. The selection criteria for the stream's candidacy is the same as upsert. If the stream is marked for deduping before upsert, we will create a _session scoped temporary table during the merge transaction to dedupe the ingested records. This is useful for streams that are not unique on the key properties during an ingest but are unique in the source system. String booleans and pattern strings are accepted for env-based configuration. Data lake ingestion is often a good example of this where the same unique record may exist in the lake at different points in time from different extracts. |
 | temporary_table_expiration_hours                   |  False   |        168        | Number of hours before upsert and overwrite temporary tables expire. Defaults to 168 hours so long-running syncs do not lose staged data after one day. |
-| temporary_table_name_template                      |  False   | `{table_name}__{timestamp}__{uuid}` | Template for upsert and overwrite temporary table names. Supports `{table_name}`, `{timestamp}`, and `{uuid}`; characters outside letters, digits, and underscores are normalized to underscores. |
+| temporary_table_name_template                      |  False   | `{table_name}__{timestamp}__{uuid}` | Template for upsert and overwrite temporary table names. Streaming methods require an unmodified `{uuid}` placeholder to prevent reuse of deleted staging names. Supports `{table_name}`, `{timestamp}`, and `{uuid}`; characters outside letters, digits, and underscores are normalized to underscores. |
 | bucket                                             |  False   |       None        | The GCS bucket to use for staging data. Only used if method is gcs_stage. |
 | cluster_on_key_properties                          |  False   |         0         | Determines whether to cluster on the key properties from the tap. Defaults to false. When false, clustering will be based on _sdc_batched_at instead. |
-| clustering_fields                                  |  False   |       None        | Optional explicit BigQuery clustering fields. When set, this takes precedence over `cluster_on_key_properties` and does not change merge key semantics. |
-| partition_granularity                              |  False   |      "month"      | Indicates the granularity of the created table partitioning scheme which is based on `_sdc_batched_at`. By default the granularity is monthly. Must be one of: "hour", "day", "month", "year". |
+| clustering_fields                                  |  False   |       None        | Optional explicit BigQuery clustering fields. When set, this takes precedence over `cluster_on_key_properties` and does not change merge key semantics. An empty list (`[]`) disables clustering entirely, mirroring `partition_granularity=none`. |
+| clustering_fields_by_stream                        |  False   |       None        | Optional mapping of `fnmatch` stream-name patterns to clustering field lists. The last matching pattern wins. An empty list disables clustering for matching streams. |
+| partition_granularity                              |  False   |      "month"      | Indicates the granularity of the created table partitioning scheme which is based on `_sdc_batched_at`. By default the granularity is monthly. Must be one of: "none", "hour", "day", "month", "year". |
+| partition_granularity_by_stream                    |  False   |       None        | Optional mapping of `fnmatch` stream-name patterns to partition granularities. The last matching pattern wins. |
 | partition_expiration_days                          |  False   |       None        | If set for date- or timestamp-type partitions, the partition will expire that many days after the date it represents. |
 | column_name_transforms.lower                       |  False   |       None        | Lowercase column names. |
 | column_name_transforms.quote                       |  False   |       None        | Quote column names in any generated DDL. |

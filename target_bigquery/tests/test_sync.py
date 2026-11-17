@@ -193,3 +193,62 @@ def test_basic_denorm_sync(method, bigquery_gcs_config: dict[str, str]):
     ]
 
     assert len(records) == 5
+
+
+@pytest.mark.parametrize("method", ["batch_job", "storage_write_api"])
+def test_two_overwrites_preserve_monthly_layout_and_replace_rows(method, bigquery_config):
+    """Live regression; requires explicit credentials and an authorized test dataset."""
+    import json
+
+    table_name = f"overwrite_layout_{uuid.uuid4().hex}"
+    staging_names = []
+    config = {
+        **bigquery_config,
+        "method": method,
+        "denormalized": True,
+        "overwrite": True,
+        "generate_view": False,
+        "partition_granularity": "month",
+        # Monthly expiration starts at the month boundary, not the insertion time.
+        "partition_expiration_days": 40,
+        "clustering_fields": ["_sdc_batched_at"],
+        "temporary_table_name_template": f"{table_name}__stage_{{uuid}}",
+    }
+    client = bigquery_client_factory(
+        BigQueryCredentials(None, config["credentials_json"], config["project"])
+    )
+    destination = f"{config['project']}.{config['dataset']}.{table_name}"
+    try:
+        for ids in ([1, 2], [3]):
+            messages = [
+                {
+                    "type": "SCHEMA",
+                    "stream": table_name,
+                    "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
+                    "key_properties": [],
+                }
+            ]
+            messages.extend(
+                {"type": "RECORD", "stream": table_name, "record": {"id": value}} for value in ids
+            )
+            messages.append({"type": "STATE", "value": {"run": ids[-1]}})
+            target = TargetBigQuery(config=config)
+            sink = target.get_sink(
+                table_name, schema=messages[0]["schema"], key_properties=[]
+            )
+            staging_names.append(sink.table.name)
+            target.listen(
+                io.StringIO("\n".join(json.dumps(message) for message in messages) + "\n")
+            )
+            table = client.get_table(destination)
+            assert table.time_partitioning.type_ == "MONTH"
+            assert table.time_partitioning.field == "_sdc_batched_at"
+            assert table.time_partitioning.expiration_ms == 40 * 86400000
+            assert table.clustering_fields == ["_sdc_batched_at"]
+            assert sorted(row["id"] for row in client.list_rows(table)) == ids
+    finally:
+        for staging_name in staging_names:
+            client.delete_table(
+                f"{config['project']}.{config['dataset']}.{staging_name}", not_found_ok=True
+            )
+        client.delete_table(destination, not_found_ok=True)
