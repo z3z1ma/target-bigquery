@@ -473,7 +473,7 @@ on the same pending stream and offset from default-stream replay and fresh-strea
 creation; do not change retry policy without reproductions and compatibility tests.
 
 
-### In progress — ambiguous append dispatch containment (#175)
+### Completed — ambiguous append dispatch containment (#175, #176)
 
 Real installed SDK connection setup plus simulated transport acceptance reproduces
 lost-response duplication on the default stream. Including the connector's nested
@@ -488,7 +488,23 @@ with fake transport and deterministic connection-renewal scheduling, model pendi
 stream deduplication, and cover checkpoint/EOF failure, both stream types and safe
 setup recovery. Four regression cases fail against `d329809`.
 
-No cloud writes or end-to-end exactly-once claim. Independent review, full suite,
-and current-head matrix CI are required. Next: design explicit pending-stream
-recovery by stream/offset identity, with durable diagnostics and fault-injection
-acceptance criteria before introducing any automatic replay.
+No cloud writes or end-to-end exactly-once claim. Full offline suite: 500 passed,
+15 cloud skips; Ruff/mypy clean. Independent review passed 89 focused tests.
+Exact head `c07ecf6` passed Python 3.10–3.12
+[CI44022270096](https://github.com/z3z1ma/target-bigquery/actions/runs/44022270096).
+Merged as `acf6273`; merged-main
+[CI44029355711](https://github.com/z3z1ma/target-bigquery/actions/runs/44029355711)
+also passed all three versions. The GitHub review bot exhausted its quota;
+the separate independent review and tests above completed successfully.
+
+Post-merge inventory: zero open PRs; #150 is the sole open issue, still blocked
+on PyPI authentication and the existing publication approval-review denial.
+No publishing action was attempted.
+
+Next: design explicit pending-stream recovery by stream/offset identity, with
+durable diagnostics and fault-injection acceptance criteria before introducing
+automatic replay. Require identical payload/offset reuse on the same stream,
+explicit handling of ALREADY_EXISTS and OUT_OF_RANGE, unknown commit outcomes,
+and a prohibition on fresh-stream replay of an unresolved append. Default-stream
+recovery remains separately scoped because it cannot use per-stream offsets to
+deduplicate. Keep fail-closed behavior until these cases are proven.
