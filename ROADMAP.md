@@ -538,7 +538,7 @@ same-stream/offset recovery policy must distinguish already accepted data, gaps,
 unknown commit outcomes and lost process state before any implementation is enabled.
 
 
-### In progress — streaming insert partial/unknown outcome containment (#181)
+### Completed — streaming insert partial/unknown outcome containment (#181, #182)
 
 Daily inventory found new dependency PRs #179/#180 and existing publishing block
 #150. A higher-priority runtime gap emerged in `streaming_insert`: returned row
@@ -556,16 +556,27 @@ and publication; source replay can still duplicate previously accepted rows.
 Acceptance covers partial success, lost response, actual client request IDs/retry
 settings, safe NotFound recovery/exhaustion, configuration validation and process
 serialization, plus checkpoint/EOF suppression. 531 offline tests passed, 15 cloud
-skips; Ruff/mypy clean. Independent review passed 199 focused tests; exact-head CI
-required before integration. No cloud
+skips; Ruff/mypy clean. Independent review passed 199 focused tests. Exact head
+`b51f05a` passed Python 3.10–3.12
+[CI44114651079](https://github.com/z3z1ma/target-bigquery/actions/runs/44114651079).
+Merged as `709c25f`; merged-main
+[CI44114941624](https://github.com/z3z1ma/target-bigquery/actions/runs/44114941624)
+also passed all three versions. No cloud
 operations. This confirmed duplicate-write defect takes priority over speculative
 pending-stream replay; the latter's retained-payload/ordering requirements remain.
 
-### Maintenance — action pins (#179, #180)
+### Completed maintenance — action pins (#179, #180)
 
 Independent research verified official setup-uv 10.3.3 and setup-python 7.1.0 pins,
 with no relevant input migration. Existing prune-cache remains true. #179 passed
 exact-head matrix CI44104425569 and merged as `483e0bc`; #180 is refreshed on that
 base; combined matrix CI44114311813 passed at `26dca3c` before merge. Original
-bot commits are preserved. #179 merged-main CI44114224407 passed. Final main CI
-and inventory remain to be verified.
+bot commits are preserved. #179 merged-main CI44114224407 passed. #180 merged as
+`22f6900`; merged-main CI44114501841 passed. Subsequent runtime fix #182 passed
+with both pins on the integrated matrix.
+
+Daily post-merge inventory: zero open PRs; #150 remains the sole open issue,
+blocked on PyPI authentication and the existing publication approval-review
+restriction. No cloud operations or publication were attempted. Pending-stream
+recovery remains gated on retained payload identity and ordered fault-injection
+coverage; no automatic replay was added.
