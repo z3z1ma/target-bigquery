@@ -508,3 +508,26 @@ explicit handling of ALREADY_EXISTS and OUT_OF_RANGE, unknown commit outcomes,
 and a prohibition on fresh-stream replay of an unresolved append. Default-stream
 recovery remains separately scoped because it cannot use per-stream offsets to
 deduplicate. Keep fail-closed behavior until these cases are proven.
+
+
+### In progress — pending append acknowledgement identity (#177)
+
+Before adding replay, retain stream/requested offset/row count per append and
+verify successful pending responses against the captured offset. Log the identity
+before dispatch and on completion failure. A returned stream is checked when
+supplied. Missing/mismatched offsets trigger the existing fail-fast STATE gate;
+zero is valid and default streams remain offset-free. This is defensive validation
+of the official contract, not an observed server offset bug.
+
+Acceptance: multiple outstanding batches after counters advance; zero/nonzero
+success; absent/wrong offset or returned stream; default success without offsets;
+ALREADY_EXISTS/OUT_OF_RANGE remain failures; checkpoint/EOF suppress publication;
+pre-dispatch identity logging excludes payloads. Installed-client futures are used
+offline. Full suite: 515 passed, 15 cloud skips; Ruff/mypy clean. Eleven initial
+regression cases failed against `ebc8d92`. Independent review and exact-head
+matrix CI are required before integration. No automatic retry, cloud operations,
+or persistent payload journal.
+
+Next: design retained payload identity and ordered pending-stream replay. A bounded
+same-stream/offset recovery policy must distinguish already accepted data, gaps,
+unknown commit outcomes and lost process state before any implementation is enabled.

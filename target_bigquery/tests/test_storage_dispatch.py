@@ -111,7 +111,7 @@ def test_setup_failure_before_dispatch_can_retry(monkeypatch):
     sent = []
     closed = []
     future = writer.AppendRowsFuture(None)
-    future.set_result(types.AppendRowsResponse())
+    future.set_result(types.AppendRowsResponse(append_result={"offset": 0}))
 
     def components(*args):
         setup.append(True)

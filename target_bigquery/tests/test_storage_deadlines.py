@@ -81,7 +81,7 @@ def test_append_timeout_keeps_stream_identity_and_blocks_state(default, endofpip
 def test_locked_sdk_unfinished_append_future_times_out_without_cancelling():
     worker = make_worker()
     future = writer.AppendRowsFuture(SimpleNamespace(close=lambda: pytest.fail("cancelled")))
-    worker.awaiting = [storage_write.PendingAppend(future, "stream-a", 0.001)]
+    worker.awaiting = [storage_write.PendingAppend(future, "stream-a", 0.001, None, 1)]
     worker.wait(drain=True)
     assert isinstance(worker.error_notifier.messages[0][0], futures.TimeoutError)
     assert not future.cancelled()
@@ -158,7 +158,7 @@ def test_completed_append_response_uses_client_future(rejected):
             row_errors=[types.RowError(index=0, message="invalid row")] if rejected else [],
         )
     )
-    worker.awaiting = [storage_write.PendingAppend(future, "stream-a", 5)]
+    worker.awaiting = [storage_write.PendingAppend(future, "stream-a", 5, None, 1)]
     worker.wait(drain=True)
     assert worker.job_notifier.messages == [True]
     assert bool(worker.error_notifier.messages) is rejected
