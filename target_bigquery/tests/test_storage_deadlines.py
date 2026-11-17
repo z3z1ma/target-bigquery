@@ -2,6 +2,7 @@
 
 import logging
 import pickle
+from concurrent import futures
 from types import SimpleNamespace
 
 import pytest
@@ -82,7 +83,7 @@ def test_locked_sdk_unfinished_append_future_times_out_without_cancelling():
     future = writer.AppendRowsFuture(SimpleNamespace(close=lambda: pytest.fail("cancelled")))
     worker.awaiting = [storage_write.PendingAppend(future, "stream-a", 0.001)]
     worker.wait(drain=True)
-    assert isinstance(worker.error_notifier.messages[0][0], TimeoutError)
+    assert isinstance(worker.error_notifier.messages[0][0], futures.TimeoutError)
     assert not future.cancelled()
     assert not future.done()
 

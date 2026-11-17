@@ -450,7 +450,7 @@ keep new write modes and metadata-preserving overwrite gated on scoped evidence.
 ### In progress — Storage Write completion deadlines (#173)
 
 The configured timeout now travels with each queued job through serialization to
-append future waits. Pending finalize/commit use the same timeout and `retry=None`
+append future waits, replacing the locked SDK’s inherited 900-second polling limit. Pending finalize/commit use the same timeout and `retry=None`
 to avoid the locked client's independent 600-second retry window. Errors retain
 stream diagnostics, pending stream identities and default fail-fast STATE gates.
 No append retry/reconnection changes or end-to-end exactly-once guarantees.
@@ -461,7 +461,9 @@ unfinished installed-client future, successful/rejected append responses, defaul
 stream exclusion, checkpoint/EOF failure and process serialization. Per-operation
 limits, total-drain limitations, and transient-error recovery tradeoffs are in
 `docs/query-recovery.md`. No cloud operations. Independent review and exact-head
-Python 3.10–3.12 CI required before integration.
+Python 3.10–3.12 CI required before integration. Full offline suite: 495 passed,
+15 cloud skips; Ruff/mypy clean. Initial CI exposed a Python 3.10 test-only
+exception-class mismatch; use concurrent.futures.TimeoutError consistently.
 
 Next priority: isolate ambiguous synchronous append dispatch/reconnect failures
 with an offline accepted-but-response-lost server model. Distinguish safe retries
