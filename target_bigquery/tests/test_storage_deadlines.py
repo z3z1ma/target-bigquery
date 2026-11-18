@@ -101,9 +101,7 @@ def test_invalid_timeout_rejects_job_before_enqueue(timeout):
 def test_pending_commit_deadlines_preserve_recovery_streams(monkeypatch, failure, endofpipe):
     sink, _ = make_sink(13)
     stream_name = f"{PARENT}/streams/pending-a"
-    # Stream objects in production are hashable.
-    stream = type("Stream", (), {"close": lambda self: None})()
-    sink.open_streams = {(stream_name, stream)}
+    sink.open_streams = {stream_name}
     sink.stream_notification = FakeStreamNotification()
     sink._credentials = None
     sink.logger = logging.getLogger(__name__)
@@ -135,7 +133,7 @@ def test_pending_commit_deadlines_preserve_recovery_streams(monkeypatch, failure
         with pytest.raises(TimeoutError, match="uncertain"):
             target.drain_all(is_endofpipe=endofpipe)
         assert emitted == []
-        assert sink.open_streams == {(stream_name, stream)}
+        assert sink.open_streams == {stream_name}
     else:
         sink.commit_streams()
         assert sink.open_streams == set()
@@ -166,7 +164,7 @@ def test_completed_append_response_uses_client_future(rejected):
 
 def test_default_stream_is_not_finalized_or_committed(monkeypatch):
     sink, _ = make_sink()
-    sink.open_streams = {(f"{PARENT}/streams/_default", object())}
+    sink.open_streams = {f"{PARENT}/streams/_default"}
     sink.stream_notification = FakeStreamNotification()
     monkeypatch.setattr(
         storage_write, "storage_client_factory", lambda _: pytest.fail("commit called")

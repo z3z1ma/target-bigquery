@@ -123,6 +123,10 @@ class BigQueryStreamingInsertSink(BaseBigQuerySink):
     def worker_cls_factory(
         worker_executor_cls: type[Process], config: dict[str, Any]
     ) -> type[StreamingInsertThreadWorker | StreamingInsertProcessWorker]:
+        if worker_executor_cls is Process:
+            return StreamingInsertProcessWorker
+        if worker_executor_cls is _Thread:
+            return StreamingInsertThreadWorker
         Worker = type("Worker", (StreamingInsertWorker, worker_executor_cls), {})
         return cast(type[StreamingInsertThreadWorker], Worker)
 

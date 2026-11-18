@@ -14,7 +14,6 @@ import logging
 import math
 import os
 from collections.abc import Callable, Iterable
-from contextlib import suppress
 from decimal import Decimal
 from multiprocessing import Process
 from multiprocessing.connection import Connection
@@ -83,7 +82,7 @@ def get_application_stream(client: BigQueryWriteClient, job: "Job") -> StreamCom
     job.template.write_stream = write_stream.name
     append_rows_stream = writer.AppendRowsStream(client, job.template)
     rv = (write_stream.name, append_rows_stream)
-    job.stream_notifier.send(rv)
+    job.stream_notifier.send(rv[0])
     return *rv, append_rows_stream.send
 
 
@@ -94,7 +93,7 @@ def get_default_stream(client: BigQueryWriteClient, job: "Job") -> StreamCompone
     )
     append_rows_stream = writer.AppendRowsStream(client, job.template)
     rv = (job.template.write_stream, append_rows_stream)
-    job.stream_notifier.send(rv)
+    job.stream_notifier.send(rv[0])
     return *rv, append_rows_stream.send
 
 
@@ -440,10 +439,13 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
         | StorageWriteThreadBatchWorker
         | StorageWriteProcessBatchWorker
     ]:
-        if config.get("options", {}).get("storage_write_batch_mode", False):
-            Worker = type("Worker", (StorageWriteBatchWorker, worker_executor_cls), {})
-        else:
-            Worker = type("Worker", (StorageWriteStreamWorker, worker_executor_cls), {})
+        batch_mode = config.get("options", {}).get("storage_write_batch_mode", False)
+        if worker_executor_cls is Process:
+            return StorageWriteProcessBatchWorker if batch_mode else StorageWriteProcessStreamWorker
+        if worker_executor_cls is _Thread:
+            return StorageWriteThreadBatchWorker if batch_mode else StorageWriteThreadStreamWorker
+        base = StorageWriteBatchWorker if batch_mode else StorageWriteStreamWorker
+        Worker = type("Worker", (base, worker_executor_cls), {})
         return cast(type[StorageWriteThreadStreamWorker], Worker)
 
     def __init__(
@@ -454,7 +456,7 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
         key_properties: list[str] | None,
     ) -> None:
         super().__init__(target, stream_name, schema, key_properties)
-        self.open_streams: set[tuple[str, writer.AppendRowsStream]] = set()
+        self.open_streams: set[str] = set()
         self.parent = BigQueryWriteClient.table_path(
             self.table.project,
             self.table.dataset,
@@ -518,26 +520,22 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
             self.open_streams.add(stream_payload)
         if not self.open_streams:
             return
-        self.open_streams = {
-            (name, stream) for name, stream in self.open_streams if not name.endswith("_default")
-        }
+        self.open_streams = {name for name in self.open_streams if not name.endswith("_default")}
         if self.open_streams:
             timeout = _completion_timeout(self.config.get("timeout", 600))
             committer = storage_client_factory(self._credentials)
-            for name, stream in self.open_streams:
-                with suppress(exceptions.StreamClosedError):
-                    stream.close()
+            for name in sorted(self.open_streams):
                 self.logger.info("Finalizing Storage Write stream=%s", name)
                 committer.finalize_write_stream(name=name, timeout=timeout, retry=None)
             self.logger.info(
                 "Committing Storage Write parent=%s streams=%s",
                 self.parent,
-                [name for name, _ in self.open_streams],
+                sorted(self.open_streams),
             )
             write = committer.batch_commit_write_streams(
                 types.BatchCommitWriteStreamsRequest(
                     parent=self.parent,
-                    write_streams=[name for name, _ in self.open_streams],
+                    write_streams=sorted(self.open_streams),
                 ),
                 timeout=timeout,
                 retry=None,
