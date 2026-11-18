@@ -582,7 +582,7 @@ recovery remains gated on retained payload identity and ordered fault-injection
 coverage; no automatic replay was added.
 
 
-### In progress — process worker startup and Storage Write IPC (#183)
+### Completed — process worker startup and Storage Write IPC (#183 / #184)
 
 Current main and CI were green; only blocked release issue #150 remained. Offline
 reproduction identified two concrete process-mode failures: Storage Write sent
@@ -601,7 +601,13 @@ name deduplication, commit-failure retention, and staging-parent rotation.
 No cloud ingestion or expenditure. These tests do not establish live process-mode
 validation or resolve unexpected-worker-death and pipe-backpressure behavior.
 Full offline suite: 540 passed, 15 cloud skips; Ruff/mypy clean. Four initial
-regressions failed against `548fe46`. Independent review and current-head matrix
-CI are required before integration.
+regressions failed against `548fe46`. Independent review passed 110 focused tests
+for the core change and 38 for the factory extension, with no remaining blockers.
+PR [#184](https://github.com/z3z1ma/target-bigquery/pull/184), exact head `b7b62bc`,
+passed Python 3.10–3.12 CI run 44330648722; merged as `3ffc4e8`.
+Post-merge main matrix run 44331206196 passed all three Python versions.
+Issue #183 is closed. Reconciled inventory: zero open PRs; only release issue
+#150 remains, blocked on PyPI authentication and the existing publication-review
+restriction. No publishing retry was attempted.
 This startup blocker takes precedence over automatic pending-stream replay; its
 retained-payload and ordered-recovery acceptance gates remain unchanged.
