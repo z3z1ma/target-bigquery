@@ -159,3 +159,21 @@ failed-row retry, remote rollback or whole-process deadline is provided.
 See Google's [partial-success and deduplication guidance](https://docs.cloud.google.com/bigquery/docs/troubleshoot-storage-api).
 Offline tests use the installed client request builder and simulated acceptance;
 no live cloud test is claimed.
+
+
+## Storage Write worker ownership
+
+With `options.process_pool: true`, notifications now carry only stream names.
+SDK stream objects and their locks stay in the worker process. Standard process workers for all four ingestion methods use importable classes
+and are tested under Python's spawn start method. Thread mode uses the same stream-name notification contract.
+
+Workers finish append waits and close their own clients before normal exit.
+The coordinator joins them and checks errors before finalizing/committing pending
+stream names. It deduplicates names, excludes the default stream and retains pending
+names on finalize/commit failure. A worker close error blocks hooks and STATE under
+default fail-fast behavior; closing a client is not remote rollback.
+
+Validation covers real multiprocessing pipes with installed SDK stream objects,
+spawned sentinel-only workers, and offline lifecycle failures. It does not claim
+live process-mode ingestion validation or solve unexpected worker death, pipe
+backpressure, or spawn compatibility for custom executor classes.

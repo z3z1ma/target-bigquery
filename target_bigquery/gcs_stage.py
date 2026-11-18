@@ -153,6 +153,10 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
     def worker_cls_factory(
         worker_executor_cls: type[Process], config: dict[str, Any]
     ) -> type[GcsStagingThreadWorker | GcsStagingProcessWorker]:
+        if worker_executor_cls is Process:
+            return GcsStagingProcessWorker
+        if worker_executor_cls is _Thread:
+            return GcsStagingThreadWorker
         Worker = type("Worker", (GcsStagingWorker, worker_executor_cls), {})
         return cast(type[GcsStagingThreadWorker], Worker)
 

@@ -654,12 +654,12 @@ def test_close_cached_streams_tolerates_already_closed_stream():
     assert worker.error_notifier.messages == []
 
 
-def test_storage_write_commit_streams_tolerates_already_closed_stream(monkeypatch):
+def test_storage_write_commit_streams_deduplicates_notified_names(monkeypatch):
     sink = object.__new__(storage_write.BigQueryStorageWriteSink)
     sink._config = {}
     stream_name = "projects/p/datasets/d/tables/t/streams/s"
     sink.open_streams = set()
-    sink.stream_notification = FakeStreamNotification((stream_name, AlreadyClosedStream()))
+    sink.stream_notification = FakeStreamNotification(stream_name, stream_name)
     sink._credentials = object()
     sink.parent = "projects/p/datasets/d/tables/t"
     sink.logger = SimpleNamespace(
@@ -682,9 +682,8 @@ def test_storage_write_commit_failure_retains_streams(monkeypatch, failure, endo
     sink = object.__new__(storage_write.BigQueryStorageWriteSink)
     sink._config = {}
     stream_name = "projects/p/datasets/d/tables/t/streams/s"
-    stream = AlreadyClosedStream()
     sink.open_streams = set()
-    sink.stream_notification = FakeStreamNotification((stream_name, stream))
+    sink.stream_notification = FakeStreamNotification(stream_name)
     sink._credentials = object()
     sink.parent = "projects/p/datasets/d/tables/t"
     sink.logger = SimpleNamespace(debug=lambda *args: None, info=lambda *args: None)
@@ -715,4 +714,4 @@ def test_storage_write_commit_failure_retains_streams(monkeypatch, failure, endo
     monkeypatch.setattr(sink, "merge_table", lambda **kwargs: pytest.fail("merge ran"))
     with pytest.raises(RuntimeError):
         target.drain_all(is_endofpipe=endofpipe)
-    assert sink.open_streams == {(stream_name, stream)}
+    assert sink.open_streams == {stream_name}

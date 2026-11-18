@@ -1,6 +1,6 @@
 # Maintained roadmap
 
-Updated: 2026-11-17. Owner: repository maintainer (execution delegated to Codex).
+Updated: 2026-11-18. Owner: repository maintainer (execution delegated to Codex).
 Baseline: `c0acf83` on main. This replaces the July zero-open snapshot as the
 current work queue; the historical `.10x` records remain evidence for that date.
 
@@ -580,3 +580,28 @@ blocked on PyPI authentication and the existing publication approval-review
 restriction. No cloud operations or publication were attempted. Pending-stream
 recovery remains gated on retained payload identity and ordered fault-injection
 coverage; no automatic replay was added.
+
+
+### In progress — process worker startup and Storage Write IPC (#183)
+
+Current main and CI were green; only blocked release issue #150 remained. Offline
+reproduction identified two concrete process-mode failures: Storage Write sent
+SDK objects containing RLocks through a multiprocessing pipe; all four ingestion
+factories dynamically created unpicklable worker classes. Existing named classes
+already provided the required behavior.
+
+Stream notifications now contain names only. Workers own and close SDK clients;
+the coordinator deduplicates/filter names and finalizes/commits after join and
+worker-error checks. Standard Process/Thread factories return the existing named
+classes; custom executor fallback remains unchanged. Acceptance includes real
+spawn start/exit for every standard worker variant, real SDK construction with
+real process pipes, worker-close failure blocking checkpoint/EOF hooks and STATE,
+name deduplication, commit-failure retention, and staging-parent rotation.
+
+No cloud ingestion or expenditure. These tests do not establish live process-mode
+validation or resolve unexpected-worker-death and pipe-backpressure behavior.
+Full offline suite: 540 passed, 15 cloud skips; Ruff/mypy clean. Four initial
+regressions failed against `548fe46`. Independent review and current-head matrix
+CI are required before integration.
+This startup blocker takes precedence over automatic pending-stream replay; its
+retained-payload and ordered-recovery acceptance gates remain unchanged.

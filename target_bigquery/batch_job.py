@@ -138,6 +138,10 @@ class BigQueryBatchJobSink(BaseBigQuerySink):
     def worker_cls_factory(
         worker_executor_cls: type[Process], config: dict[str, Any]
     ) -> type[BatchJobThreadWorker | BatchJobProcessWorker]:
+        if worker_executor_cls is Process:
+            return BatchJobProcessWorker
+        if worker_executor_cls is _Thread:
+            return BatchJobThreadWorker
         Worker = type("Worker", (BatchJobWorker, worker_executor_cls), {})
         return cast(type[BatchJobThreadWorker], Worker)
 
