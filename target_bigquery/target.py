@@ -544,6 +544,7 @@ class TargetBigQuery(Target):
         for i in reversed(workers_to_cull):
             worker = self.workers.pop(i)
             cast(Any, worker).join()  # Wait for termination. This should be a no-op.
+            self._check_worker_exit(worker)
             self.logger.info("Culling terminated worker %s", worker.ext_id)
         while self.add_worker_predicate or not self.workers:
             worker = self.worker_factory()
@@ -623,7 +624,10 @@ class TargetBigQuery(Target):
                 self.logger.error(msg)
                 self.logger.error("Terminating workers without writing state.")
                 if shutdown_workers:
-                    self._shutdown_workers()
+                    try:
+                        self._shutdown_workers()
+                    except RuntimeError:
+                        self.logger.exception("Worker shutdown also failed.")
                 raise RuntimeError(msg) from e
             else:
                 self.logger.warning(msg)
@@ -669,14 +673,35 @@ class TargetBigQuery(Target):
         for worker in self.workers:
             if cast(Any, worker).is_alive():
                 self.queue.put(None)
+        stopped = []
         while self.workers:
             worker = self.workers.pop()
             cast(Any, worker).join()
+            stopped.append(worker)
+        for worker in stopped:
+            self._check_worker_exit(worker, shutdown_workers=False)
 
     def _join_workers(self) -> None:
         """Join workers without clearing the pool."""
         for worker in self.workers:
             cast(Any, worker).join()
+
+        for worker in self.workers:
+            self._check_worker_exit(worker, shutdown_workers=False)
+
+    def _check_worker_exit(self, worker: Any, *, shutdown_workers: bool = True) -> None:
+        """Detect process failures that could not send an error notification."""
+        exitcode = getattr(worker, "exitcode", None)
+        if exitcode is None or exitcode == 0:
+            return
+        msg = f"Worker {worker.ext_id} exited with status {exitcode}; queued data may be incomplete."
+        if self.config.get("fail_fast", True):
+            self.logger.error(msg)
+            if shutdown_workers:
+                self._shutdown_workers()
+            self._handle_worker_error(shutdown_workers=False)
+            raise RuntimeError(msg)
+        self.logger.warning(msg)
 
     def _clean_up_sinks(self) -> None:
         """Run end-of-pipe cleanup hooks for all active sinks."""
