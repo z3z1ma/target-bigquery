@@ -175,5 +175,19 @@ default fail-fast behavior; closing a client is not remote rollback.
 
 Validation covers real multiprocessing pipes with installed SDK stream objects,
 spawned sentinel-only workers, and offline lifecycle failures. It does not claim
-live process-mode ingestion validation or solve unexpected worker death, pipe
-backpressure, or spawn compatibility for custom executor classes.
+live process-mode ingestion validation or solve pipe backpressure or spawn
+compatibility for custom executor classes.
+
+
+## Abnormal process exits
+
+The coordinator checks process exit status after joins, including idle-worker
+removal. A nonzero status (including a negative signal status) blocks replacement,
+checkpoint hooks, publication and STATE with default `fail_fast: true`, even when
+the worker could not send an error notification. Shutdown joins all workers before
+reporting the failure. Diagnostics identify the worker and exit status; an existing
+error notification remains the primary exception if shutdown also detects a crash.
+
+`fail_fast: false` logs a warning and retains permissive behavior, which can advance
+STATE with incomplete data. This check does not undo remote writes, detect silent
+zero-status exits or unexpected thread death, or impose a deadline on joins.

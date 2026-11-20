@@ -1,6 +1,6 @@
 # Maintained roadmap
 
-Updated: 2026-11-18. Owner: repository maintainer (execution delegated to Codex).
+Updated: 2026-11-20. Owner: repository maintainer (execution delegated to Codex).
 Baseline: `c0acf83` on main. This replaces the July zero-open snapshot as the
 current work queue; the historical `.10x` records remain evidence for that date.
 
@@ -611,3 +611,25 @@ Issue #183 is closed. Reconciled inventory: zero open PRs; only release issue
 restriction. No publishing retry was attempted.
 This startup blocker takes precedence over automatic pending-stream replay; its
 retained-payload and ordered-recovery acceptance gates remain unchanged.
+
+
+### In progress — abnormal process exit containment (#185)
+
+Main `0c5b80d` had zero open PRs and only blocked release issue #150. The prior
+runtime main matrix (44331206196, `3ffc4e8`) passed; subsequent main edits were
+roadmap-only. Read the local `.10x` quality specification and completion audit;
+this pass prioritizes a reproducible checkpoint defect over speculative recovery.
+
+Independent reproduction showed that a process exiting with status 17 and an
+empty error pipe still allowed checkpoint hooks and EOF overwrite publication.
+Check exit status after culling and checkpoint/EOF joins. Default fail-fast stops
+replacement, hooks and STATE; explicit fail-fast-disabled behavior warns and
+remains permissive. All siblings are joined before shutdown reports failure.
+Acceptance includes positive/negative exits, overwrite/append checkpoint and EOF,
+clean process/thread compatibility, culling, original error preservation and a real
+spawned `os._exit(17)` process. No cloud calls, release changes or permission changes.
+
+Independent review found no data-integrity blockers; its diagnostic suggestion
+was incorporated to preserve an existing error notification during shutdown.
+Exact-head CI and final offline validation are required before integration.
+Silent zero exits, thread death and join/pipe backpressure remain separate work.
