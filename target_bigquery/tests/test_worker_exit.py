@@ -115,3 +115,25 @@ def test_error_notification_remains_primary_when_shutdown_finds_failed_process()
     assert exc.value.__cause__ is original
     assert target.workers == []
     assert emitted == []
+
+
+@pytest.mark.parametrize("boundary", ["checkpoint", "eof", "cull"])
+def test_pending_error_remains_primary_at_lifecycle_boundaries(boundary):
+    failed, sibling = ExitedWorker(17), ExitedWorker(0)
+    target, sink, emitted = target_with_workers([sibling, failed])
+    original = ValueError("reconcile load job abc before replay")
+    errors = [(original, str(original))]
+    target.error_notification = SimpleNamespace(
+        poll=lambda: bool(errors), recv=lambda: errors.pop(0)
+    )
+    with pytest.raises(RuntimeError, match="reconcile load job abc") as exc:
+        if boundary == "cull":
+            target.resize_worker_pool()
+        else:
+            target.drain_all(is_endofpipe=boundary == "eof")
+    assert exc.value.__cause__ is original
+    assert errors == []
+    assert failed.joins == sibling.joins == 1
+    assert emitted == []
+    assert not sink.published
+    assert sink.checkpoints == 0

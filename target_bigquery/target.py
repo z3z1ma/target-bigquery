@@ -699,6 +699,7 @@ class TargetBigQuery(Target):
             self.logger.error(msg)
             if shutdown_workers:
                 self._shutdown_workers()
+            self._handle_worker_error(shutdown_workers=False)
             raise RuntimeError(msg)
         self.logger.warning(msg)
 

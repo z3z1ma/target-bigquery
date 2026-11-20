@@ -631,5 +631,9 @@ spawned `os._exit(17)` process. No cloud calls, release changes or permission ch
 
 Independent review found no data-integrity blockers; its diagnostic suggestion
 was incorporated to preserve an existing error notification during shutdown.
+Automated review additionally identified pending notifications at checkpoint/EOF;
+the fallback exit-status check now consumes their detailed error first after all
+siblings join. Regressions cover checkpoint, EOF and culling. Final offline suite:
+559 passed, 15 cloud skips; Ruff/mypy clean.
 Exact-head CI and final offline validation are required before integration.
 Silent zero exits, thread death and join/pipe backpressure remain separate work.
