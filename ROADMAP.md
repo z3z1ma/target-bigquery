@@ -613,7 +613,7 @@ This startup blocker takes precedence over automatic pending-stream replay; its
 retained-payload and ordered-recovery acceptance gates remain unchanged.
 
 
-### In progress — abnormal process exit containment (#185)
+### Completed — abnormal process exit containment (#185 / #186)
 
 Main `0c5b80d` had zero open PRs and only blocked release issue #150. The prior
 runtime main matrix (44331206196, `3ffc4e8`) passed; subsequent main edits were
@@ -635,5 +635,10 @@ Automated review additionally identified pending notifications at checkpoint/EOF
 the fallback exit-status check now consumes their detailed error first after all
 siblings join. Regressions cover checkpoint, EOF and culling. Final offline suite:
 559 passed, 15 cloud skips; Ruff/mypy clean.
-Exact-head CI and final offline validation are required before integration.
+PR [#186](https://github.com/z3z1ma/target-bigquery/pull/186), final head `b84a98c`,
+passed Python 3.10–3.12 matrix run 44755899850. Merged as `dadb548`;
+post-merge main run 44756064562 passed all three Python versions. Eight checkpoint
+regressions fail against old main `0c5b80d`. Issue #185 is closed.
+Final inventory: zero open PRs; only #150 remains blocked on PyPI sign-in and the
+existing publication-review restriction. No publication retry or cloud spending.
 Silent zero exits, thread death and join/pipe backpressure remain separate work.
