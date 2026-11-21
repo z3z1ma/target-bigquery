@@ -644,7 +644,7 @@ existing publication-review restriction. No publication retry or cloud spending.
 Silent zero exits, thread death and join/pipe backpressure remain separate work.
 
 
-### In progress — explicit normal worker completion (#187)
+### Completed — explicit normal worker completion (#187 / #188)
 
 Reconciled main `1685c2e`: zero open PRs, only blocked #150. Runtime main CI
 44756064562 passed; subsequent edits were documentation-only. Four deterministic
@@ -660,6 +660,14 @@ return, culling, finish ordering, and checkpoint/EOF gates. Normal loop completi
 is not queue emptiness or durable-delivery proof. Late-enqueued work, feeder loss
 and backpressure remain separate investigations; retries and replay are unchanged.
 
-Independent review, full offline tests and exact-head Python matrix are required
-before integration. No cloud operations, release/tag, permission or credential
-changes. The existing #150 publication block remains untouched.
+PR [#188](https://github.com/z3z1ma/target-bigquery/pull/188) opened as draft, then
+passed exact-head Python 3.10–3.12 CI 44915442948 at `1321f3c`. Offline suite:
+574 passed, 15 cloud skips; Ruff/mypy clean. Independent review passed 106 focused
+tests; automated review completed with no findings. Merged as `103a5b5`; main
+matrix 44915674127 passed all three versions. Issue #187 is closed.
+
+Final inventory: zero open PRs, only #150 remains. No cloud operations, release/tag,
+permission or credential changes; the existing publication block is untouched.
+Next gate: reproduce late-enqueued work or queue-feeder loss independently before
+introducing any queue-exhaustion protocol. This completion marker does not claim
+to solve either condition.
