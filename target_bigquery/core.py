@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from fnmatch import fnmatch
 from io import BytesIO
-from multiprocessing import Process, Queue
+from multiprocessing import Event, Process, Queue
 from multiprocessing.connection import Connection
 from pathlib import Path
 from string import Formatter
@@ -425,6 +425,7 @@ class BaseWorker(ABC):
         self.job_notifier: Connection = job_notifier
         self.error_notifier: Connection = error_notifier
         self.log_notifier: Connection = log_notifier
+        self.normal_completion = Event()
 
     @abstractmethod
     def run(self) -> None:

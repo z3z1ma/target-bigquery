@@ -692,9 +692,14 @@ class TargetBigQuery(Target):
     def _check_worker_exit(self, worker: Any, *, shutdown_workers: bool = True) -> None:
         """Detect process failures that could not send an error notification."""
         exitcode = getattr(worker, "exitcode", None)
-        if exitcode is None or exitcode == 0:
+        completion = getattr(worker, "normal_completion", None)
+        if exitcode is not None and exitcode != 0:
+            reason = f"exited with status {exitcode}"
+        elif completion is not None and not completion.is_set():
+            reason = "exited without normal completion"
+        else:
             return
-        msg = f"Worker {worker.ext_id} exited with status {exitcode}; queued data may be incomplete."
+        msg = f"Worker {worker.ext_id} {reason}; queued data may be incomplete."
         if self.config.get("fail_fast", True):
             self.logger.error(msg)
             if shutdown_workers:

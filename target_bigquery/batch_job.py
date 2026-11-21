@@ -107,6 +107,7 @@ class BatchJobWorker(BaseWorker):
                 )
             finally:
                 self.queue.task_done()  # type: ignore
+        self.normal_completion.set()
 
 
 class BatchJobThreadWorker(BatchJobWorker, _Thread):

@@ -189,5 +189,21 @@ reporting the failure. Diagnostics identify the worker and exit status; an exist
 error notification remains the primary exception if shutdown also detects a crash.
 
 `fail_fast: false` logs a warning and retains permissive behavior, which can advance
-STATE with incomplete data. This check does not undo remote writes, detect silent
-zero-status exits or unexpected thread death, or impose a deadline on joins.
+STATE with incomplete data. This check does not undo remote writes or impose a deadline on joins.
+
+
+## Normal worker completion
+
+Standard workers now share an explicit normal-completion marker with the
+coordinator. They set it only at the end of their ingestion loop, after Storage
+Write finishes its append waits and client cleanup. Both idle timeouts and queue
+sentinels are normal exits. After joining, the coordinator rejects a missing
+marker under default fail-fast behavior, even for exit status zero or an early
+thread return. Culling checks this before starting replacements. Detailed pending
+worker errors remain primary; `fail_fast: false` warns and remains permissive.
+
+The marker establishes that the loop reached its normal end, not that every
+queued job was delivered or every remote write succeeded. Error notifications,
+stream commits and publication hooks still determine checkpoint safety. Work
+arriving after an idle worker exits and queue feeder/backpressure failures need
+separate handling. No automatic replay or live-cloud validation is added.

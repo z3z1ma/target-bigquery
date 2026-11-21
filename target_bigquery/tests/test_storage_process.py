@@ -2,6 +2,7 @@
 
 import multiprocessing as mp
 import pickle
+from queue import Empty
 from types import SimpleNamespace
 
 import pytest
@@ -10,7 +11,13 @@ from google.cloud.bigquery_storage_v1 import types, writer
 from target_bigquery import batch_job, gcs_stage, storage_write, streaming_insert
 from target_bigquery.tests.test_overwrite_state import StagedSink, make_target
 from target_bigquery.tests.test_storage_deadlines import PARENT, make_worker
+from target_bigquery.tests.test_worker_exit import target_with_workers
 from target_bigquery.tests.test_workers import FakeNotifier, FakeStreamNotification
+
+
+class IdleQueue:
+    def get(self, timeout):
+        raise Empty
 
 
 def _run_offline_worker():
@@ -23,8 +30,9 @@ def _run_offline_worker():
     type(worker).run(worker)
 
 
+@pytest.mark.parametrize("idle", [False, True])
 @pytest.mark.parametrize("method", ["storage_default", "storage_pending", "batch", "gcs", "insert"])
-def test_standard_process_worker_starts_with_spawn(method):
+def test_standard_process_worker_starts_with_spawn(method, idle):
     previous = mp.get_start_method(allow_none=True)
     mp.set_start_method("spawn", force=True)
     queue = mp.Queue()
@@ -43,18 +51,24 @@ def test_standard_process_worker_starts_with_spawn(method):
         assert pickle.loads(pickle.dumps(cls)) is cls
         worker = cls(
             ext_id="spawn-test",
-            queue=queue,
+            queue=IdleQueue() if idle else queue,
             credentials=None,
             job_notifier=FakeNotifier(),
             error_notifier=FakeNotifier(),
             log_notifier=FakeNotifier(),
         )
         worker.run = _run_offline_worker
-        queue.put(None)
+        if not idle:
+            queue.put(None)
         worker.start()
         worker.join(timeout=20)
         assert not worker.is_alive()
         assert worker.exitcode == 0
+        assert worker.normal_completion.is_set()
+        target, sink, emitted = target_with_workers([worker])
+        target.drain_all(is_endofpipe=idle)
+        assert emitted == [{"pos": 1}]
+        assert sink.published if idle else sink.checkpoints == 1
     finally:
         if worker is not None and worker.is_alive():
             worker.terminate()
