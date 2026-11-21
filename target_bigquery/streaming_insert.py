@@ -104,6 +104,7 @@ class StreamingInsertWorker(BaseWorker):
                 )
             finally:
                 self.queue.task_done()  # type: ignore
+        self.normal_completion.set()
 
 
 class StreamingInsertThreadWorker(StreamingInsertWorker, _Thread):

@@ -1,6 +1,6 @@
 # Maintained roadmap
 
-Updated: 2026-11-20. Owner: repository maintainer (execution delegated to Codex).
+Updated: 2026-11-21. Owner: repository maintainer (execution delegated to Codex).
 Baseline: `c0acf83` on main. This replaces the July zero-open snapshot as the
 current work queue; the historical `.10x` records remain evidence for that date.
 
@@ -642,3 +642,24 @@ regressions fail against old main `0c5b80d`. Issue #185 is closed.
 Final inventory: zero open PRs; only #150 remains blocked on PyPI sign-in and the
 existing publication-review restriction. No publication retry or cloud spending.
 Silent zero exits, thread death and join/pipe backpressure remain separate work.
+
+
+### In progress — explicit normal worker completion (#187)
+
+Reconciled main `1685c2e`: zero open PRs, only blocked #150. Runtime main CI
+44756064562 passed; subsequent edits were documentation-only. Four deterministic
+real-spawn regressions confirmed that `os._exit(0)` before an unconsumed batch and
+sentinel allowed append/overwrite checkpoint and EOF hooks on old main.
+
+Standard workers now set a shared event at natural loop end, after Storage Write
+finish. Default fail-fast checks it after join and before culling replacements or
+publication/STATE. Nonzero status and detailed pending errors retain priority.
+Idle-timeout and sentinel exits remain normal; fail-fast-disabled mode warns.
+Acceptance covers all five standard process variants under spawn, early thread
+return, culling, finish ordering, and checkpoint/EOF gates. Normal loop completion
+is not queue emptiness or durable-delivery proof. Late-enqueued work, feeder loss
+and backpressure remain separate investigations; retries and replay are unchanged.
+
+Independent review, full offline tests and exact-head Python matrix are required
+before integration. No cloud operations, release/tag, permission or credential
+changes. The existing #150 publication block remains untouched.

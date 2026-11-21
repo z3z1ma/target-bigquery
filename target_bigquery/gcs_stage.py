@@ -112,6 +112,7 @@ class GcsStagingWorker(BaseWorker):
                 )
             finally:
                 self.queue.task_done()  # type: ignore
+        self.normal_completion.set()
 
 
 class GcsStagingThreadWorker(GcsStagingWorker, _Thread):

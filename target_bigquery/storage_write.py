@@ -243,6 +243,7 @@ class StorageWriteBatchWorker(BaseWorker):
             finally:
                 self.queue.task_done()  # type: ignore
         self._finish()
+        self.normal_completion.set()
 
     @staticmethod
     def _configure_bidi_logging() -> None:

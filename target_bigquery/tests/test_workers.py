@@ -3,6 +3,7 @@
 from io import BytesIO
 from multiprocessing import Process
 from queue import Empty
+from threading import Event
 from types import SimpleNamespace, TracebackType
 from typing import Any, cast
 
@@ -112,6 +113,7 @@ def first_error_message(notifier: FakeNotifier) -> tuple[Exception, str]:
 
 def make_worker(worker_cls: type[Any], job: object) -> Any:
     worker = object.__new__(worker_cls)
+    worker.normal_completion = Event()
     worker.ext_id = "worker-a"
     worker.credentials = object()
     worker.queue = SequencedQueue(job)
