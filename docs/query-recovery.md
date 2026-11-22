@@ -207,3 +207,30 @@ queued job was delivered or every remote write succeeded. Error notifications,
 stream commits and publication hooks still determine checkpoint safety. Work
 arriving after an idle worker exits and queue feeder/backpressure failures need
 separate handling. No automatic replay or live-cloud validation is added.
+
+## Nullable upsert keys
+
+Denormalized upsert matches each key component using equality or both values
+being SQL NULL, with each component grouped before AND. This prevents a replay
+from inserting another row solely because an accepted key component is null.
+Ordinary equality is retained for non-null values: no casts, COALESCE sentinels,
+or IS NOT DISTINCT FROM substitution changes NaN or coercion behavior. MERGE
+schema intersection uses the same transformed physical names as ingestion.
+
+Missing Singer keys remain errors. Fixed JSON mode validates original key presence
+inside `data` but does not upsert or extract keys for MERGE. Append and overwrite
+are unaffected. `_sdc_deleted_at` remains an updated metadata column, not a physical
+DELETE operation. General record validation is already bypassed by this target;
+this change does not add validation, relax schemas or support new key types.
+
+For repeated staged keys, enable `dedupe_before_upsert` when appropriate: it groups
+by the same keys and keeps the latest extraction/receipt ordering. Without dedup,
+multiple nullable source rows can now match one destination row and cause a
+BigQuery UPDATE cardinality error instead of silently inserting duplicates. An
+empty destination can still receive repeated source keys. Existing destination
+duplicates are not repaired, and tied dedup timestamps do not gain a new tie-breaker.
+
+The predicate follows [Google's MERGE guidance](https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/dml-syntax#merge_statement).
+Offline tests execute the generated predicate/window SQL subset and a minimal
+replay model in SQLite; they are not BigQuery integration tests. Live correctness,
+query-plan cost and partition-pruning equivalence have not been measured.
