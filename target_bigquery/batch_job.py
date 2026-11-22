@@ -109,7 +109,7 @@ class BatchJobWorker(BaseWorker):
                         )
                     break
             finally:
-                self.queue.task_done()  # type: ignore
+                self.mark_job_done()
         self.normal_completion.set()
 
 

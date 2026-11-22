@@ -432,6 +432,12 @@ class BaseWorker(ABC):
         """Run the worker."""
         raise NotImplementedError
 
+    def mark_job_done(self) -> None:
+        """Account for a data job when the queue supports task tracking."""
+        task_done = getattr(self.queue, "task_done", None)
+        if task_done is not None:
+            task_done()
+
     def serialize_exception(self, exc: Exception) -> str:
         """Serialize an exception to a string."""
         msg = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__, chain=False))
