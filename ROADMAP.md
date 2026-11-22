@@ -724,7 +724,7 @@ predates the fix; next gate is a real process data-job regression, since sentine
 spawn tests cannot cover it. Feeder loss remains independently unproven.
 No cloud, publishing, tag, credential or permission changes.
 
-### In progress — process data-job accounting (#193)
+### Integrated; main CI pending — process data-job accounting (#193 / #194)
 
 Main `0db06d1` records #192's successful exact post-merge matrix. The separate
 queue mismatch was reproduced with actual standard spawned workers, the target's
@@ -739,6 +739,10 @@ coverage includes five worker variants, FIFO completion at checkpoint/EOF, termi
 API failure containment and thread accounting regressions. APIs remain offline
 fakes; feeder loss and live ingestion are outside these claims.
 
-Focused spawn/accounting suite: 21 passed; Ruff/mypy clean. Full suite, independent
-review and exact-head CI are required before integration. No cloud, publishing,
-tag, permission or credential changes; #150 remains blocked.
+Full offline suite: 622 passed, 15 cloud skips; Ruff/mypy clean. Independent review:
+102 focused tests passed; automated review found no issues. Draft-first PR #194
+passed exact-head Python 3.10–3.12 matrix 45058186230 at `13a45f4`; merged as
+`f502c81`. Post-merge run 45058609177: Python 3.12 passed, 3.10/3.11 remain queued
+for runners. Full main verification is pending. Issue #193 closed; zero open PRs,
+only blocked #150 remains. No cloud, publishing, tag, permission or credential
+changes. A follow-up will record terminal main CI results without inferring success.
