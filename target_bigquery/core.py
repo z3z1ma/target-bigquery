@@ -870,7 +870,9 @@ class BaseBigQuerySink(BatchSink):
                 f"ORDER BY {', '.join(f'{c} DESC' for c in ordering_columns)}) = 1"
             )
             ctas_tmp = f"CREATE OR REPLACE TEMP TABLE `{tmp}` AS {dedupe_query}"
-        source_columns = {field.name for field in self.table.as_table().schema}
+        source_columns = {
+            field.name for field in self.table.get_resolved_schema(self.apply_transforms)
+        }
         target_columns = [field.name for field in target.schema if field.name in source_columns]
         if not target_columns:
             raise RuntimeError("merge_table called without shared source and target columns")
@@ -884,7 +886,11 @@ class BaseBigQuerySink(BatchSink):
             )
         merge_clause = (
             f"MERGE `{merge_target}` AS target USING `{tmp or self.table}` AS source ON "
-            + " AND ".join(f"target.`{field}` = source.`{field}`" for field in key_properties)
+            + " AND ".join(
+                f"(target.`{field}` = source.`{field}` OR "
+                f"(target.`{field}` IS NULL AND source.`{field}` IS NULL))"
+                for field in key_properties
+            )
         )
         update_columns = [field for field in target_columns if field not in key_properties]
         update_clause = (

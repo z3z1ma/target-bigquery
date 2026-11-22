@@ -1,6 +1,6 @@
 # Maintained roadmap
 
-Updated: 2026-11-21. Owner: repository maintainer (execution delegated to Codex).
+Updated: 2026-11-22. Owner: repository maintainer (execution delegated to Codex).
 Baseline: `c0acf83` on main. This replaces the July zero-open snapshot as the
 current work queue; the historical `.10x` records remain evidence for that date.
 
@@ -671,3 +671,23 @@ permission or credential changes; the existing publication block is untouched.
 Next gate: reproduce late-enqueued work or queue-feeder loss independently before
 introducing any queue-exhaustion protocol. This completion marker does not claim
 to solve either condition.
+
+### In progress — nullable upsert matching (#189)
+
+Main `53fb2c7`: zero open PRs, only blocked release #150. Reviewed current Google
+MERGE documentation and local `.10x` guidance. SDK/target checks key presence and
+accepts explicit null; denormalized upsert uses MERGE, while fixed JSON does not.
+Five offline regressions failed against old main: generated composite predicate,
+nullable matches and two-pass replay. A transformed-key test separately exposed
+source-schema intersection using original names despite transformed ingestion.
+
+Use parenthesized equality-or-both-null per key component and physical transformed
+source columns. No casting, alternate NaN equality, validation, append/overwrite,
+physical tombstone deletion or historical duplicate cleanup changes. Test optional
+staging dedup and multiple source matches; document the possible cardinality error
+with dedup disabled. Existing record-schema validation bypass and unsupported key
+types remain separate gaps. Offline predicate/window/replay tests are not live
+BigQuery evidence; planner performance remains unmeasured.
+
+Full offline validation, independent review, draft-first PR and exact-head CI are
+required before integration. No cloud, publishing, tag or permission changes.
