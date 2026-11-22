@@ -724,7 +724,7 @@ predates the fix; next gate is a real process data-job regression, since sentine
 spawn tests cannot cover it. Feeder loss remains independently unproven.
 No cloud, publishing, tag, credential or permission changes.
 
-### Integrated; main CI pending — process data-job accounting (#193 / #194)
+### Completed — process data-job accounting (#193 / #194)
 
 Main `0db06d1` records #192's successful exact post-merge matrix. The separate
 queue mismatch was reproduced with actual standard spawned workers, the target's
@@ -742,7 +742,17 @@ fakes; feeder loss and live ingestion are outside these claims.
 Full offline suite: 622 passed, 15 cloud skips; Ruff/mypy clean. Independent review:
 102 focused tests passed; automated review found no issues. Draft-first PR #194
 passed exact-head Python 3.10–3.12 matrix 45058186230 at `13a45f4`; merged as
-`f502c81`. Post-merge run 45058609177: Python 3.12 passed, 3.10/3.11 remain queued
-for runners. Full main verification is pending. Issue #193 closed; zero open PRs,
-only blocked #150 remains. No cloud, publishing, tag, permission or credential
-changes. A follow-up will record terminal main CI results without inferring success.
+`f502c81`. Exact post-merge run 45058609177 passed Python 3.10–3.12,
+completing at 19:15 UTC on 2026-11-22. Main verification is complete. Issue #193
+closed; zero open PRs, only blocked #150 remains. No cloud, publishing, tag,
+permission or credential changes.
+
+Next bounded investigation: test whether a multiprocessing queue feeder serialization
+failure can discard a data job while a later sentinel permits normal completion.
+The completion marker proves the worker loop ended, not that every queued payload
+arrived; this is a documented coverage gap, not a confirmed transport defect.
+Use an offline real-spawn test with a deliberately unpicklable payload, capture the
+feeder failure and parent checkpoint/EOF outcome, then assess whether production
+job construction can reach that failure. Require deterministic evidence before any
+production change; preserve FIFO, bounded waits and fail-closed publication/STATE.
+No cloud experiment, retry-policy expansion or release work is part of this gate.
