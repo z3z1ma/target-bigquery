@@ -698,3 +698,25 @@ final inventory is zero open PRs and only blocked #150. No cloud, publishing,
 tag, credential or permission changes. Next validation gate for this area is
 explicit key-type/schema-validation contract work; live planner evidence remains
 separate and requires authorized cloud scope.
+
+### In progress — EOF retry ownership (#191)
+
+Reconciled main `c65f271`: no open PRs, only #150. A gated fake submission on a real
+standard batch thread confirmed EOF queued a sentinel before a retryable failure;
+the retry went behind the sentinel and normal completion permitted publication
+and STATE. This deterministic test failed before the fix.
+
+All four loops now retry eligible jobs locally before another shared-queue read,
+using existing caps, identities, delays and classifications. Storage Write returns
+an explicit retry decision; terminal/ambiguous paths retain their error behavior.
+An outer finally accounts each original data dequeue once. No empty/qsize checks,
+queue joins or retry/replay expansion. Nine gated EOF tests cover all transports,
+recovery and exhaustion, publication/STATE gates and identity/accounting.
+
+601 offline tests passed, 15 cloud skips; Ruff/mypy clean. Independent review:
+72 focused tests passed, no blockers. Exact-head CI and post-merge verification
+remain required. Separate source-confirmed finding: process mode configures
+multiprocessing.Queue, which lacks task_done used by all data-job loops. This
+predates the fix; next gate is a real process data-job regression, since sentinel
+spawn tests cannot cover it. Feeder loss remains independently unproven.
+No cloud, publishing, tag, credential or permission changes.

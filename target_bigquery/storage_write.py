@@ -235,11 +235,15 @@ class StorageWriteBatchWorker(BaseWorker):
             if job is None:
                 break
             try:
-                write_stream = self._send_job(client, job)
-            except Exception as exc:
-                self._handle_dispatch_error(job, exc)
-            else:
-                self._record_dispatch_success(job, write_stream)
+                while True:
+                    try:
+                        write_stream = self._send_job(client, job)
+                    except Exception as exc:
+                        if self._handle_dispatch_error(job, exc):
+                            continue
+                    else:
+                        self._record_dispatch_success(job, write_stream)
+                    break
             finally:
                 self.queue.task_done()  # type: ignore
         self._finish()
@@ -296,7 +300,7 @@ class StorageWriteBatchWorker(BaseWorker):
             return generate_request(job.data, path=write_stream)
         return generate_request(job.data, offset=self.offsets[job.parent])
 
-    def _handle_dispatch_error(self, job: Job, exc: Exception) -> None:
+    def _handle_dispatch_error(self, job: Job, exc: Exception) -> bool:
         """Retry setup failures; stop after any potentially accepted dispatch."""
         if isinstance(exc, AppendDispatchError):
             self.error_notifier.send((exc, self.serialize_exception(exc)))
@@ -308,8 +312,6 @@ class StorageWriteBatchWorker(BaseWorker):
         if job.attempts > 3:
             # TODO: add a metric for this + a DLQ & wrap exception type
             self.error_notifier.send((exc, self.serialize_exception(exc)))
-        else:
-            self.queue.put(job)
         # Track errors and recycle the stream if we hit a threshold
         # 1 bad payload is not indicative of a bad bidi stream as it could
         # be a transient error or luck of the draw with the first payload.
@@ -317,6 +319,7 @@ class StorageWriteBatchWorker(BaseWorker):
             self.wait(drain=True)
             self.close_cached_streams()
             raise exc
+        return job.attempts <= 3
 
     def _record_dispatch_success(self, job: Job, write_stream: str) -> None:
         """Record a successful append dispatch and apply backpressure."""

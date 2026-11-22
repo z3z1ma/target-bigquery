@@ -72,39 +72,42 @@ class BatchJobWorker(BaseWorker):
                 break
             if job is None:
                 break
-            submitted = False
-            logging.getLogger(__name__).info(
-                "Submitting batch load (job_id=%s, destination=%s).", job.job_id, job.table
-            )
             try:
-                load_job = client.load_table_from_file(
-                    BytesIO(job.data),
-                    job.table,
-                    job_id=job.job_id,
-                    num_retries=3,
-                    timeout=job.timeout,
-                    job_config=bigquery.LoadJobConfig(**job.config),
-                )
-                submitted = True
-                load_job.result(timeout=job.timeout)
-            except Exception as exc:
-                job.attempt += 1
-                diagnostic = (
-                    f"Load job_id={job.job_id}, destination={job.table}. "
-                    "Remote completion may be unknown; reconcile before restarting.\n"
-                    + self.serialize_exception(exc)
-                )
-                if submitted or isinstance(exc, Conflict) or job.attempt > 3:
-                    self.error_notifier.send((exc, diagnostic))
-                    raise
-                else:
-                    self.queue.put(job)
-                    self.log_notifier.send(diagnostic)
-            else:
-                self.job_notifier.send(True)
-                self.log_notifier.send(
-                    f"[{self.ext_id}] Loaded {len(job.data)} bytes into {job.table}."
-                )
+                while True:
+                    submitted = False
+                    logging.getLogger(__name__).info(
+                        "Submitting batch load (job_id=%s, destination=%s).", job.job_id, job.table
+                    )
+                    try:
+                        load_job = client.load_table_from_file(
+                            BytesIO(job.data),
+                            job.table,
+                            job_id=job.job_id,
+                            num_retries=3,
+                            timeout=job.timeout,
+                            job_config=bigquery.LoadJobConfig(**job.config),
+                        )
+                        submitted = True
+                        load_job.result(timeout=job.timeout)
+                    except Exception as exc:
+                        job.attempt += 1
+                        diagnostic = (
+                            f"Load job_id={job.job_id}, destination={job.table}. "
+                            "Remote completion may be unknown; reconcile before restarting.\n"
+                            + self.serialize_exception(exc)
+                        )
+                        if submitted or isinstance(exc, Conflict) or job.attempt > 3:
+                            self.error_notifier.send((exc, diagnostic))
+                            raise
+                        else:
+                            self.log_notifier.send(diagnostic)
+                            continue
+                    else:
+                        self.job_notifier.send(True)
+                        self.log_notifier.send(
+                            f"[{self.ext_id}] Loaded {len(job.data)} bytes into {job.table}."
+                        )
+                    break
             finally:
                 self.queue.task_done()  # type: ignore
         self.normal_completion.set()

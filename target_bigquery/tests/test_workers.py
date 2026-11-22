@@ -271,7 +271,7 @@ def test_receive_job_returns_none_when_queue_is_empty():
     assert worker._receive_job() is None
 
 
-def test_batch_job_worker_requeues_transient_load_failures(monkeypatch):
+def test_batch_job_worker_retries_transient_load_failures_locally(monkeypatch):
     client = FakeLoadClient(RuntimeError("temporary load failure"))
     monkeypatch.setattr(batch_job, "bigquery_client_factory", lambda credentials: client)
     table = bigquery.TableReference.from_string("project.dataset.orders")
@@ -285,8 +285,8 @@ def test_batch_job_worker_requeues_transient_load_failures(monkeypatch):
     assert client.calls[0]["num_retries"] == 3
     assert client.calls[0]["timeout"] == 12
     assert job.attempt == 2
-    assert worker.queue.requeued == [job]
-    assert worker.queue.task_done_count == 2
+    assert worker.queue.requeued == []
+    assert worker.queue.task_done_count == 1
     assert worker.job_notifier.messages == [True]
     assert "temporary load failure" in cast(str, worker.log_notifier.messages[0])
     assert cast(str, worker.log_notifier.messages[1]).startswith("[worker-a] Loaded")
@@ -520,14 +520,14 @@ def test_storage_write_worker_factory_selects_stream_or_batch_worker():
     assert issubclass(batch_worker_cls, storage_write.StorageWriteBatchWorker)
 
 
-def test_handle_dispatch_error_requeues_retryable_job():
+def test_handle_dispatch_error_allows_local_retry():
     worker = make_storage_dispatch_worker()
     job = SimpleNamespace(attempts=1)
 
-    worker._handle_dispatch_error(job, RuntimeError("transient"))
+    assert worker._handle_dispatch_error(job, RuntimeError("transient")) is True
 
     assert job.attempts == 2
-    assert worker.queue.items == [job]
+    assert worker.queue.items == []
     assert worker.error_notifier.messages == []
     assert worker.max_errors_before_recycle == 4
 
@@ -537,7 +537,7 @@ def test_handle_dispatch_error_sends_terminal_error_after_three_attempts():
     exc = RuntimeError("terminal")
     job = SimpleNamespace(attempts=3)
 
-    worker._handle_dispatch_error(job, exc)
+    assert worker._handle_dispatch_error(job, exc) is False
 
     assert worker.queue.items == []
     error, message = first_error_message(worker.error_notifier)
@@ -561,7 +561,7 @@ def test_handle_dispatch_error_recycles_streams_when_error_threshold_is_hit():
     with pytest.raises(RuntimeError, match="recycle"):
         worker._handle_dispatch_error(job, exc)
 
-    assert worker.queue.items == [job]
+    assert worker.queue.items == []
     assert waited == [True]
     assert closed == [True]
 

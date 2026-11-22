@@ -78,38 +78,41 @@ class GcsStagingWorker(BaseWorker):
             if job is None:
                 break
             try:
-                # TODO: consider configurability?
-                path = DEFAULT_BUCKET_PATH.format(
-                    bucket=job.bucket,
-                    dataset=job.dataset,
-                    table=job.table,
-                    date=time.strftime("%Y-%m-%d"),
-                    batch_id=job.batch_id,
-                )
-                blob = storage.Blob.from_string(path, client=client)
-                # TODO: pass in timeout?
-                # TODO: composite uploads
-                with blob.open(
-                    "wb",
-                    if_generation_match=0,
-                    chunk_size=1024 * 1024 * 10,
-                    timeout=300,
-                ) as fh:
-                    shutil.copyfileobj(BytesIO(job.buffer), cast(BlobWriter, fh))
-                job.gcs_notifier.send(path)
-            except Exception as exc:
-                job.attempt += 1
-                if job.attempt > 3:
-                    # TODO: add a metric for this + a DLQ & wrap exception type
-                    self.error_notifier.send((exc, self.serialize_exception(exc)))
-                    raise
-                else:
-                    self.queue.put(job)
-            else:
-                self.job_notifier.send(True)
-                self.log_notifier.send(
-                    f"[{self.ext_id}] Successfully uploaded {len(job.buffer)} bytes to {path}"
-                )
+                while True:
+                    try:
+                        # TODO: consider configurability?
+                        path = DEFAULT_BUCKET_PATH.format(
+                            bucket=job.bucket,
+                            dataset=job.dataset,
+                            table=job.table,
+                            date=time.strftime("%Y-%m-%d"),
+                            batch_id=job.batch_id,
+                        )
+                        blob = storage.Blob.from_string(path, client=client)
+                        # TODO: pass in timeout?
+                        # TODO: composite uploads
+                        with blob.open(
+                            "wb",
+                            if_generation_match=0,
+                            chunk_size=1024 * 1024 * 10,
+                            timeout=300,
+                        ) as fh:
+                            shutil.copyfileobj(BytesIO(job.buffer), cast(BlobWriter, fh))
+                        job.gcs_notifier.send(path)
+                    except Exception as exc:
+                        job.attempt += 1
+                        if job.attempt > 3:
+                            # TODO: add a metric for this + a DLQ & wrap exception type
+                            self.error_notifier.send((exc, self.serialize_exception(exc)))
+                            raise
+                        else:
+                            continue
+                    else:
+                        self.job_notifier.send(True)
+                        self.log_notifier.send(
+                            f"[{self.ext_id}] Successfully uploaded {len(job.buffer)} bytes to {path}"
+                        )
+                    break
             finally:
                 self.queue.task_done()  # type: ignore
         self.normal_completion.set()
