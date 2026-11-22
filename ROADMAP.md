@@ -699,7 +699,7 @@ tag, credential or permission changes. Next validation gate for this area is
 explicit key-type/schema-validation contract work; live planner evidence remains
 separate and requires authorized cloud scope.
 
-### In progress — EOF retry ownership (#191)
+### Integrated; main CI pending — EOF retry ownership (#191 / #192)
 
 Reconciled main `c65f271`: no open PRs, only #150. A gated fake submission on a real
 standard batch thread confirmed EOF queued a sentinel before a retryable failure;
@@ -714,8 +714,11 @@ queue joins or retry/replay expansion. Nine gated EOF tests cover all transports
 recovery and exhaustion, publication/STATE gates and identity/accounting.
 
 601 offline tests passed, 15 cloud skips; Ruff/mypy clean. Independent review:
-72 focused tests passed, no blockers. Exact-head CI and post-merge verification
-remain required. Separate source-confirmed finding: process mode configures
+72 focused tests passed, no blockers. Draft-first PR #192 passed exact-head Python
+3.10–3.12 CI 45053506544 at `62cd069`. Automated review completed without findings;
+merged as `1bd90dc`. Main verification run 45054583396 is queued for runners;
+integration is not yet recorded as fully verified. Issue #191 closed; current
+inventory is zero open PRs and only blocked #150. Separate source-confirmed finding: process mode configures
 multiprocessing.Queue, which lacks task_done used by all data-job loops. This
 predates the fix; next gate is a real process data-job regression, since sentinel
 spawn tests cannot cover it. Feeder loss remains independently unproven.
