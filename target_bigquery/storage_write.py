@@ -245,7 +245,7 @@ class StorageWriteBatchWorker(BaseWorker):
                         self._record_dispatch_success(job, write_stream)
                     break
             finally:
-                self.queue.task_done()  # type: ignore
+                self.mark_job_done()
         self._finish()
         self.normal_completion.set()
 

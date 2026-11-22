@@ -248,3 +248,18 @@ This may reduce work sharing while a worker retries. It adds no replay, queue-si
 checks or queue-join waits. Gated offline thread tests cover every ingestion method
 at EOF, including exhaustion and STATE/publication suppression. Existing spawn
 tests cover startup and clean shutdown, not live ingestion or queue feeder failure.
+
+## Process queue accounting
+
+Workers account for each dequeued data job only when the queue provides
+`task_done()`. Thread queues retain their accounting; the configured plain
+multiprocessing queue does not require it. Errors from an existing accounting
+method still propagate. This avoids a child crash after API acceptance without
+changing FIFO consumption, retries, queue type or wait behavior.
+
+Offline spawn tests now send two data jobs and a sentinel through the actual
+configured process queue for every standard worker variant, checking FIFO API
+observations, successful completion and parent checkpoint/EOF hooks. Separate
+terminal API cases verify that STATE and publication remain blocked. The APIs are
+fakes: these tests do not establish live ingestion, remote durability, queue feeder
+reliability or end-to-end exactly-once semantics.

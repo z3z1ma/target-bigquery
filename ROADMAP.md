@@ -723,3 +723,22 @@ multiprocessing.Queue, which lacks task_done used by all data-job loops. This
 predates the fix; next gate is a real process data-job regression, since sentinel
 spawn tests cannot cover it. Feeder loss remains independently unproven.
 No cloud, publishing, tag, credential or permission changes.
+
+### In progress — process data-job accounting (#193)
+
+Main `0db06d1` records #192's successful exact post-merge matrix. The separate
+queue mismatch was reproduced with actual standard spawned workers, the target's
+configured multiprocessing.Queue, two data jobs and a sentinel. Ten baseline
+cases failed: the first fake API call occurred, task_done raised AttributeError,
+and the child exited with status 1. Parent checkpoint/EOF correctly failed closed.
+
+A shared worker helper calls task_done only when available, propagating errors
+from existing accounting methods. All four loops use it once per data dequeue.
+No queue replacement, join/wait, FIFO, retry or state-contract changes. Real-spawn
+coverage includes five worker variants, FIFO completion at checkpoint/EOF, terminal
+API failure containment and thread accounting regressions. APIs remain offline
+fakes; feeder loss and live ingestion are outside these claims.
+
+Focused spawn/accounting suite: 21 passed; Ruff/mypy clean. Full suite, independent
+review and exact-head CI are required before integration. No cloud, publishing,
+tag, permission or credential changes; #150 remains blocked.
