@@ -263,3 +263,23 @@ observations, successful completion and parent checkpoint/EOF hooks. Separate
 terminal API cases verify that STATE and publication remain blocked. The APIs are
 fakes: these tests do not establish live ingestion, remote durability, queue feeder
 reliability or end-to-end exactly-once semantics.
+
+## Process feeder failures
+
+The process queue retains its first completed feeder error and keeps Python's
+normal traceback. Default fail-fast checks this before checkpoint/EOF hooks and
+STATE, even if workers exit normally after a later sentinel. Errors remain latched;
+`fail_fast: false` warns and retains permissive behavior. Ordinary thread queues
+and retry policies are unchanged.
+
+A real notifier Connection in a producer-created GCS or Storage Write job can fail
+serialization when local handle-sharing resources are unavailable. Offline tests
+reproduced a local socket permission failure, then verified the same producer jobs
+transfer successfully with local IPC permitted. No normal JSON input creating an
+inherently unpicklable job was identified; Arrow is not used by these producers.
+
+This detects completed feeder failures, not work still being serialized, queue
+exhaustion or remote durability. In particular, idle worker exit does not prove
+that the feeder is finished. The implementation uses Python's private feeder-error
+hook, covered by the supported Python CI matrix. No new wait or automatic replay
+is added; reconcile accepted remote work before restarting a failed run.

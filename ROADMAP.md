@@ -756,3 +756,26 @@ feeder failure and parent checkpoint/EOF outcome, then assess whether production
 job construction can reach that failure. Require deterministic evidence before any
 production change; preserve FIFO, bounded waits and fail-closed publication/STATE.
 No cloud experiment, retry-policy expansion or release work is part of this gate.
+
+### In progress — completed process feeder failure containment (#195)
+
+Baseline `3df9332`: zero open PRs, only blocked #150. The deliberate custom-object
+probe confirmed the mechanism but was not sufficient to justify a fix. Actual
+producer-created GCS/Storage jobs then failed during Connection reduction in the
+restricted executor (resource_sharer local socket PermissionError). Outside that
+restriction, all eight fixed/denormalized producer round trips passed, with working
+received notifier connections. No normal-input unpicklable job or Arrow path found.
+Evidence and runnable probe: `.10x/evidence/2026-11-22-feeder-findings.md`.
+
+Four gated actual-job/standard-spawn regressions failed before the change: the
+feeder dropped the job, the later sentinel allowed normal completion, and parent
+checkpoint/EOF advanced. ProcessJobQueue now latches the first completed feeder
+failure and preserves its traceback; existing fail-fast gates reject hooks/STATE.
+Spawn reconstruction initializes child-local bookkeeping. Explicit permissive mode
+warns. No retry, wait, FIFO or remote semantics changes. In-flight serialization
+at an idle checkpoint is unresolved and is not claimed by these sentinel-gated tests.
+
+627 offline tests passed, 15 skips; Ruff/mypy pass. Independent review: 69 focused
+passes, no blockers. Nine unrestricted-local-IPC probes passed. Exact-head CI is
+required, especially for the private multiprocessing hook. No cloud, publishing,
+release/tag, credential or permission configuration changes; #150 stays blocked.
