@@ -44,6 +44,7 @@ from target_bigquery.gcs_stage import (
     BigQueryGcsStagingDenormalizedSink,
     BigQueryGcsStagingSink,
 )
+from target_bigquery.process_queue import ProcessJobQueue
 from target_bigquery.storage_write import (
     BigQueryStorageWriteDenormalizedSink,
     BigQueryStorageWriteSink,
@@ -503,7 +504,7 @@ class TargetBigQuery(Target):
             return mp_dummy.Process, mp_dummy.Pipe, mp_dummy.Queue, ParType.THREAD
         else:
             self.logger.info("Using process-based parallelism")
-            return mp.Process, mp.Pipe, mp.Queue, ParType.PROCESS
+            return mp.Process, mp.Pipe, ProcessJobQueue, ParType.PROCESS
 
     # Worker management methods, which are used to manage the number of
     # workers in the pool. The ensure_workers method should be called
@@ -618,6 +619,14 @@ class TargetBigQuery(Target):
 
     def _handle_worker_error(self, *, shutdown_workers: bool = True) -> None:
         """Raise or log a worker error notification according to fail-fast config."""
+        feeder_error = getattr(getattr(self, "queue", None), "feeder_error", None)
+        if feeder_error is not None:
+            msg = f"Process queue feeder failed; queued data may be incomplete: {feeder_error}"
+            if self.config.get("fail_fast", True):
+                if shutdown_workers:
+                    self._shutdown_workers()
+                raise RuntimeError(msg) from feeder_error
+            self.logger.warning(msg)
         if self.error_notification.poll():
             e, msg = self.error_notification.recv()
             if self.config.get("fail_fast", True):
