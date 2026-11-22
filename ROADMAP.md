@@ -672,7 +672,7 @@ Next gate: reproduce late-enqueued work or queue-feeder loss independently befor
 introducing any queue-exhaustion protocol. This completion marker does not claim
 to solve either condition.
 
-### In progress — nullable upsert matching (#189)
+### Completed — nullable upsert matching (#189 / #190)
 
 Main `53fb2c7`: zero open PRs, only blocked release #150. Reviewed current Google
 MERGE documentation and local `.10x` guidance. SDK/target checks key presence and
@@ -689,5 +689,12 @@ with dedup disabled. Existing record-schema validation bypass and unsupported ke
 types remain separate gaps. Offline predicate/window/replay tests are not live
 BigQuery evidence; planner performance remains unmeasured.
 
-Full offline validation, independent review, draft-first PR and exact-head CI are
-required before integration. No cloud, publishing, tag or permission changes.
+PR [#190](https://github.com/z3z1ma/target-bigquery/pull/190) opened as draft.
+592 offline tests passed, 15 cloud skips; Ruff/mypy clean. Independent review:
+174 focused tests passed; automated review completed with no findings. Exact head
+`fa79436` passed Python 3.10–3.12 CI 45020338895; merged as `1e2c3df`.
+Post-merge main matrix 45020597045 passed all three versions. Issue #189 closed;
+final inventory is zero open PRs and only blocked #150. No cloud, publishing,
+tag, credential or permission changes. Next validation gate for this area is
+explicit key-type/schema-validation contract work; live planner evidence remains
+separate and requires authorized cloud scope.
