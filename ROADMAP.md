@@ -757,7 +757,7 @@ job construction can reach that failure. Require deterministic evidence before a
 production change; preserve FIFO, bounded waits and fail-closed publication/STATE.
 No cloud experiment, retry-policy expansion or release work is part of this gate.
 
-### In progress — completed process feeder failure containment (#195)
+### Completed — completed process feeder failure containment (#195 / #196)
 
 Baseline `3df9332`: zero open PRs, only blocked #150. The deliberate custom-object
 probe confirmed the mechanism but was not sufficient to justify a fix. Actual
@@ -776,6 +776,11 @@ warns. No retry, wait, FIFO or remote semantics changes. In-flight serialization
 at an idle checkpoint is unresolved and is not claimed by these sentinel-gated tests.
 
 627 offline tests passed, 15 skips; Ruff/mypy pass. Independent review: 69 focused
-passes, no blockers. Nine unrestricted-local-IPC probes passed. Exact-head CI is
-required, especially for the private multiprocessing hook. No cloud, publishing,
-release/tag, credential or permission configuration changes; #150 stays blocked.
+passes, no blockers. Nine unrestricted-local-IPC probes passed. Draft-first PR #196
+passed exact-head Python 3.10–3.12 CI 45062104324 at `74b0a99`; automated review
+completed with no findings. Merged as `a6bd41d`; exact post-merge main matrix
+45062337329 passed all three Python versions. Issue #195 closed; zero open PRs,
+only blocked #150 remains. No cloud, publishing, release/tag, credential or
+permission configuration changes. Next gate: independently reproduce serialization
+still in progress at an idle checkpoint before considering a delivery barrier;
+this fix does not establish one.
