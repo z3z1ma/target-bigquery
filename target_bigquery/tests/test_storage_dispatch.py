@@ -127,7 +127,8 @@ def test_setup_failure_before_dispatch_can_retry(monkeypatch):
     worker.run()
     assert len(setup) == 2
     assert len(sent) == 1
-    assert worker.queue.requeued == [job]
+    assert worker.queue.requeued == []
+    assert worker.queue.task_done_count == 1
     assert worker.job_notifier.messages == [True]
     assert worker.error_notifier.messages == []
     assert closed == [True]

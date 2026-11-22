@@ -234,3 +234,17 @@ The predicate follows [Google's MERGE guidance](https://docs.cloud.google.com/bi
 Offline tests execute the generated predicate/window SQL subset and a minimal
 replay model in SQLite; they are not BigQuery integration tests. Live correctness,
 query-plan cost and partition-pruning equivalence have not been measured.
+
+## Retries during EOF drain
+
+Eligible retries stay with the worker that owns the job until success or exhaustion.
+The worker reads the next shared-queue item only afterward, so EOF sentinels cannot
+pass a retry queued during shutdown. Existing attempt limits, delays, identities
+and retry eligibility remain unchanged; ambiguous Storage Write dispatch and
+submitted batch failures still stop without retry. Queue accounting occurs once
+per original data-job dequeue.
+
+This may reduce work sharing while a worker retries. It adds no replay, queue-size
+checks or queue-join waits. Gated offline thread tests cover every ingestion method
+at EOF, including exhaustion and STATE/publication suppression. Existing spawn
+tests cover startup and clean shutdown, not live ingestion or queue feeder failure.

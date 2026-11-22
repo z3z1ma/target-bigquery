@@ -72,36 +72,39 @@ class StreamingInsertWorker(BaseWorker):
                 break
             if job is None:
                 break
-            identity = f"batch_id={job.batch_id}, destination={job.table}"
-            logging.getLogger(__name__).info("Submitting streaming insert (%s).", identity)
             try:
-                errors = client.insert_rows_json(
-                    table=job.table,
-                    json_rows=job.records,
-                    row_ids=job.row_ids,
-                    timeout=job.timeout,
-                    retry=None,  # type: ignore[arg-type]  # Supported by SDK runtime.
-                )
-                if errors:
-                    raise RuntimeError(f"BigQuery streaming insert returned row errors: {errors}")
-            except Exception as exc:
-                job.attempt += 1
-                if not isinstance(exc, NotFound) or job.attempt > 3:
-                    diagnostic = (
-                        f"Streaming insert failed for {identity}. "
-                        "Rows may already be present; reconcile before replay.\n"
-                        + self.serialize_exception(exc)
-                    )
-                    self.error_notifier.send((exc, diagnostic))
-                    raise
-                else:
-                    sleep(1)
-                    self.queue.put(job)
-            else:
-                self.job_notifier.send(True)
-                self.log_notifier.send(
-                    f"[{self.ext_id}] Inserted {len(job.records)} records into {job.table}"
-                )
+                while True:
+                    identity = f"batch_id={job.batch_id}, destination={job.table}"
+                    logging.getLogger(__name__).info("Submitting streaming insert (%s).", identity)
+                    try:
+                        errors = client.insert_rows_json(
+                            table=job.table,
+                            json_rows=job.records,
+                            row_ids=job.row_ids,
+                            timeout=job.timeout,
+                            retry=None,  # type: ignore[arg-type]  # Supported by SDK runtime.
+                        )
+                        if errors:
+                            raise RuntimeError(f"BigQuery streaming insert returned row errors: {errors}")
+                    except Exception as exc:
+                        job.attempt += 1
+                        if not isinstance(exc, NotFound) or job.attempt > 3:
+                            diagnostic = (
+                                f"Streaming insert failed for {identity}. "
+                                "Rows may already be present; reconcile before replay.\n"
+                                + self.serialize_exception(exc)
+                            )
+                            self.error_notifier.send((exc, diagnostic))
+                            raise
+                        else:
+                            sleep(1)
+                            continue
+                    else:
+                        self.job_notifier.send(True)
+                        self.log_notifier.send(
+                            f"[{self.ext_id}] Inserted {len(job.records)} records into {job.table}"
+                        )
+                    break
             finally:
                 self.queue.task_done()  # type: ignore
         self.normal_completion.set()
