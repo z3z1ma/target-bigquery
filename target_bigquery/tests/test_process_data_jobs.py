@@ -114,6 +114,7 @@ def test_spawned_data_jobs_complete_before_parent_publication(method, eof, fail_
         target.par_typ = ParType.PROCESS
         target._jobs_enqueued = 2
         target.job_notification = completed
+        target.log_notification = type("NoLogs", (), {"poll": lambda self: False})()
         target.worker_pings = {}
         target.queue = queue
         target.error_notification = error_received
