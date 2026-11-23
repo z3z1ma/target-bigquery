@@ -844,3 +844,26 @@ GCS URI/Storage Write stream-name pipes and characterize their normal workload
 bounds before changing lifecycle ordering. This fix is not an overall shutdown
 deadline and does not resolve those channels. #150 remains blocked; no cloud,
 spend, publishing, tag, credential or permission changes.
+
+### In review — process error-message backpressure (#201)
+
+Baseline `a1398b3`: zero open PRs, only blocked #150. Actual streaming-insert
+producer jobs and a standard spawned worker reproduce checkpoint/EOF stalls on
+ordinary per-row error details from one supported 500-row batch, after a successful
+one-row batch. Both bounded baseline tests failed; no pipe resizing or custom
+unpicklable payload. This is a liveness defect, not evidence that STATE advanced.
+
+Process notification draining now buffers complete error tuples, then the existing
+handler preserves their order, diagnostic content and exception causes before
+hooks/STATE. No recursive shutdown from collection, retry-policy change, thread
+collection change or overall deadline. Ten cases cover siblings, partial work,
+checkpoint/EOF, full row-detail endpoints, permissive mode and buffered ordering.
+Full offline suite: 655 passed, 15 cloud skips; Ruff/mypy pass. Independent review
+and exact-head CI verification pending.
+Evidence and channel lifecycle map: `.10x/evidence/2026-11-23-error-pipe.md`.
+
+Next bounded gate: actual-producer GCS URI backpressure and collecting paths without
+premature loading; assess Storage stream-name pressure against cache/worker bounds
+separately. Interrupted frames, concurrent large unsynchronized writers and buffer
+memory bounds remain separate risks. #150 remains blocked. No cloud, spend,
+publishing/tag, credential or permission changes.

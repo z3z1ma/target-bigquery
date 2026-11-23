@@ -308,8 +308,22 @@ the parent waits for its exit. The existing completion counter and subsequent
 worker/error/persistence checks still govern STATE and publication. Thread joins,
 retry limits and FIFO job consumption are unchanged.
 
-Join polling is not an overall shutdown deadline. Oversized or accumulated errors
-and sink-owned GCS URI/Storage Write stream notifications are separate channels;
+Join polling is not an overall shutdown deadline. Interrupted error frames
+and sink-owned GCS URI/Storage Write stream notifications remain separate risks;
 this change does not establish a general bound for all worker hangs. Offline tests
 cover real pipes, standard spawned workers and producer-created jobs with fake APIs,
 not live BigQuery behavior.
+
+## Process error-message backpressure
+
+Process notification draining retains complete error messages while workers are
+joining. The existing error handler consumes them in order before newer messages,
+preserving the original exception and diagnostic. This prevents an ordinary large
+row-error response from blocking its worker's exit before the parent checks errors.
+The collector does not publish, retry or initiate shutdown. Default fail-fast still
+withholds hooks/STATE; explicit permissive mode retains its warnings and behavior.
+
+This handles intact messages, not a writer killed mid-frame or concurrent large
+writes that corrupt framing. Buffered errors are not size-capped, and this adds no
+overall join deadline. GCS URI and Storage Write stream-name channels remain
+separate; receiving their messages would not by itself prove durable delivery.

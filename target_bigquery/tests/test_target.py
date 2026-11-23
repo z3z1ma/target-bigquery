@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+from collections import deque
 from collections.abc import Sequence
 from typing import Any, cast
 
@@ -142,6 +143,7 @@ class StreamMapRecordingTarget(TargetBigQuery):
 
 def make_target(config: dict[str, Any]) -> TargetBigQuery:
     target = object.__new__(TargetBigQuery)
+    target._pending_worker_errors = deque()
     target.par_typ = ParType.THREAD
     target._config = config
     target.workers = []
@@ -337,6 +339,8 @@ def test_stream_maps_alias_schema_and_records_route_to_alias():
 
 def test_drain_one_fail_fast_stops_workers_without_writing_state():
     target = object.__new__(FailFastDrainTarget)
+    target.par_typ = ParType.THREAD
+    target._pending_worker_errors = deque()
     target._config = {"fail_fast": True}
     target.job_notification = FakeNotification()
     target.log_notification = FakeNotification()
@@ -358,6 +362,8 @@ def test_drain_one_fail_fast_stops_workers_without_writing_state():
 
 def test_drain_all_fail_fast_checks_worker_errors_after_shutdown():
     target = object.__new__(FailFastDrainTarget)
+    target.par_typ = ParType.THREAD
+    target._pending_worker_errors = deque()
     target._config = {"fail_fast": True}
     target._latest_state = {"bookmarks": {"orders": {}}}
     target._sinks_active = {"orders": object()}

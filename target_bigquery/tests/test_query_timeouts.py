@@ -1,6 +1,7 @@
 """Query wait failures must never acknowledge uncommitted progress."""
 
 import logging
+from collections import deque
 from types import SimpleNamespace
 
 import pytest
@@ -76,6 +77,7 @@ def test_query_failure_does_not_emit_state_or_clear_staging(
     sink.logger = logging.getLogger("query-test")
     monkeypatch.setattr(sink, "_get_bigquery_client", lambda: client)
     target = object.__new__(TargetBigQuery)
+    target._pending_worker_errors = deque()
     target.par_typ = ParType.THREAD
     target._config = {}
     target._latest_state = {"pos": 7}
