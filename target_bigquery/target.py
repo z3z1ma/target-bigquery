@@ -607,15 +607,28 @@ class TargetBigQuery(Target):
         """Drain a sink. Includes a hook to manage the worker pool and notifications."""
         # self.logger.info(f"Jobs queued : {self.queue.qsize()} | Max nb jobs queued : {os.cpu_count() * 4} | Nb workers : {len(self.workers)} | Max nb workers : {os.cpu_count() * 2}")
         self.resize_worker_pool()
-        while self.job_notification.poll():
-            ext_id = self.job_notification.recv()
-            self.worker_pings[ext_id] = time.time()
-            self._jobs_enqueued -= 1
+        self._drain_job_notifications()
         while self.log_notification.poll():
             msg = self.log_notification.recv()
             self.logger.info(msg)
         self._handle_worker_error()
         super().drain_one(sink)
+
+    def _drain_job_notifications(self) -> None:
+        while self.job_notification.poll():
+            ext_id = self.job_notification.recv()
+            self.worker_pings[ext_id] = time.time()
+            self._jobs_enqueued -= 1
+
+    def _check_process_job_completion(self) -> None:
+        if self.par_typ is not ParType.PROCESS:
+            return
+        self._drain_job_notifications()
+        if self._jobs_enqueued != 0:
+            msg = f"Process job completion mismatch: {self._jobs_enqueued} outstanding jobs."
+            if self.config.get("fail_fast", True):
+                raise RuntimeError(msg)
+            self.logger.warning(msg)
 
     def _handle_worker_error(self, *, shutdown_workers: bool = True) -> None:
         """Raise or log a worker error notification according to fail-fast config."""
@@ -649,10 +662,12 @@ class TargetBigQuery(Target):
         if is_endofpipe:
             self._shutdown_workers()
             self._handle_worker_error(shutdown_workers=False)
+            self._check_process_job_completion()
             self._clean_up_sinks()
         else:
             self._join_workers()
             self._handle_worker_error()
+            self._check_process_job_completion()
             self._run_pre_state_hooks()
         # Overwrite staging is published only at EOF. Singer state is global, so
         # defer it while any sink still has an unpublished replacement.

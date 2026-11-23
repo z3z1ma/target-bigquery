@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from target_bigquery.core import ParType
 from target_bigquery.target import TargetBigQuery
 
 
@@ -27,6 +28,7 @@ class StagedSink:
 def make_target(sinks):
     target = object.__new__(TargetBigQuery)
     target._config = {}
+    target.par_typ = ParType.THREAD
     target._latest_state = {"pos": 1}
     target._sinks_active = sinks
     target.max_parallelism = 1

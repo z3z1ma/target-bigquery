@@ -283,3 +283,19 @@ exhaustion or remote durability. In particular, idle worker exit does not prove
 that the feeder is finished. The implementation uses Python's private feeder-error
 hook, covered by the supported Python CI matrix. No new wait or automatic replay
 is added; reconcile accepted remote work before restarting a failed run.
+
+
+## Process checkpoint completion
+
+After workers join and existing errors are checked, process mode consumes remaining
+job completion notifications and requires the submitted-minus-completed count to be
+zero before checkpoint/EOF hooks or STATE. This catches work still being serialized
+when workers exit through their normal idle timeout, even before any feeder error
+exists. A mismatch fails by default; explicit `fail_fast: false` logs a warning.
+Thread mode is unchanged. Completion counts are not reset between checkpoints.
+
+This adds no wait, automatic replay or queue-size inference. It can stop a run with
+unfinished local work; reconcile accepted remote work before restarting. A zero
+count alone is not a persistence guarantee: transport errors, GCS loading, Storage
+Write commit and MERGE/overwrite hooks still determine success. Existing join and
+completion-pipe backpressure behavior is outside this correction.

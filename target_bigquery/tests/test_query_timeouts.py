@@ -7,6 +7,7 @@ import pytest
 from google.cloud import bigquery
 from singer_sdk.sinks import BatchSink
 
+from target_bigquery.core import ParType
 from target_bigquery.target import TargetBigQuery
 from target_bigquery.tests.test_core_pure import make_bigquery_table, make_merge_sink, make_sink
 
@@ -75,6 +76,7 @@ def test_query_failure_does_not_emit_state_or_clear_staging(
     sink.logger = logging.getLogger("query-test")
     monkeypatch.setattr(sink, "_get_bigquery_client", lambda: client)
     target = object.__new__(TargetBigQuery)
+    target.par_typ = ParType.THREAD
     target._config = {}
     target._latest_state = {"pos": 7}
     target._sinks_active = {"orders": sink}

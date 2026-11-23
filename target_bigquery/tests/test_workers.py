@@ -17,6 +17,7 @@ import target_bigquery.batch_job as batch_job
 import target_bigquery.gcs_stage as gcs_stage
 import target_bigquery.storage_write as storage_write
 import target_bigquery.streaming_insert as streaming_insert
+from target_bigquery.core import ParType
 from target_bigquery.target import TargetBigQuery
 
 
@@ -249,6 +250,7 @@ class FakeBlob:
 
 def test_shutdown_workers_joins_each_worker_once():
     target = object.__new__(TargetBigQuery)
+    target.par_typ = ParType.THREAD
     target.queue = FakeQueue()
     workers = [
         FakeWorker(alive=False),
@@ -704,6 +706,7 @@ def test_storage_write_commit_failure_retains_streams(monkeypatch, failure, endo
     committer = SimpleNamespace(finalize_write_stream=finalize, batch_commit_write_streams=commit)
     monkeypatch.setattr(storage_write, "storage_client_factory", lambda credentials: committer)
     target = object.__new__(TargetBigQuery)
+    target.par_typ = ParType.THREAD
     target._config = {}
     target._latest_state = {"pos": 1}
     target._sinks_active = {"orders": sink}

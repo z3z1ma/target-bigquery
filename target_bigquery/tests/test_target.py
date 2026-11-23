@@ -142,6 +142,7 @@ class StreamMapRecordingTarget(TargetBigQuery):
 
 def make_target(config: dict[str, Any]) -> TargetBigQuery:
     target = object.__new__(TargetBigQuery)
+    target.par_typ = ParType.THREAD
     target._config = config
     target.workers = []
     target._jobs_enqueued = 0
