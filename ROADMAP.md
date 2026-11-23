@@ -874,3 +874,27 @@ premature loading; assess Storage stream-name pressure against cache/worker boun
 separately. Interrupted frames, concurrent large unsynchronized writers and buffer
 memory bounds remain separate risks. #150 remains blocked. No cloud, spend,
 publishing/tag, credential or permission changes.
+
+### In review — GCS URI notification backpressure (#203)
+
+Baseline `b426db9`: zero open PRs, only blocked #150. A real spawned GCS worker
+and actual producer jobs stall at checkpoint/EOF after 456/1,000 uploads locally:
+URI sends fill the sink-owned pipe before load hooks can drain it. Ordinary UUID
+paths, unchanged pipes and supported batch_size=1 establish a plausible backlog;
+this is offline liveness evidence, not live cloud behavior or a universal limit.
+
+Process notification draining now collects URI paths for each active GCS sink into
+its existing pending list. Loads stay in the original hooks after worker/error/job
+completion checks. Order, membership, successful-load clearing and failed-load
+URI/job-ID retention are unchanged; collection adds no publication or deduplication.
+Ten tests cover pressure, multiple sinks, no reload, worker/load failure and both
+GCS variants with unchanged thread collection. Full suite: 665 passed, 15 cloud
+skips; Ruff/mypy pass. Independent review: 61 focused passes, no blockers.
+Exact-head CI and integration pending.
+Evidence: `.10x/evidence/2026-11-23-gcs-uri-pipe.md`.
+
+Next bounded gate: characterize Storage Write stream-name notifications against
+cache reuse, worker counts and stream creation; do not infer pressure per row.
+Interrupted frames, concurrent large writers, URI memory growth and overall join
+deadlines remain separate. #150 stays blocked. No cloud, spend, publishing/tag,
+credential or permission changes. Stop this pass after integration verification.
