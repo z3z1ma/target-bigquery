@@ -815,3 +815,26 @@ Next bounded gate: characterize completion-pipe backpressure during existing wor
 joins with an offline bounded harness before proposing any wait-loop change.
 This correction does not resolve that separate potential hang. #150's publishing
 block remains untouched; no cloud, release/tag, credential or permission changes.
+
+### In review — process completion/log backpressure (#199)
+
+Baseline `ef025f6`: zero open PRs, only blocked #150. Actual streaming-insert
+producer jobs and standard spawned workers reproduce checkpoint/EOF joins blocked
+by ordinary notification sends with unchanged OS pipe capacity. Completion-only
+cases stalled at 8,193/10,000 API calls locally; real logs stalled at 820. The
+supported batch_size=1 and a gated slow first API model a plausible backlog, not
+an oversized-message fault. These local bounds are not universal or live evidence.
+
+Process joins now poll while draining completion/log messages, with a final drain
+after exit. Thread mode, retries, FIFO and existing failure/publication gates are
+unchanged. Eight cases cover single-worker order, sibling completion, logs,
+checkpoint/EOF and terminal API failure after backlog. Full offline suite:
+645 passed, 15 cloud skips; Ruff/mypy pass. Independent review: 84 focused passes,
+no blockers. Exact-head CI and integration pending.
+Evidence: `.10x/evidence/2026-11-23-process-backpressure.md`.
+
+Next bounded gate: reproduce pressure on the separate error or sink-owned
+GCS URI/Storage Write stream-name pipes and characterize their normal workload
+bounds before changing lifecycle ordering. This fix is not an overall shutdown
+deadline and does not resolve those channels. #150 remains blocked; no cloud,
+spend, publishing, tag, credential or permission changes.

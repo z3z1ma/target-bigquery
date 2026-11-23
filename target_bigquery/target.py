@@ -607,12 +607,14 @@ class TargetBigQuery(Target):
         """Drain a sink. Includes a hook to manage the worker pool and notifications."""
         # self.logger.info(f"Jobs queued : {self.queue.qsize()} | Max nb jobs queued : {os.cpu_count() * 4} | Nb workers : {len(self.workers)} | Max nb workers : {os.cpu_count() * 2}")
         self.resize_worker_pool()
-        self._drain_job_notifications()
-        while self.log_notification.poll():
-            msg = self.log_notification.recv()
-            self.logger.info(msg)
+        self._drain_worker_notifications()
         self._handle_worker_error()
         super().drain_one(sink)
+
+    def _drain_worker_notifications(self) -> None:
+        self._drain_job_notifications()
+        while self.log_notification.poll():
+            self.logger.info(self.log_notification.recv())
 
     def _drain_job_notifications(self) -> None:
         while self.job_notification.poll():
@@ -700,7 +702,7 @@ class TargetBigQuery(Target):
         stopped = []
         while self.workers:
             worker = self.workers.pop()
-            cast(Any, worker).join()
+            self._join_worker(worker)
             stopped.append(worker)
         for worker in stopped:
             self._check_worker_exit(worker, shutdown_workers=False)
@@ -708,10 +710,18 @@ class TargetBigQuery(Target):
     def _join_workers(self) -> None:
         """Join workers without clearing the pool."""
         for worker in self.workers:
-            cast(Any, worker).join()
+            self._join_worker(worker)
 
         for worker in self.workers:
             self._check_worker_exit(worker, shutdown_workers=False)
+
+    def _join_worker(self, worker: Any) -> None:
+        if self.par_typ is ParType.PROCESS:
+            while worker.is_alive():
+                self._drain_worker_notifications()
+                worker.join(timeout=0.1)
+            self._drain_worker_notifications()
+        worker.join()
 
     def _check_worker_exit(self, worker: Any, *, shutdown_workers: bool = True) -> None:
         """Detect process failures that could not send an error notification."""

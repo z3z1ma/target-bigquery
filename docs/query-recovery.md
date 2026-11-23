@@ -299,3 +299,17 @@ unfinished local work; reconcile accepted remote work before restarting. A zero
 count alone is not a persistence guarantee: transport errors, GCS loading, Storage
 Write commit and MERGE/overwrite hooks still determine success. Existing join and
 completion-pipe backpressure behavior is outside this correction.
+
+## Completion and log backpressure during process joins
+
+Process checkpoint and EOF joins continue consuming completion and log messages
+while workers finish. This prevents a worker from waiting for pipe space while
+the parent waits for its exit. The existing completion counter and subsequent
+worker/error/persistence checks still govern STATE and publication. Thread joins,
+retry limits and FIFO job consumption are unchanged.
+
+Join polling is not an overall shutdown deadline. Oversized or accumulated errors
+and sink-owned GCS URI/Storage Write stream notifications are separate channels;
+this change does not establish a general bound for all worker hangs. Offline tests
+cover real pipes, standard spawned workers and producer-created jobs with fake APIs,
+not live BigQuery behavior.

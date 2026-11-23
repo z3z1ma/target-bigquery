@@ -48,6 +48,7 @@ def test_idle_checkpoint_refuses_unresolved_serialization(monkeypatch, eventual_
     target.par_typ = ParType.PROCESS
     target.queue = queue
     target.job_notification = completed
+    target.log_notification = type("NoLogs", (), {"poll": lambda self: False})()
     target.worker_pings = {}
     target._jobs_enqueued = 0
     producer = object.__new__(batch_job.BigQueryBatchJobSink)
