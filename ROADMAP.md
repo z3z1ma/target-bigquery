@@ -786,7 +786,7 @@ still in progress at an idle checkpoint before considering a delivery barrier;
 this fix does not establish one.
 
 
-### In review — idle process checkpoint completion (#197)
+### Completed — idle process checkpoint completion (#197 / #198)
 
 Baseline `93ebc41`: zero open PRs, only blocked #150. A real spawned batch worker
 and actual producer Job reproduce checkpoint advancement while serialization is
@@ -804,7 +804,13 @@ empty/qsize proof. Transport commit/load hooks remain necessary after this gate.
 Evidence: `.10x/evidence/2026-11-23-idle-checkpoint.md`.
 
 637 offline tests passed, 15 cloud skips; Ruff/mypy pass. Independent review:
-94 focused passes, no blockers. Exact-head CI and integration remain pending.
+94 focused passes, no blockers. Draft-first PR #198 passed exact-head Python
+3.10–3.12 CI [45210936773](https://github.com/z3z1ma/target-bigquery/actions/runs/45210936773)
+at `ff027ba30575d17f1329fda401f960534f357b08`. Automated review completed without
+findings. Merged as `f6021da3bf4e2c631fbc8315b87312fe2bf56d0f`; exact post-merge
+main CI [45214584357](https://github.com/z3z1ma/target-bigquery/actions/runs/45214584357)
+passed all three Python versions. Issue #197 closed; zero open PRs and only blocked
+#150 remain. Verification is complete.
 Next bounded gate: characterize completion-pipe backpressure during existing worker
 joins with an offline bounded harness before proposing any wait-loop change.
 This correction does not resolve that separate potential hang. #150's publishing
