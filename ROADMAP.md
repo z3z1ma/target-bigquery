@@ -816,7 +816,7 @@ joins with an offline bounded harness before proposing any wait-loop change.
 This correction does not resolve that separate potential hang. #150's publishing
 block remains untouched; no cloud, release/tag, credential or permission changes.
 
-### In review — process completion/log backpressure (#199)
+### Completed — process completion/log backpressure (#199 / #200)
 
 Baseline `ef025f6`: zero open PRs, only blocked #150. Actual streaming-insert
 producer jobs and standard spawned workers reproduce checkpoint/EOF joins blocked
@@ -830,7 +830,13 @@ after exit. Thread mode, retries, FIFO and existing failure/publication gates ar
 unchanged. Eight cases cover single-worker order, sibling completion, logs,
 checkpoint/EOF and terminal API failure after backlog. Full offline suite:
 645 passed, 15 cloud skips; Ruff/mypy pass. Independent review: 84 focused passes,
-no blockers. Exact-head CI and integration pending.
+no blockers. Draft-first PR #200 passed exact-head Python 3.10–3.12 CI
+[45216548232](https://github.com/z3z1ma/target-bigquery/actions/runs/45216548232)
+at `6f0c581c54eacfd1d84d57291d5682dd240d4652`. Automated review completed without
+findings. Merged as `2bb9901464eee416114aa70581e6db563767e293`; exact post-merge
+main CI [45219721627](https://github.com/z3z1ma/target-bigquery/actions/runs/45219721627)
+passed all three Python versions. Issue #199 closed; zero open PRs and only blocked
+#150 remain. Verification is complete.
 Evidence: `.10x/evidence/2026-11-23-process-backpressure.md`.
 
 Next bounded gate: reproduce pressure on the separate error or sink-owned
