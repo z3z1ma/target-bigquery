@@ -1,5 +1,6 @@
 """State must describe published data, not temporary overwrite staging."""
 
+from collections import deque
 from types import SimpleNamespace
 
 import pytest
@@ -27,6 +28,7 @@ class StagedSink:
 
 def make_target(sinks):
     target = object.__new__(TargetBigQuery)
+    target._pending_worker_errors = deque()
     target._config = {}
     target.par_typ = ParType.THREAD
     target._latest_state = {"pos": 1}

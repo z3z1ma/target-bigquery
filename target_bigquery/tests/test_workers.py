@@ -1,5 +1,6 @@
 """Tests for worker lifecycle helpers that do not require BigQuery."""
 
+from collections import deque
 from io import BytesIO
 from multiprocessing import Process
 from queue import Empty
@@ -250,6 +251,7 @@ class FakeBlob:
 
 def test_shutdown_workers_joins_each_worker_once():
     target = object.__new__(TargetBigQuery)
+    target._pending_worker_errors = deque()
     target.par_typ = ParType.THREAD
     target.queue = FakeQueue()
     workers = [
@@ -706,6 +708,7 @@ def test_storage_write_commit_failure_retains_streams(monkeypatch, failure, endo
     committer = SimpleNamespace(finalize_write_stream=finalize, batch_commit_write_streams=commit)
     monkeypatch.setattr(storage_write, "storage_client_factory", lambda credentials: committer)
     target = object.__new__(TargetBigQuery)
+    target._pending_worker_errors = deque()
     target.par_typ = ParType.THREAD
     target._config = {}
     target._latest_state = {"pos": 1}

@@ -17,6 +17,7 @@ import multiprocessing as mp
 import multiprocessing.dummy as mp_dummy
 import time
 import uuid
+from collections import deque
 from collections.abc import Callable, Sequence
 from importlib import metadata
 from types import FrameType
@@ -441,6 +442,7 @@ class TargetBigQuery(Target):
         self.job_notification, self.job_notifier = self.pipe_cls(False)
         self.log_notification, self.log_notifier = self.pipe_cls(False)
         self.error_notification, self.error_notifier = self.pipe_cls(False)
+        self._pending_worker_errors: deque[tuple[Exception, str]] = deque()
         self._credentials = BigQueryCredentials(
             self.config.get("credentials_path"),
             self.config.get("credentials_json"),
@@ -612,6 +614,9 @@ class TargetBigQuery(Target):
         super().drain_one(sink)
 
     def _drain_worker_notifications(self) -> None:
+        if self.par_typ is ParType.PROCESS:
+            while self.error_notification.poll():
+                self._pending_worker_errors.append(self.error_notification.recv())
         self._drain_job_notifications()
         while self.log_notification.poll():
             self.logger.info(self.log_notification.recv())
@@ -642,8 +647,12 @@ class TargetBigQuery(Target):
                     self._shutdown_workers()
                 raise RuntimeError(msg) from feeder_error
             self.logger.warning(msg)
-        if self.error_notification.poll():
-            e, msg = self.error_notification.recv()
+        if self._pending_worker_errors or self.error_notification.poll():
+            e, msg = (
+                self._pending_worker_errors.popleft()
+                if self._pending_worker_errors
+                else self.error_notification.recv()
+            )
             if self.config.get("fail_fast", True):
                 self.logger.error(msg)
                 self.logger.error("Terminating workers without writing state.")
