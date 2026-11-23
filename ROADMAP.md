@@ -1,6 +1,6 @@
 # Maintained roadmap
 
-Updated: 2026-11-22. Owner: repository maintainer (execution delegated to Codex).
+Updated: 2026-11-23. Owner: repository maintainer (execution delegated to Codex).
 Baseline: `c0acf83` on main. This replaces the July zero-open snapshot as the
 current work queue; the historical `.10x` records remain evidence for that date.
 
@@ -784,3 +784,28 @@ only blocked #150 remains. No cloud, publishing, release/tag, credential or
 permission configuration changes. Next gate: independently reproduce serialization
 still in progress at an idle checkpoint before considering a delivery barrier;
 this fix does not establish one.
+
+
+### In review — idle process checkpoint completion (#197)
+
+Baseline `93ebc41`: zero open PRs, only blocked #150. A real spawned batch worker
+and actual producer Job reproduce checkpoint advancement while serialization is
+held in the parent feeder. No sentinel is sent. The test accelerates the existing
+idle timeout; after normal worker exit, old code ran hooks/STATE before release.
+Eventual success leaves an unprocessed job; eventual failure arrives after STATE.
+Both containment tests failed before the correction. Production incidence and live
+cloud impact are unmeasured.
+
+Process checkpoints and EOF now consume remaining completion notifications after
+existing worker/error gates and reject nonzero submitted-minus-completed counts
+before hooks/STATE. Counts persist across checkpoints. Explicit permissive mode
+warns; thread mode and retry behavior are unchanged. No new wait/join or queue
+empty/qsize proof. Transport commit/load hooks remain necessary after this gate.
+Evidence: `.10x/evidence/2026-11-23-idle-checkpoint.md`.
+
+637 offline tests passed, 15 cloud skips; Ruff/mypy pass. Independent review:
+94 focused passes, no blockers. Exact-head CI and integration remain pending.
+Next bounded gate: characterize completion-pipe backpressure during existing worker
+joins with an offline bounded harness before proposing any wait-loop change.
+This correction does not resolve that separate potential hang. #150's publishing
+block remains untouched; no cloud, release/tag, credential or permission changes.

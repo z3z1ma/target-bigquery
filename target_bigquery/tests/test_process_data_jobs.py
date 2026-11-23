@@ -8,6 +8,7 @@ import pytest
 from google.cloud.bigquery_storage_v1 import types, writer
 
 from target_bigquery import batch_job, gcs_stage, storage_write, streaming_insert
+from target_bigquery.core import ParType
 from target_bigquery.target import TargetBigQuery
 from target_bigquery.tests.test_worker_exit import target_with_workers
 from target_bigquery.tests.test_workers import FakeNotifier
@@ -110,6 +111,10 @@ def test_spawned_data_jobs_complete_before_parent_publication(method, eof, fail_
         worker.join(20)
         assert not worker.is_alive()
         target, sink, emitted = target_with_workers([worker])
+        target.par_typ = ParType.PROCESS
+        target._jobs_enqueued = 2
+        target.job_notification = completed
+        target.worker_pings = {}
         target.queue = queue
         target.error_notification = error_received
         if fail_transport:
@@ -126,8 +131,8 @@ def test_spawned_data_jobs_complete_before_parent_publication(method, eof, fail_
         assert "first" in received.recv()
         assert received.poll(1)
         assert "second" in received.recv()
-        assert completed.poll(1) and completed.recv() is True
-        assert completed.poll(1) and completed.recv() is True
+        assert target._jobs_enqueued == 0
+        assert not completed.poll()
         assert not error_received.poll()
         assert emitted == [{"pos": 1}]
         assert sink.published if eof else sink.checkpoints == 1
