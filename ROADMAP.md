@@ -845,7 +845,7 @@ bounds before changing lifecycle ordering. This fix is not an overall shutdown
 deadline and does not resolve those channels. #150 remains blocked; no cloud,
 spend, publishing, tag, credential or permission changes.
 
-### In review — process error-message backpressure (#201)
+### Completed — process error-message backpressure (#201 / #202)
 
 Baseline `a1398b3`: zero open PRs, only blocked #150. Actual streaming-insert
 producer jobs and a standard spawned worker reproduce checkpoint/EOF stalls on
@@ -859,7 +859,14 @@ hooks/STATE. No recursive shutdown from collection, retry-policy change, thread
 collection change or overall deadline. Ten cases cover siblings, partial work,
 checkpoint/EOF, full row-detail endpoints, permissive mode and buffered ordering.
 Full offline suite: 655 passed, 15 cloud skips; Ruff/mypy pass. Independent review
-and exact-head CI verification pending.
+approved exact head after 36 focused passes; automated review completed without
+findings. Draft-first PR #202 passed Python 3.10–3.12 CI
+[45221548072](https://github.com/z3z1ma/target-bigquery/actions/runs/45221548072)
+at `a2c9bb41b20fd504912d6aec6dce8b8b9fc63def`. Merged as
+`5a988d3595cf9aac84ac9cc4d151da8f45114d18`; exact post-merge main CI
+[45222066410](https://github.com/z3z1ma/target-bigquery/actions/runs/45222066410)
+passed all three Python versions. Issue #201 closed; zero open PRs and only blocked
+#150 remain. Verification is complete.
 Evidence and channel lifecycle map: `.10x/evidence/2026-11-23-error-pipe.md`.
 
 Next bounded gate: actual-producer GCS URI backpressure and collecting paths without
