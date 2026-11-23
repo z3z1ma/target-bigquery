@@ -309,7 +309,7 @@ worker/error/persistence checks still govern STATE and publication. Thread joins
 retry limits and FIFO job consumption are unchanged.
 
 Join polling is not an overall shutdown deadline. Interrupted error frames
-and sink-owned GCS URI/Storage Write stream notifications remain separate risks;
+and Storage Write stream notifications remain separate risks;
 this change does not establish a general bound for all worker hangs. Offline tests
 cover real pipes, standard spawned workers and producer-created jobs with fake APIs,
 not live BigQuery behavior.
@@ -325,5 +325,19 @@ withholds hooks/STATE; explicit permissive mode retains its warnings and behavio
 
 This handles intact messages, not a writer killed mid-frame or concurrent large
 writes that corrupt framing. Buffered errors are not size-capped, and this adds no
-overall join deadline. GCS URI and Storage Write stream-name channels remain
-separate; receiving their messages would not by itself prove durable delivery.
+overall join deadline. Storage Write stream-name notifications remain a separate channel; receiving a
+notification does not by itself prove durable delivery.
+
+
+## GCS URI collection during process joins
+
+Process notification draining collects uploaded-object paths into each active GCS
+sink's pending URI list. This keeps a full sink-owned pipe from blocking worker
+exit. It does not start a load: checkpoint/EOF hooks still wait for worker, error
+and completion checks before loading objects into BigQuery and advancing STATE.
+
+Collection preserves received order and consumes each notification once. Successful
+loads clear the list and load-job ID; failed loads retain both for reconciliation.
+An empty subsequent hook does not reload earlier objects. Thread collection and
+upload retries are unchanged. The in-memory list is not size-capped; interrupted
+frames and concurrent large-message corruption remain outside this correction.

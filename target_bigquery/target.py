@@ -617,6 +617,9 @@ class TargetBigQuery(Target):
         if self.par_typ is ParType.PROCESS:
             while self.error_notification.poll():
                 self._pending_worker_errors.append(self.error_notification.recv())
+            for sink in self._sinks_active.values():
+                if isinstance(sink, BigQueryGcsStagingSink):
+                    sink._collect_uploaded_uris()
         self._drain_job_notifications()
         while self.log_notification.poll():
             self.logger.info(self.log_notification.recv())

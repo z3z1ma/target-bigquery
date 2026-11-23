@@ -196,10 +196,14 @@ class BigQueryGcsStagingSink(BaseBigQuerySink):
         self.increment_jobs_enqueued()
         self.buffer = Compressor()
 
-    def _load_pending_uris(self) -> None:
-        """Commit uploaded objects to BigQuery before acknowledging a checkpoint."""
+    def _collect_uploaded_uris(self) -> None:
+        """Retain upload notifications without scheduling a load."""
         while self.gcs_notification.poll():
             self.uris.append(self.gcs_notification.recv())
+
+    def _load_pending_uris(self) -> None:
+        """Commit uploaded objects to BigQuery before acknowledging a checkpoint."""
+        self._collect_uploaded_uris()
         if not self.uris:
             return
         timeout = self.config.get("timeout", 600)
