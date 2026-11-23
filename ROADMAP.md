@@ -875,7 +875,7 @@ separately. Interrupted frames, concurrent large unsynchronized writers and buff
 memory bounds remain separate risks. #150 remains blocked. No cloud, spend,
 publishing/tag, credential or permission changes.
 
-### In review — GCS URI notification backpressure (#203)
+### Completed — GCS URI notification backpressure (#203 / #204)
 
 Baseline `b426db9`: zero open PRs, only blocked #150. A real spawned GCS worker
 and actual producer jobs stall at checkpoint/EOF after 456/1,000 uploads locally:
@@ -890,11 +890,17 @@ URI/job-ID retention are unchanged; collection adds no publication or deduplicat
 Ten tests cover pressure, multiple sinks, no reload, worker/load failure and both
 GCS variants with unchanged thread collection. Full suite: 665 passed, 15 cloud
 skips; Ruff/mypy pass. Independent review: 61 focused passes, no blockers.
-Exact-head CI and integration pending.
+Draft-first PR #204 passed exact-head Python 3.10–3.12 CI
+[45223730667](https://github.com/z3z1ma/target-bigquery/actions/runs/45223730667)
+at `99515e1d9ec6a4d10b3e5ca021888867742a1afa`. Automated review completed without
+findings. Merged as `704afddcfd85a8205741f964bd8181f1835382d9`; exact post-merge
+main CI [45227575204](https://github.com/z3z1ma/target-bigquery/actions/runs/45227575204)
+passed all three Python versions. Issue #203 closed; zero open PRs and only blocked
+#150 remain. Verification is complete.
 Evidence: `.10x/evidence/2026-11-23-gcs-uri-pipe.md`.
 
 Next bounded gate: characterize Storage Write stream-name notifications against
 cache reuse, worker counts and stream creation; do not infer pressure per row.
 Interrupted frames, concurrent large writers, URI memory growth and overall join
 deadlines remain separate. #150 stays blocked. No cloud, spend, publishing/tag,
-credential or permission changes. Stop this pass after integration verification.
+credential or permission changes. This bounded pass is complete.
