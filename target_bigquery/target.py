@@ -45,6 +45,7 @@ from target_bigquery.gcs_stage import (
     BigQueryGcsStagingDenormalizedSink,
     BigQueryGcsStagingSink,
 )
+from target_bigquery.process_errors import ErrorReceiver
 from target_bigquery.process_queue import ProcessJobQueue
 from target_bigquery.storage_write import (
     BigQueryStorageWriteDenormalizedSink,
@@ -443,6 +444,7 @@ class TargetBigQuery(Target):
         self.log_notification, self.log_notifier = self.pipe_cls(False)
         self.error_notification, self.error_notifier = self.pipe_cls(False)
         self._pending_worker_errors: deque[tuple[Exception, str]] = deque()
+        self._process_error_channels: dict[str, ErrorReceiver] = {}
         self._credentials = BigQueryCredentials(
             self.config.get("credentials_path"),
             self.config.get("credentials_json"),
@@ -450,20 +452,31 @@ class TargetBigQuery(Target):
         )
 
         def worker_factory():
-            return cast(
-                type[BaseWorker],
-                self.get_sink_class().worker_cls_factory(
-                    self.proc_cls,
-                    dict(self.config),
-                ),
-            )(
-                ext_id=uuid.uuid4().hex,
-                queue=self.queue,
-                credentials=self._credentials,
-                job_notifier=self.job_notifier,
-                log_notifier=self.log_notifier,
-                error_notifier=self.error_notifier,
-            )
+            ext_id = uuid.uuid4().hex
+            notifier = self.error_notifier
+            if self.par_typ is ParType.PROCESS:
+                receiver, notifier = ErrorReceiver.create()
+                self._process_error_channels[ext_id] = receiver
+            try:
+                return cast(
+                    type[BaseWorker],
+                    self.get_sink_class().worker_cls_factory(
+                        self.proc_cls,
+                        dict(self.config),
+                    ),
+                )(
+                    ext_id=ext_id,
+                    queue=self.queue,
+                    credentials=self._credentials,
+                    job_notifier=self.job_notifier,
+                    log_notifier=self.log_notifier,
+                    error_notifier=notifier,
+                )
+            except BaseException:
+                if self.par_typ is ParType.PROCESS:
+                    self._process_error_channels.pop(ext_id).close()
+                    notifier.close()
+                raise
 
         self.worker_factory = worker_factory
         self.workers: list[BaseWorker | Any] = []
@@ -546,12 +559,22 @@ class TargetBigQuery(Target):
                 workers_to_cull.append(i)
         for i in reversed(workers_to_cull):
             worker = self.workers.pop(i)
-            cast(Any, worker).join()  # Wait for termination. This should be a no-op.
+            self._join_worker(worker)
             self._check_worker_exit(worker)
             self.logger.info("Culling terminated worker %s", worker.ext_id)
         while self.add_worker_predicate or not self.workers:
             worker = self.worker_factory()
-            cast(Any, worker).start()
+            try:
+                cast(Any, worker).start()
+            except BaseException:
+                receiver = self._process_error_channels.pop(worker.ext_id, None)
+                if receiver is not None:
+                    receiver.close()
+                    worker.error_notifier.close()
+                raise
+            finally:
+                if worker.ext_id in self._process_error_channels:
+                    worker.error_notifier.close()
             self.workers.append(worker)
             self.logger.info("Adding worker %s", worker.ext_id)
             self._last_worker_creation = time.time()
@@ -615,6 +638,8 @@ class TargetBigQuery(Target):
 
     def _drain_worker_notifications(self) -> None:
         if self.par_typ is ParType.PROCESS:
+            for receiver in getattr(self, "_process_error_channels", {}).values():
+                self._pending_worker_errors.extend(receiver.drain())
             while self.error_notification.poll():
                 self._pending_worker_errors.append(self.error_notification.recv())
             for sink in self._sinks_active.values():
@@ -733,6 +758,9 @@ class TargetBigQuery(Target):
                 self._drain_worker_notifications()
                 worker.join(timeout=0.1)
             self._drain_worker_notifications()
+            receiver = getattr(self, "_process_error_channels", {}).pop(worker.ext_id, None)
+            if receiver is not None:
+                self._pending_worker_errors.extend(receiver.drain(finished=True))
         worker.join()
 
     def _check_worker_exit(self, worker: Any, *, shutdown_workers: bool = True) -> None:
