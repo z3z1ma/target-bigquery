@@ -945,9 +945,9 @@ Storage stream-name pressure and qsize portability remain separate investigation
 Current open issues: blocked #150 and confirmed #205. No cloud, spending, publishing,
 tag, credential or permission changes.
 
-### In progress — isolated process error channels (#205)
+### Verified — isolated process error channels (#205, #207)
 
-A separate correction branch gives each process worker a single-writer socket
+The integrated correction gives each process worker a single-writer socket
 channel and incrementally receives length-prefixed diagnostics without blocking
 for a partial frame. Parent sender copies close immediately after startup; fork
 children close inherited receivers. Worker exit finalizes available bytes and
@@ -960,4 +960,18 @@ Offline regressions use actual target construction, Singer input, producer jobs,
 standard workers and fake BigQuery boundaries: concurrent errors, interrupted
 frames, healthy checkpoint/replacement, permissive errors and a surviving sibling.
 Framing/startup/descriptor tests cover additional transport fault boundaries.
-Independent final review and exact-head/main CI remain pending; #205 stays open.
+Independent review approved the runtime change after 62 focused checks, then
+approved the test-only STATE synchronization correction. The complete offline
+suite passed 682 tests with 15 cloud tests skipped; Ruff and mypy passed.
+Automated review completed without findings at final head
+`ae1abedc90a2e4ac175fdddde9f5682ec752cdec`; exact-head CI
+[45438412519](https://github.com/z3z1ma/target-bigquery/actions/runs/45438412519)
+passed Python 3.10–3.12. Merged via [#207](https://github.com/z3z1ma/target-bigquery/pull/207)
+as `cd13cf627b8acc0fbc150637d39905d58d7d00c5`; exact post-merge main CI
+[45441871047](https://github.com/z3z1ma/target-bigquery/actions/runs/45441871047)
+passed all three Python versions. Runtime correction verified; #205 is resolved.
+The earlier evidence-only entry records the pre-correction findings.
+
+Remaining bounded investigations are separate: Storage Write stream-name pressure
+and qsize portability, other notification channels, and diagnostic memory growth.
+No new experiments were added in this integration pass. #150 remains untouched.
