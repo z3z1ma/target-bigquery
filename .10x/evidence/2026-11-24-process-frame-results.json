@@ -1,0 +1,178 @@
+[
+  {
+    "campaign": "baseline",
+    "mode": "concurrent",
+    "deadline_exceeded": false,
+    "exception": "RuntimeError",
+    "complete_diagnostics": 2,
+    "state_received_observed": false,
+    "state_write_events": 0,
+    "state_output": "",
+    "cleanup_closed_parent_writer": false
+  },
+  {
+    "campaign": "baseline",
+    "mode": "concurrent",
+    "deadline_exceeded": false,
+    "exception": "RuntimeError",
+    "complete_diagnostics": 2,
+    "state_received_observed": false,
+    "state_write_events": 0,
+    "state_output": "",
+    "cleanup_closed_parent_writer": false
+  },
+  {
+    "campaign": "baseline",
+    "mode": "concurrent",
+    "deadline_exceeded": false,
+    "exception": "RuntimeError",
+    "complete_diagnostics": 2,
+    "state_received_observed": false,
+    "state_write_events": 0,
+    "state_output": "",
+    "cleanup_closed_parent_writer": false
+  },
+  {
+    "campaign": "baseline",
+    "mode": "interrupted",
+    "deadline_exceeded": true,
+    "exception": null,
+    "complete_diagnostics": null,
+    "state_received_observed": false,
+    "state_write_events": 0,
+    "state_output": null,
+    "cleanup_closed_parent_writer": false
+  },
+  {
+    "campaign": "cleanup-assisted",
+    "mode": "concurrent",
+    "deadline_exceeded": false,
+    "exception": "UnicodeDecodeError",
+    "complete_diagnostics": 0,
+    "state_received_observed": false,
+    "state_write_events": 0,
+    "state_output": "",
+    "cleanup_closed_parent_writer": false
+  },
+  {
+    "campaign": "cleanup-assisted",
+    "mode": "concurrent",
+    "deadline_exceeded": false,
+    "exception": "RuntimeError",
+    "complete_diagnostics": 2,
+    "state_received_observed": false,
+    "state_write_events": 0,
+    "state_output": "",
+    "cleanup_closed_parent_writer": false
+  },
+  {
+    "campaign": "cleanup-assisted",
+    "mode": "concurrent",
+    "deadline_exceeded": false,
+    "exception": "RuntimeError",
+    "complete_diagnostics": 2,
+    "state_received_observed": false,
+    "state_write_events": 0,
+    "state_output": "",
+    "cleanup_closed_parent_writer": false
+  },
+  {
+    "campaign": "cleanup-assisted",
+    "mode": "interrupted",
+    "deadline_exceeded": true,
+    "exception": "OSError",
+    "complete_diagnostics": 0,
+    "state_received_observed": false,
+    "state_write_events": 0,
+    "state_output": "",
+    "cleanup_closed_parent_writer": true
+  },
+  {
+    "campaign": "isolated-group",
+    "mode": "concurrent",
+    "deadline_exceeded": false,
+    "exception": "RuntimeError",
+    "complete_diagnostics": 2,
+    "state_received_observed": false,
+    "state_write_events": 0,
+    "state_output": "",
+    "cleanup_closed_parent_writer": false
+  },
+  {
+    "campaign": "isolated-group",
+    "mode": "concurrent",
+    "deadline_exceeded": false,
+    "exception": "RuntimeError",
+    "complete_diagnostics": 2,
+    "state_received_observed": false,
+    "state_write_events": 0,
+    "state_output": "",
+    "cleanup_closed_parent_writer": false
+  },
+  {
+    "campaign": "isolated-group",
+    "mode": "concurrent",
+    "deadline_exceeded": false,
+    "exception": "UnicodeDecodeError",
+    "complete_diagnostics": 0,
+    "state_received_observed": false,
+    "state_write_events": 0,
+    "state_output": "",
+    "cleanup_closed_parent_writer": false
+  },
+  {
+    "campaign": "isolated-group",
+    "mode": "interrupted",
+    "deadline_exceeded": true,
+    "exception": "OSError",
+    "complete_diagnostics": 0,
+    "state_received_observed": false,
+    "state_write_events": 0,
+    "state_output": "",
+    "cleanup_closed_parent_writer": true
+  },
+  {
+    "campaign": "state-gated",
+    "mode": "concurrent",
+    "deadline_exceeded": false,
+    "exception": "RuntimeError",
+    "complete_diagnostics": 2,
+    "state_received_observed": true,
+    "state_write_events": 0,
+    "state_output": "",
+    "cleanup_closed_parent_writer": false
+  },
+  {
+    "campaign": "state-gated",
+    "mode": "concurrent",
+    "deadline_exceeded": false,
+    "exception": "RuntimeError",
+    "complete_diagnostics": 2,
+    "state_received_observed": true,
+    "state_write_events": 0,
+    "state_output": "",
+    "cleanup_closed_parent_writer": false
+  },
+  {
+    "campaign": "state-gated",
+    "mode": "concurrent",
+    "deadline_exceeded": false,
+    "exception": "RuntimeError",
+    "complete_diagnostics": 2,
+    "state_received_observed": true,
+    "state_write_events": 0,
+    "state_output": "",
+    "cleanup_closed_parent_writer": false
+  },
+  {
+    "campaign": "state-gated",
+    "mode": "interrupted",
+    "deadline_exceeded": true,
+    "exception": "OSError",
+    "complete_diagnostics": 0,
+    "state_received_observed": true,
+    "state_write_events": 0,
+    "state_output": "",
+    "cleanup_closed_parent_writer": true
+  }
+]
