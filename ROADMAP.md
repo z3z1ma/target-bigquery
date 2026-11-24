@@ -944,3 +944,20 @@ queues also requires feeder-loss proof. Do not ship either as a partial fix.
 Storage stream-name pressure and qsize portability remain separate investigations.
 Current open issues: blocked #150 and confirmed #205. No cloud, spending, publishing,
 tag, credential or permission changes.
+
+### In progress — isolated process error channels (#205)
+
+A separate correction branch gives each process worker a single-writer socket
+channel and incrementally receives length-prefixed diagnostics without blocking
+for a partial frame. Parent sender copies close immediately after startup; fork
+children close inherited receivers. Worker exit finalizes available bytes and
+reports incomplete delivery before the existing fail-fast/checkpoint gates.
+Thread delivery, job acknowledgments, retry limits and permissive policy remain
+unchanged. Full diagnostic tuples are preserved; this does not bound diagnostic
+memory, API duration, log/result pipes or the whole shutdown duration.
+
+Offline regressions use actual target construction, Singer input, producer jobs,
+standard workers and fake BigQuery boundaries: concurrent errors, interrupted
+frames, healthy checkpoint/replacement, permissive errors and a surviving sibling.
+Framing/startup/descriptor tests cover additional transport fault boundaries.
+Independent final review and exact-head/main CI remain pending; #205 stays open.
