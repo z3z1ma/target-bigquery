@@ -34,6 +34,8 @@ def run_api_worker():
     worker = mp.current_process()
 
     def insert(**kwargs):
+        if worker.interrupted:
+            assert worker.response_release.wait(6)
         if worker.api_barrier is not None:
             worker.api_barrier.wait(timeout=6)
             assert worker.response_release.wait(6)
@@ -96,6 +98,7 @@ def harness(mode, output, start_method):
         worker = original_factory()
         worker.healthy = mode == "healthy" or (mode == "survivor" and bool(created))
         worker.crash = mode == "survivor" and not created
+        worker.interrupted = mode == "interrupted"
         worker.accepted = accepted
         worker.api_barrier = barrier
         worker.response_release = response_release
@@ -137,6 +140,10 @@ def harness(mode, output, start_method):
             if len(pids) != reported:
                 output.send({"workers": pids})
                 reported = len(pids)
+        yield json.dumps({"type": "STATE", "value": {"position": rows}})
+        output.send({"state_received": bool(target._latest_state)})
+        response_release.set()
+
         if mode == "interrupted":
             receiver = next(iter(target._process_error_channels.values()))
             assert select.select([receiver.endpoint], [], [], 6)[0], (
@@ -147,9 +154,6 @@ def harness(mode, output, start_method):
             os.kill(worker.pid, signal.SIGKILL)
             worker.join(2)
             output.send({"interrupted_exit": worker.exitcode})
-        yield json.dumps({"type": "STATE", "value": {"position": rows}})
-        output.send({"state_received": bool(target._latest_state)})
-        response_release.set()
 
     try:
         with contextlib.redirect_stdout(stdout):
