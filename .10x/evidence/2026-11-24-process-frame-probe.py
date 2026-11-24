@@ -35,6 +35,7 @@ def run_api_worker():
     def insert(**kwargs):
         if worker.api_barrier is not None:
             worker.api_barrier.wait(timeout=6)
+            assert worker.response_release.wait(6)
         return [
             {
                 "index": index,
@@ -54,6 +55,7 @@ def run_api_worker():
 
 
 def harness(mode, output):
+    os.setsid()
     mp.set_start_method("spawn", force=True)
     logging.disable(logging.CRITICAL)
     with open(os.devnull, "w") as devnull:
@@ -78,10 +80,12 @@ def harness(mode, output):
     original_factory = target.worker_factory
     created = []
     barrier = mp.Barrier(2) if mode == "concurrent" else None
+    response_release = mp.Event()
 
     def factory():
         worker = original_factory()
         worker.api_barrier = barrier
+        worker.response_release = response_release
         worker.run = run_api_worker
         created.append(worker)
         return worker
@@ -128,6 +132,8 @@ def harness(mode, output):
             worker.join(2)
             output.send({"interrupted_exit": worker.exitcode})
         yield json.dumps({"type": "STATE", "value": {"position": rows}})
+        output.send({"state_received": bool(target._latest_state)})
+        response_release.set()
 
     try:
         with contextlib.redirect_stdout(stdout):
@@ -162,22 +168,19 @@ def probe(mode):
     received, sent = context.Pipe(False)
     process = context.Process(target=harness, args=(mode, sent))
     process.start()
-    messages, pids = [], []
+    messages = []
     deadline = time.monotonic() + 12
     while time.monotonic() < deadline and process.is_alive():
         if received.poll(0.1):
             message = received.recv()
             messages.append(message)
-            pids = message.get("workers", pids)
     timed_out = process.is_alive()
     if timed_out:
         os.kill(process.pid, signal.SIGUSR1)
         process.join(3)
     if process.is_alive():
-        for pid in pids:
-            with contextlib.suppress(ProcessLookupError):
-                os.kill(pid, signal.SIGKILL)
-        process.kill()
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGKILL)
     process.join(3)
     while received.poll():
         messages.append(received.recv())

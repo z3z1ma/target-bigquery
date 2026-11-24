@@ -918,7 +918,9 @@ Six local concurrent-error trials produced five complete diagnostic pairs and on
 UnicodeDecodeError losing both diagnostics. An independent three-trial repeat
 also reproduced one corruption. Abrupt worker death after error-send readability
 left the parent blocked beyond 12 seconds; test cleanup closing the retained parent
-writer released it with OSError. No STATE output was observed. This is confirmed
+writer released it with OSError. Final probes explicitly received STATE before releasing concurrent API errors;
+all three raised with intact diagnostics and withheld output. The final interrupted
+case also received STATE and reproduced the stall. No STATE output was observed. This is confirmed
 liveness/diagnostic loss, not demonstrated checkpoint advancement or live impact.
 
 Evidence, runnable bounded probe and captured results:

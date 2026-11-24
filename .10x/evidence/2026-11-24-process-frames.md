@@ -40,7 +40,9 @@ production run method. Stdout is observed at the caller boundary.
 Concurrent mode sends 11,500 rows with supported batch_size=500/max_workers=2.
 A 1.1-second producer pause lets the existing worker-creation interval expire;
 the normal backlog predicate starts the second worker. A barrier at the fake API
-response synchronizes two failures, each containing 500 row-error details. The
+response synchronizes two failures, each containing 500 row-error details. The final
+probe also holds those responses until the target has received STATE, recording
+that receipt before releasing the responses. The
 queue, error pipe, serialization and worker scheduling remain real and unmodified.
 
 Interrupted mode sends 500 rows, waits for the error pipe to become readable, then
@@ -48,7 +50,7 @@ SIGKILLs only its owned worker. This models abrupt process death during an error
 send; it is not presented as a routine service error or a measured production rate.
 The outer observer imposes a 12-second observation deadline. Only after that
 expires does cleanup send SIGUSR1 to the harness; its handler closes the parent's
-retained error writer. A fallback kills only recorded probe-created PIDs if cleanup
+retained error writer. A fallback kills only the harness's isolated process group if cleanup
 does not finish. This intervention is test cleanup and causal evidence, not a
 production correction. Expected hard-death cleanup may invalidate a frame.
 
@@ -61,6 +63,9 @@ Captured local results: `2026-11-24-process-frame-results.json`.
 | Six concurrent local trials | Five RuntimeErrors preserved both complete diagnostics; one UnicodeDecodeError preserved neither | None |
 | Interrupted writer, initial campaign | Parent exceeded deadline; outer cleanup killed harness | No stdout write observed |
 | Interrupted writer, cleanup-assisted campaign | Parent exceeded deadline; closing retained writer then released it with OSError | None |
+| Isolated-group cleanup: three concurrent trials | Two preserved both diagnostics; one UnicodeDecodeError preserved neither | None |
+| Final STATE-gated three concurrent trials | All preserved both diagnostics, with STATE receipt observed first | None |
+| Final STATE-gated interrupted writer | Same deadline stall and cleanup-only OSError; STATE receipt observed | None |
 | Independent repeat: three concurrent trials | Two preserved both diagnostics; one UnicodeDecodeError preserved neither | None |
 | Independent interrupted repeat | Same deadline stall, then OSError after cleanup-only close | None |
 
