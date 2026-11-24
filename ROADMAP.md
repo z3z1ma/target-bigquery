@@ -932,7 +932,8 @@ as `9d44801951d0760970a063ec725599bdb553eb86`. Exact-head CI
 passed Python 3.10–3.12 at `58f81799c0f4b8ebeac504330c042df527002015`;
 automated review completed without findings. Exact post-merge main CI
 [45428802226](https://github.com/z3z1ma/target-bigquery/actions/runs/45428802226)
-is queued; verification remains pending. This integrates evidence, not a runtime fix.
+passed Python 3.10–3.12 on the exact merge commit. Evidence integration is verified;
+this is not a runtime fix, and #205 remains open.
 
 P1 next gate: design channel ownership and interrupted-frame handling together.
 Acceptance must preserve healthy complete diagnostics, fail closed without hanging
