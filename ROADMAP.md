@@ -1,6 +1,6 @@
 # Maintained roadmap
 
-Updated: 2026-11-23. Owner: repository maintainer (execution delegated to Codex).
+Updated: 2026-11-24. Owner: repository maintainer (execution delegated to Codex).
 Baseline: `c0acf83` on main. This replaces the July zero-open snapshot as the
 current work queue; the historical `.10x` records remain evidence for that date.
 
@@ -904,3 +904,34 @@ cache reuse, worker counts and stream creation; do not infer pressure per row.
 Interrupted frames, concurrent large writers, URI memory growth and overall join
 deadlines remain separate. #150 stays blocked. No cloud, spend, publishing/tag,
 credential or permission changes. This bounded pass is complete.
+
+### Confirmed — shared process error-frame integrity (#205)
+
+2026-11-24 baseline `08160bf`: zero PRs, only blocked #150. Refreshed official
+BigQuery ingestion, Singer at-least-once and Python pipe guidance. The bounded probe
+now uses actual TargetBigQuery construction, Singer schema/record/STATE parsing,
+EOF handling, producer envelopes and normal worker-pool creation; only BigQuery
+API boundaries are fakes. This distinguishes frame integrity from the earlier
+completed-message backpressure fixes.
+
+Six local concurrent-error trials produced five complete diagnostic pairs and one
+UnicodeDecodeError losing both diagnostics. An independent three-trial repeat
+also reproduced one corruption. Abrupt worker death after error-send readability
+left the parent blocked beyond 12 seconds; test cleanup closing the retained parent
+writer released it with OSError. No STATE output was observed. This is confirmed
+liveness/diagnostic loss, not demonstrated checkpoint advancement or live impact.
+
+Evidence, runnable bounded probe and captured results:
+`.10x/evidence/2026-11-24-process-frames.md`. Independent review confirmed both
+findings and approved an evidence-only scope. Production remains unchanged; #205
+stays open. Exact-head CI and evidence integration pending.
+
+P1 next gate: design channel ownership and interrupted-frame handling together.
+Acceptance must preserve healthy complete diagnostics, fail closed without hanging
+on sender death, retain repeated-checkpoint worker replacement and permissive
+behavior, and exercise surviving siblings plus spawn/supported fork contexts.
+A send-lock-only patch violates the dead-owner invariant; replacing pipes with
+queues also requires feeder-loss proof. Do not ship either as a partial fix.
+Storage stream-name pressure and qsize portability remain separate investigations.
+Current open issues: blocked #150 and confirmed #205. No cloud, spending, publishing,
+tag, credential or permission changes.
