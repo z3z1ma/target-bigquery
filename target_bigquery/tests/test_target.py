@@ -444,7 +444,7 @@ def test_storage_checkpoint_merges_before_state_and_rotates_destination(monkeypa
         assert events == ["commit", "merge", "rotate", "state"]
         assert sink.parent == "projects/p/datasets/d/tables/stage1"
         jobs = []
-        sink.global_queue = SimpleNamespace(qsize=lambda: 0, put=jobs.append)
+        sink.enqueue_job = jobs.append
         sink.template = object()
         sink.proto_rows = object()
         sink.stream_notifier = object()
