@@ -1010,7 +1010,7 @@ passed Python 3.10–3.12 on the exact merge commit. This is evidence integratio
 not a runtime correction; #209 remains open.
 #150 is untouched. No cloud, spend, publishing/tag or permission changes.
 
-### In progress — portable bounded Storage Write admission (#209)
+### Verified — portable bounded Storage Write admission (#209, #211)
 
 A separate runtime correction replaces producer qsize polling with the existing
 Storage Write queue-capacity limit enforced by the queue itself. Admission uses
@@ -1029,7 +1029,18 @@ failures, and pending commits plus worker replacement across a checkpoint.
 Only external BigQuery/IPC boundary failures are faked; real queues, producer jobs,
 worker loops and Singer parsing run. Queue observation records actual put results.
 
-Final suite, review, exact-head CI and post-merge verification remain pending;
-#209 stays open. This does not establish live BigQuery durability or remove the
+Frozen-head offline suite: 701 passed, 15 cloud tests skipped; native macOS
+process/thread Singer-entry suite: 19 passed. Ruff and mypy passed. Independent
+review approved after 17 focused tests and review of the final sentinel/checkpoint
+refinements. Automated review completed without findings at
+`c3b502c97a7f3840cda9138a80c1da4a72c3d2c1`. Exact-head CI
+[45649951636](https://github.com/z3z1ma/target-bigquery/actions/runs/45649951636)
+passed Python 3.10–3.12. Merged via [#211](https://github.com/z3z1ma/target-bigquery/pull/211)
+as `f9451c7e690940cf7ccdaf50c5a6860a83f24148`; exact post-merge main CI
+[45652239428](https://github.com/z3z1ma/target-bigquery/actions/runs/45652239428)
+passed all three Python versions. Runtime correction verified; #209 is resolved.
+The earlier evidence entry records the pre-correction behavior.
+
+This does not establish live BigQuery durability or remove the
 separate many-stream notification pressure risk, diagnostic memory growth, or
 unbounded external API/shutdown durations. Retry and permissive policies are unchanged.
