@@ -995,5 +995,17 @@ feeder errors, checkpoint/EOF, and native macOS plus Linux. Runtime is unchanged
 
 Separately, #208's setup-uv pin passed independent review and exact-head Python
 3.10–3.12 CI 45635220837, and merged as `11430d05c7effe13152dd8992b46f1cf9d133ec4`.
-Post-merge CI 45639490109 and evidence integration verification are pending.
+Exact post-merge CI
+[45639490109](https://github.com/z3z1ma/target-bigquery/actions/runs/45639490109)
+passed Python 3.10–3.12 for #208's merge.
+
+Evidence integrated via [#210](https://github.com/z3z1ma/target-bigquery/pull/210)
+as `aaa65919830a2fd662d791c8a88508c16081b958`. Independent review approved the
+scope and reproduced the native macOS outcomes; automated review completed without
+findings at `b330ffb08520b00bb4ffd60c1f68c0d2880c5f25`. Exact-head CI
+[45639992436](https://github.com/z3z1ma/target-bigquery/actions/runs/45639992436)
+passed Python 3.10–3.12. Exact post-merge main CI
+[45643406000](https://github.com/z3z1ma/target-bigquery/actions/runs/45643406000)
+is queued; main verification remains pending. This is evidence integration only,
+not a runtime correction; #209 remains open.
 #150 is untouched. No cloud, spend, publishing/tag or permission changes.
