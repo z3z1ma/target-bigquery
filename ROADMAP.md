@@ -1006,6 +1006,6 @@ findings at `b330ffb08520b00bb4ffd60c1f68c0d2880c5f25`. Exact-head CI
 [45639992436](https://github.com/z3z1ma/target-bigquery/actions/runs/45639992436)
 passed Python 3.10–3.12. Exact post-merge main CI
 [45643406000](https://github.com/z3z1ma/target-bigquery/actions/runs/45643406000)
-is queued; main verification remains pending. This is evidence integration only,
+passed Python 3.10–3.12 on the exact merge commit. This is evidence integration only,
 not a runtime correction; #209 remains open.
 #150 is untouched. No cloud, spend, publishing/tag or permission changes.
