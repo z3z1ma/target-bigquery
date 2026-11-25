@@ -975,3 +975,25 @@ The earlier evidence-only entry records the pre-correction findings.
 Remaining bounded investigations are separate: Storage Write stream-name pressure
 and qsize portability, other notification channels, and diagnostic memory growth.
 No new experiments were added in this integration pass. #150 remains untouched.
+
+### Confirmed — Storage Write process portability (#209)
+
+2026-11-25 audit: main `a0e66d2`, blocked #150 and Dependabot #208. Refreshed
+primary BigQuery ingestion and Singer replay guidance. A real-input native macOS
+probe confirms that Storage Write process mode fails before its first enqueue:
+Queue.qsize raises NotImplementedError; no STATE is emitted. The thread control
+completes and emits STATE. Independent review reproduced both outcomes.
+Evidence and runnable probe: `.10x/evidence/2026-11-25-storage-queue.md`.
+
+P1 correction gate: portable bounded admission must preserve notification/error
+draining and EOF sentinel delivery together. Skipping qsize removes backpressure;
+using outstanding completions can deadlock below the worker's in-flight window;
+a bounded queue alone can strand shutdown. Require real-entry tests for default
+and pending streams, delayed acknowledgments, full admission with failed workers,
+feeder errors, checkpoint/EOF, and native macOS plus Linux. Runtime is unchanged;
+#209 stays open. Thread mode (the default) remains the workaround.
+
+Separately, #208's setup-uv pin passed independent review and exact-head Python
+3.10–3.12 CI 45635220837, and merged as `11430d05c7effe13152dd8992b46f1cf9d133ec4`.
+Post-merge CI 45639490109 and evidence integration verification are pending.
+#150 is untouched. No cloud, spend, publishing/tag or permission changes.
