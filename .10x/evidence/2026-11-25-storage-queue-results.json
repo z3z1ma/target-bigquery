@@ -1,0 +1,18 @@
+{
+  "platform": "Darwin",
+  "start_method": "spawn",
+  "baseline": "a0e66d29dad965a0668466ff24f153dd153291ad",
+  "results": [
+    {
+      "process_pool": true,
+      "outcome": "NotImplementedError",
+      "trace": "TargetBigQuery.process_lines -> SDK record drain -> BigQueryStorageWriteSink.process_batch -> multiprocessing.Queue.qsize -> NotImplementedError",
+      "state": ""
+    },
+    {
+      "process_pool": false,
+      "outcome": "returned",
+      "state": "{\"position\": 1}\n"
+    }
+  ]
+}
