@@ -6,8 +6,8 @@ from typing import Any
 
 
 class ProcessJobQueue(Queue):
-    def __init__(self) -> None:
-        super().__init__(ctx=mp.get_context())
+    def __init__(self, maxsize: int = 0) -> None:
+        super().__init__(maxsize=maxsize, ctx=mp.get_context())
         self.feeder_error: Exception | None = None
 
     def __setstate__(self, state: Any) -> None:

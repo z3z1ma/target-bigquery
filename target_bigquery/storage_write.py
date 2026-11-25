@@ -19,7 +19,6 @@ from multiprocessing import Process
 from multiprocessing.connection import Connection
 from multiprocessing.dummy import Process as _Thread
 from queue import Empty
-from time import sleep
 from typing import (
     Any,
     NamedTuple,
@@ -460,6 +459,7 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
         key_properties: list[str] | None,
     ) -> None:
         super().__init__(target, stream_name, schema, key_properties)
+        self.enqueue_job = target.enqueue_storage_job
         self.open_streams: set[str] = set()
         self.parent = BigQueryWriteClient.table_path(
             self.table.project,
@@ -502,11 +502,7 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
         )
 
     def process_batch(self, context: dict[str, Any]) -> None:
-        while self.global_queue.qsize() >= self.MAX_JOBS_QUEUED:
-            self.logger.warning(f"Max jobs enqueued reached ({self.MAX_JOBS_QUEUED})")
-            sleep(1)
-
-        self.global_queue.put(
+        self.enqueue_job(
             Job(
                 parent=self.parent,
                 template=self.template,
@@ -515,7 +511,6 @@ class BigQueryStorageWriteSink(BaseBigQuerySink):
                 timeout=self.config.get("timeout", 600),
             )
         )
-        self.increment_jobs_enqueued()
 
     def commit_streams(self) -> None:
         while self.stream_notification.poll():

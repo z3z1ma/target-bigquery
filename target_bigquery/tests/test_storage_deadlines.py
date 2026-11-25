@@ -22,7 +22,7 @@ def make_sink(timeout=7):
     sink.template = types.AppendRowsRequest()
     sink.proto_rows = types.ProtoRows(serialized_rows=[b"row"])
     sink.stream_notifier = None
-    sink.global_queue = SimpleNamespace(qsize=lambda: 0, put=lambda job: jobs.append(job))
+    sink.enqueue_job = lambda job: jobs.append(job)
     jobs = []
     sink.increment_jobs_enqueued = lambda: None
     return sink, jobs

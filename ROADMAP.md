@@ -1009,3 +1009,27 @@ passed Python 3.10–3.12. Exact post-merge main CI
 passed Python 3.10–3.12 on the exact merge commit. This is evidence integration only,
 not a runtime correction; #209 remains open.
 #150 is untouched. No cloud, spend, publishing/tag or permission changes.
+
+### In progress — portable bounded Storage Write admission (#209)
+
+A separate runtime correction replaces producer qsize polling with the existing
+Storage Write queue-capacity limit enforced by the queue itself. Admission uses
+nonblocking puts while servicing notifications, errors and worker health. Slots
+are freed on dequeue, so deferred append acknowledgments do not consume queue
+capacity. Other transports keep their existing queue construction. EOF uses the
+same bounded admission without recursive shutdown or replacement workers, and
+stops inserting sentinels if no consumers remain. Job accounting follows successful
+admission; sentinels are not counted.
+
+The original native macOS Singer-entry probe now succeeds for both process and
+thread mode and emits STATE after completion. New offline entry-point regressions
+exercise a four-slot queue (the existing one-CPU limit), default/pending streams,
+producer saturation, observed Full during sentinel admission, worker/feeder/API
+failures, and pending commits plus worker replacement across a checkpoint.
+Only external BigQuery/IPC boundary failures are faked; real queues, producer jobs,
+worker loops and Singer parsing run. Queue observation records actual put results.
+
+Final suite, review, exact-head CI and post-merge verification remain pending;
+#209 stays open. This does not establish live BigQuery durability or remove the
+separate many-stream notification pressure risk, diagnostic memory growth, or
+unbounded external API/shutdown durations. Retry and permissive policies are unchanged.

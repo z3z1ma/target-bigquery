@@ -20,6 +20,7 @@ import uuid
 from collections import deque
 from collections.abc import Callable, Sequence
 from importlib import metadata
+from queue import Full
 from types import FrameType
 from typing import (
     Any,
@@ -439,7 +440,13 @@ class TargetBigQuery(Target):
             self.queue_cls,
             self.par_typ,
         ) = self.get_parallelization_components()
-        self.queue = self.queue_cls()
+        sink_class = self.get_sink_class()
+        self._storage_queue_bounded = issubclass(sink_class, BigQueryStorageWriteSink)
+        self.queue = (
+            self.queue_cls(maxsize=cast(type[BigQueryStorageWriteSink], sink_class).MAX_JOBS_QUEUED)
+            if self._storage_queue_bounded
+            else self.queue_cls()
+        )
         self.job_notification, self.job_notifier = self.pipe_cls(False)
         self.log_notification, self.log_notifier = self.pipe_cls(False)
         self.error_notification, self.error_notifier = self.pipe_cls(False)
@@ -505,7 +512,7 @@ class TargetBigQuery(Target):
     ) -> tuple[
         type[Any],
         Callable[[bool], tuple[Any, Any]],
-        Callable[[], Any],
+        Callable[..., Any],
         ParType,
     ]:
         """Get the appropriate Process, Pipe, and Queue classes and the assoc ParTyp enum."""
@@ -731,11 +738,38 @@ class TargetBigQuery(Target):
                 raise SystemExit(128 + signum)
         super()._handle_termination(signum, frame)
 
+    def enqueue_storage_job(self, job: Any) -> None:
+        """Admit a Storage Write job while servicing worker progress."""
+        self._put_storage_queue(job)
+        self.increment_jobs_enqueued()
+
+    def _put_storage_queue(self, job: Any, *, shutdown: bool = False) -> bool:
+        while True:
+            try:
+                self.queue.put(job, block=False)
+                return True
+            except Full:
+                self._drain_worker_notifications()
+                if shutdown:
+                    # No replacement workers or recursive shutdown here. A dead
+                    # pool cannot consume more sentinels; exit checks follow.
+                    if not any(cast(Any, worker).is_alive() for worker in self.workers):
+                        return False
+                else:
+                    self._handle_worker_error()
+                    self.resize_worker_pool()
+                    self._handle_worker_error()
+                time.sleep(0.1)
+
     def _shutdown_workers(self) -> None:
         """Send poison pills to live workers, then join and clear the pool."""
         for worker in self.workers:
             if cast(Any, worker).is_alive():
-                self.queue.put(None)
+                if getattr(self, "_storage_queue_bounded", False):
+                    if not self._put_storage_queue(None, shutdown=True):
+                        break
+                else:
+                    self.queue.put(None)
         stopped = []
         while self.workers:
             worker = self.workers.pop()

@@ -39,7 +39,8 @@ def test_producer_connection_reduction_failure_blocks_state(monkeypatch, method,
     sink.global_par_typ = ParType.PROCESS
     sink.increment_jobs_enqueued = lambda: None
     jobs = []
-    sink.global_queue = SimpleNamespace(put=jobs.append, qsize=lambda: 0)
+    sink.global_queue = SimpleNamespace(put=jobs.append)
+    sink.enqueue_job = jobs.append
     if method == "gcs":
         sink.buffer = Compressor()
         sink.bucket_name = "offline"
