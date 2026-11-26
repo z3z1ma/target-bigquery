@@ -1044,3 +1044,24 @@ The earlier evidence entry records the pre-correction behavior.
 This does not establish live BigQuery durability or remove the
 separate many-stream notification pressure risk, diagnostic memory growth, or
 unbounded external API/shutdown durations. Retry and permissive policies are unchanged.
+
+### In review — pending-stream creation deadlines
+
+The 2026-11-26 audit found no open PRs and only blocked #150. Main's latest runtime
+Tests run remains verified at 45652239428; subsequent documentation commits do
+not trigger the Python workflow. Primary BigQuery and Singer guidance was refreshed.
+
+A real Singer-entry offline probe found pending-stream creation bypasses the job
+completion timeout: the installed SDK supplies a 1,200-second RPC/retry deadline.
+Thread and native macOS spawn controls both exceeded a four-second observation
+window, with no STATE. The focused correction passes the job timeout and disables
+nested SDK retries, retaining the target's three setup attempts. Six regressions
+cover exhaustion without append/commit/STATE, transient recovery and default-stream
+bypass through the actual SDK wrappers. Ruff and mypy pass. Independent review
+approved after rerunning all six entry regressions; full-suite, exact-head CI and
+post-merge verification remain integration gates.
+
+Evidence, scope and acceptance: `.10x/evidence/2026-11-26-storage-creation.md`.
+This extends per-RPC timeout coverage, not a whole-process deadline. Many-stream
+notification pressure remains a separate reproduction gate; cached per-sink streams
+do not justify a speculative IPC change. No cloud activity or #150 action.
