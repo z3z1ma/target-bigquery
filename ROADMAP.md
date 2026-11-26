@@ -1045,7 +1045,7 @@ This does not establish live BigQuery durability or remove the
 separate many-stream notification pressure risk, diagnostic memory growth, or
 unbounded external API/shutdown durations. Retry and permissive policies are unchanged.
 
-### In review — pending-stream creation deadlines (#212)
+### Verified — pending-stream creation deadlines (#212)
 
 The 2026-11-26 audit found no open PRs and only blocked #150. Main's latest runtime
 Tests run remains verified at 45652239428; subsequent documentation commits do
@@ -1061,7 +1061,14 @@ bypass through the actual SDK wrappers. Ruff and mypy pass. Independent review
 approved after rerunning all six entry regressions and inspecting the final
 schema-valid integer-timeout refinement. Full offline suite: 707 passed, 15 cloud
 tests skipped before that test-only refinement; the six refined entry tests pass.
-Exact-head CI and post-merge verification remain integration gates.
+Exact-head [CI 45851718437](https://github.com/z3z1ma/target-bigquery/actions/runs/45851718437)
+passed Python 3.10–3.12 at `6a8b46b4a591deff1c71ec73ab9382c9208644ca`;
+automated review completed without findings at that head. Merged via
+[#212](https://github.com/z3z1ma/target-bigquery/pull/212) as
+`b524a11f0867e3711a45a23aba6b1570f9c6aa6b`. Exact post-merge
+[main CI 45852503913](https://github.com/z3z1ma/target-bigquery/actions/runs/45852503913)
+passed Python 3.10–3.12 on that exact merge commit. The correction is verified
+on main. The post-integration inventory is zero open PRs and only blocked #150.
 
 Evidence, scope and acceptance: `.10x/evidence/2026-11-26-storage-creation.md`.
 This extends per-RPC timeout coverage, not a whole-process deadline. Many-stream
