@@ -1047,9 +1047,9 @@ unbounded external API/shutdown durations. Retry and permissive policies are unc
 
 ### Verified — pending-stream creation deadlines (#212)
 
-The 2026-11-26 audit found no open PRs and only blocked #150. Main's latest runtime
-Tests run remains verified at 45652239428; subsequent documentation commits do
-not trigger the Python workflow. Primary BigQuery and Singer guidance was refreshed.
+The opening 2026-11-26 audit found no open PRs and only blocked #150. The then-latest
+runtime Tests run was verified at 45652239428; intervening documentation commits
+did not trigger the Python workflow. Primary BigQuery and Singer guidance was refreshed.
 
 A real Singer-entry offline probe found pending-stream creation bypasses the job
 completion timeout: the installed SDK supplies a 1,200-second RPC/retry deadline.
