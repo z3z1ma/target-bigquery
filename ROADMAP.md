@@ -1045,7 +1045,7 @@ This does not establish live BigQuery durability or remove the
 separate many-stream notification pressure risk, diagnostic memory growth, or
 unbounded external API/shutdown durations. Retry and permissive policies are unchanged.
 
-### In review — pending-stream creation deadlines
+### In review — pending-stream creation deadlines (#212)
 
 The 2026-11-26 audit found no open PRs and only blocked #150. Main's latest runtime
 Tests run remains verified at 45652239428; subsequent documentation commits do
@@ -1058,8 +1058,10 @@ window, with no STATE. The focused correction passes the job timeout and disable
 nested SDK retries, retaining the target's three setup attempts. Six regressions
 cover exhaustion without append/commit/STATE, transient recovery and default-stream
 bypass through the actual SDK wrappers. Ruff and mypy pass. Independent review
-approved after rerunning all six entry regressions; full-suite, exact-head CI and
-post-merge verification remain integration gates.
+approved after rerunning all six entry regressions and inspecting the final
+schema-valid integer-timeout refinement. Full offline suite: 707 passed, 15 cloud
+tests skipped before that test-only refinement; the six refined entry tests pass.
+Exact-head CI and post-merge verification remain integration gates.
 
 Evidence, scope and acceptance: `.10x/evidence/2026-11-26-storage-creation.md`.
 This extends per-RPC timeout coverage, not a whole-process deadline. Many-stream

@@ -18,7 +18,7 @@ def test_creation_deadline_exhausts_setup_attempts_without_state(process_pool):
     events = result["events"]
     creations = [event for event in events if "create_timeout" in event]
     assert [event["attempt"] for event in creations] == [1, 2, 3], result
-    assert all(event["create_timeout"] == 0.05 for event in creations), result
+    assert all(event["create_timeout"] == 1 for event in creations), result
     assert not any(set(event) & {"append", "finalize", "commit"} for event in events), result
     assert events[-1] == {"outcome": "RuntimeError", "cause": "DeadlineExceeded", "state": ""}, (
         result
@@ -34,7 +34,7 @@ def test_creation_retry_recovers_and_default_stream_bypasses_creation(process_po
     events = result["events"]
     creations = [event for event in events if "create_timeout" in event]
     assert [event["attempt"] for event in creations] == ([1, 2] if pending else []), result
-    assert all(event["create_timeout"] == 0.05 for event in creations), result
+    assert all(event["create_timeout"] == 1 for event in creations), result
     assert [event["append"] for event in events if "append" in event] == [1], result
     assert sum("finalize" in event for event in events) == int(pending), result
     assert sum("commit" in event for event in events) == int(pending), result

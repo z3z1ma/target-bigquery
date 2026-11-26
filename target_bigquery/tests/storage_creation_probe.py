@@ -29,7 +29,7 @@ def install_boundaries(events, mode):
         attempts += 1
         events.send({"create_timeout": kwargs.get("timeout"), "attempt": attempts})
         if mode == "exhaust" or (mode == "transient" and attempts == 1):
-            threading.Event().wait(min(kwargs.get("timeout", 1), 0.5))
+            threading.Event().wait(min(kwargs.get("timeout", 1), 1))
             raise exceptions.DeadlineExceeded("offline creation deadline")
         return types.WriteStream(name=request.parent + "/streams/offline-pending")
 
@@ -89,7 +89,7 @@ def harness(events, process_pool, pending, mode):
             "dataset": "offline",
             "method": "storage_write_api",
             "batch_size": 1,
-            "timeout": 0.05,
+            "timeout": 1,
             "options": {
                 "process_pool": process_pool,
                 "max_workers": 1,
@@ -140,7 +140,7 @@ def harness(events, process_pool, pending, mode):
             target.queue.close()
 
 
-def probe(process_pool, pending=True, mode="exhaust", deadline=8):
+def probe(process_pool, pending=True, mode="exhaust", deadline=12):
     context = mp.get_context("spawn")
     received, sent = context.Pipe(False)
     process = context.Process(target=harness, args=(sent, process_pool, pending, mode))
