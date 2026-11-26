@@ -77,7 +77,9 @@ def get_application_stream(client: BigQueryWriteClient, job: "Job") -> StreamCom
     """Get an application created stream for the parent. This stream must be finalized and committed."""
     write_stream = types.WriteStream()
     cast(Any, write_stream).type_ = types.WriteStream.Type.PENDING
-    write_stream = client.create_write_stream(parent=job.parent, write_stream=write_stream)
+    write_stream = client.create_write_stream(
+        parent=job.parent, write_stream=write_stream, timeout=job.timeout, retry=None
+    )
     job.template.write_stream = write_stream.name
     append_rows_stream = writer.AppendRowsStream(client, job.template)
     rv = (write_stream.name, append_rows_stream)
