@@ -1075,7 +1075,7 @@ This extends per-RPC timeout coverage, not a whole-process deadline. Many-stream
 notification pressure remains a separate reproduction gate; cached per-sink streams
 do not justify a speculative IPC change. No cloud activity or #150 action.
 
-### Documentation review — JSON and schema-change support
+### Verified documentation — JSON and schema-change support (#213)
 
 The 2026-11-27 public capabilities audit distinguishes JSON document changes from
 physical schema evolution, and append/upsert column retention from overwrite's
@@ -1088,4 +1088,8 @@ SCHEMA/new-field protobuf rejection with the original key retained, no worker
 started and no STATE emitted. Primary BigQuery/SDK documentation and independent
 review support the corrections. Evidence: `.10x/evidence/2026-11-27-schema-support.md`.
 This is documentation only; runtime and live-validation status are unchanged.
-Remote publication remains pending the normal documentation review gate.
+Merged via [#213](https://github.com/z3z1ma/target-bigquery/pull/213) as
+`244fd40341e12c001bbf84203e58f8e2ceae53f9`. Independent and exact-head automated
+review passed at `389efd4d5d8ebf85ab4a599c2229d3898b148d12`; remote README and
+capabilities content were verified on main. Markdown-only changes do not trigger
+the Python matrix; the unchanged runtime remains verified by main CI 45852503913.
