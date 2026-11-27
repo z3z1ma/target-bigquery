@@ -64,11 +64,17 @@ Denormalized=True means we unpack the data into a schema which is derived from t
 
 #### Resolver Versions
 
-There are 2 resolver versions. The config option `schema_resolver_version` lets you select which version you want to use. This versioning exists because we want to support evolving how we resolve schemas whilst not creating breaking changes for long-time users dependent on how a schema is resolved. The default is `1` which behaves very similarly to existing flavors of `target-bigquery`. It works well enough but has plenty of edge cases where it simply cannot resolve valid jsonschemas to a bq schema. The new version `2` is much more robust and will resolve most, if not all schemas due to it falling back to `JSON` when in doubt. You must opt-in to this version by setting `schema_resolver_version: 2` in your config.
+There are two schema resolvers. `schema_resolver_version: 1` is the default;
+version `2` falls back to BigQuery JSON for more unsupported schema shapes.
+Neither resolver promises to accept every JSON Schema or migrate existing column
+types. Denormalized mid-run schema changes are unsupported: the first sink keeps
+its schema and key properties even if the tap sends another SCHEMA message.
+See the [schema-change support matrix](docs/capabilities.md#schema-changes-json-documents-versus-physical-columns)
+for JSON document changes, top-level additions and nested migration limits.
 
 ### Overwrite vs Append
 
-Sometimes you want to overwrite a table on every load. This can be achieved by either setting `overwrite: true` which will full refresh ALL tables **or** setting `overwrite: [table1, table2, table_*_other, !table_v1_other]` which will only overwrite the specified tables and supports pattern matching. String booleans and comma-separated string patterns are also accepted for env-based configuration. This is useful if you have a table which is a lookup table and you want to overwrite it on every load. You can also set `overwrite: false` which will append to the table. This is the default behavior.
+Sometimes you want to overwrite a table on every load. This can be achieved by either setting `overwrite: true` which will full refresh ALL tables **or** setting `overwrite: [table1, table2, table_*_other, !table_v1_other]` which will only overwrite the specified tables and supports pattern matching. String booleans and comma-separated string patterns are also accepted for env-based configuration. This is useful if you have a table which is a lookup table and you want to overwrite it on every load. With `overwrite: false`, the target appends unless denormalized upsert is selected with key properties. Append is the default behavior.
 
 Overwrite preserves the configured partitioning and clustering using `CREATE OR REPLACE TABLE`.
 An existing destination must match **all** of these settings: time partition type,
@@ -113,9 +119,11 @@ If you want to merge data into a table, you can set `upsert: true` which will us
 The gap between the methods is closed due in part to the target's ability to  automatically generating a `VIEW` which will unpack (or rather provide typing as a more accurate take) a JSON based ingestion source for you. Unless operating at tens of millions of rows with JSON objects containing multiple hundreds of keys, its quite performant. Particularly if accessing a small subset of keys. It does however fall off (quite hard) given enough scale as I mentioned (I've pushed it to the limits). Denormalized is recommended for high volume where the schema is fairly consistent. Fixed is recommended for lower volume, inconsistent schemas or for taps which are inherently schemaless in which case its the ideal (only...) logical pattern. Fixed schema can also be used for taps which routinely break down on BQ due to json schemas being inexpressible in a static way (ie patternProperties, additionalProperties...)
 
 
-**Old Header (still true, here for posterity)** 🧪
-
-This is the first truly unstructured sink for BigQuery leveraging the recent GA feature in BigQuery for JSON support. This allows this target to load from essentially any tap regardless of the quality or explicitness of its jsonschema. Observations in existing taps note things such as `patternProperties` used in jsonschema objects which break down on all existing BigQuery taps due to the previous need for strong typing. Also taps such as MongoDB which inherently deal with unstructured data are seamlessly enabled by this target without klutzy collection scraping of a sample of records which we _hope_ are repesentative of all documents.
+Fixed JSON ingestion reduces dependence on a stable physical schema; it does not
+guarantee that every tap, record or JSON Schema will load successfully. Record/key
+validation, JSON encoding and BigQuery server constraints still apply. Generated
+views are typed projections and have their own schema and SQL limitations. See the
+[capabilities guide](docs/capabilities.md) for tested behavior and validation gaps.
 
 
 Built with the [Meltano Target SDK](https://sdk.meltano.com).

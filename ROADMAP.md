@@ -1074,3 +1074,18 @@ Evidence, scope and acceptance: `.10x/evidence/2026-11-26-storage-creation.md`.
 This extends per-RPC timeout coverage, not a whole-process deadline. Many-stream
 notification pressure remains a separate reproduction gate; cached per-sink streams
 do not justify a speculative IPC change. No cloud activity or #150 action.
+
+### Documentation review — JSON and schema-change support
+
+The 2026-11-27 public capabilities audit distinguishes JSON document changes from
+physical schema evolution, and append/upsert column retention from overwrite's
+staging-based replacement. README compatibility promises are narrowed to tested
+behavior. The matrix now states that the first stream sink keeps its schema/key
+properties throughout a run, unlike the SDK default schema-change lifecycle.
+
+294 existing offline tests passed. A real Singer-entry probe reproduced a later
+SCHEMA/new-field protobuf rejection with the original key retained, no worker
+started and no STATE emitted. Primary BigQuery/SDK documentation and independent
+review support the corrections. Evidence: `.10x/evidence/2026-11-27-schema-support.md`.
+This is documentation only; runtime and live-validation status are unchanged.
+Remote publication remains pending the normal documentation review gate.

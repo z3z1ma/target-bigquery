@@ -1,7 +1,8 @@
 # Ingestion capabilities and validation boundaries
 
-This guide describes current main. GitHub release0.8.0 includes the layout,
-nested-name and view-alias fixes; #167 query recovery is subsequent work on main.
+This guide describes current main, including changes after GitHub release 0.8.0.
+The JSON/schema support matrix was checked against code, offline tests and primary
+documentation on 2026-11-27.
 Most evidence is offline. The focused two-pass overwrite gate passed for
 batch_job and storage_write_api; see [live evidence](live-overwrite-validation.md).
 This is not full transport/schema cloud certification.
@@ -24,10 +25,14 @@ These are layered offline checks, not an end-to-end cloud certification matrix.
 | Strategy (all four transports) | Fixed schema | Denormalized | Checkpoint / selection contract |
 | --- | --- | --- | --- |
 | Append | Supported | Supported | Default when no selected overwrite/upsert applies. Successful drain is required before STATE. Replays can duplicate rows. |
-| Upsert | Not selected | Selected only with tap `key_properties` | Takes precedence over overwrite. Staging must merge before STATE; rotated staging is used by subsequent writes. Without keys, upsert is not selected and append or selected overwrite applies. |
+| Upsert | Not selected | Selected only with tap `key_properties`; key types must support the generated SQL equality | Takes precedence over overwrite. Staging must merge before STATE; rotated staging is used by subsequent writes. Without keys, upsert is not selected and append or selected overwrite applies. |
 | Overwrite | Supported; layout preflight | Supported; layout preflight | Configured layout is retained; incompatible existing layouts require migration. Staging publishes at EOF. Any pending overwrite defers global STATE, including mixed streams. Multiple table replacements are not one atomic transaction. |
 
 An upsert flag on a fixed-schema stream does not turn raw JSON into a merge key.
+Denormalized JSON payload columns can accompany typed keys, but a JSON column
+is not itself a supported MERGE key: BigQuery does not define JSON equality.
+The target does not extract a scalar key from that column automatically. See
+[BigQuery JSON limitations](https://docs.cloud.google.com/bigquery/docs/json-data).
 Selection strings/patterns are tested in `test_core_pure.py`; checkpoint ordering
 and overwrite failure/termination behavior are tested in `test_target.py` and
 `test_overwrite_state.py`. Check the tap's exit status: closed stdin looks like EOF
@@ -55,6 +60,50 @@ and is not proof that an upstream full refresh succeeded.
   tables fail before mutations. See README for explicit migration guidance.
 - BigQuery JSON server constraints remain authoritative; see
   [JSON ingestion](https://docs.cloud.google.com/bigquery/docs/json-data).
+
+## Schema changes: JSON documents versus physical columns
+
+A changed JSON document is different from a changed BigQuery table schema.
+Fixed ingestion keeps source fields inside `data`; adding document keys does not
+add physical columns. Denormalized JSON fields have the same distinction for their
+contents, while declared RECORD/STRUCT children are physical schema fields.
+
+| Change | Append | Denormalized upsert | Overwrite |
+| --- | --- | --- | --- |
+| New keys inside a JSON document | No physical schema update; fixed ingestion preserves raw keys, denormalized JSON applies configured key transforms and collision checks | Same payload rules; use separate typed keys for MERGE | Same payload rules; publication still waits for EOF |
+| New top-level denormalized column at sink initialization, such as a new run | Missing columns are added to the existing destination | Destination additions precede staging/MERGE | Destination preflight/update precedes staging; the final replacement uses the staging schema |
+| Child added, removed, renamed, reordered or changed in an existing RECORD | Rejected by nested compatibility preflight | Same check before staging/MERGE | Same check before staging; overwrite does not bypass it |
+| Historical top-level column omitted from the incoming denormalized schema | Schema update retains the destination column | MERGE lists only columns shared with staging; omitted destination columns are not updated | Replacement selects the staging columns; do not expect destination-only columns to survive |
+| Existing scalar type or mode changes | No automatic conversion or relaxation | No automatic conversion or relaxation | Not a general migration facility; preflight still applies, and replacement takes its schema from staging |
+
+Top-level additions are the target's schema-update behavior, not a promise that
+all API requests or historical data are compatible. Existing scalar columns are
+not rewritten by `update_schema`; not every incompatibility is caught locally.
+BigQuery supports some operator-managed [schema changes](https://docs.cloud.google.com/bigquery/docs/managing-table-schemas)
+that this target does not automate. For nested migration, follow the
+[README migration procedure](../README.md#nested-schema-migration).
+
+### SCHEMA messages within one run
+
+The first sink for a stream retains its schema and key properties for that run.
+Later Singer SCHEMA messages do **not** recreate this target's sink or evolve its
+physical schema. This is an explicit override of the
+[SDK's sink lifecycle](https://sdk.meltano.com/en/latest/classes/singer_sdk.Sink.html#singer_sdk.Sink.setup),
+which normally creates a new sink when a schema change is detected. Restart with
+an appropriate initial schema after planning any destination migration.
+
+Fixed JSON ingestion can accommodate changing document shapes within the JSON
+column, but does not adopt changed key properties or regenerate a view from a later
+SCHEMA message. Denormalized mid-run changes are unsupported: new record fields
+can fail protobuf serialization, while batch/GCS loads configured to ignore unknown
+values can discard fields outside the load schema. Receiving a SCHEMA message is
+not confirmation that its changes have been applied.
+
+Evidence: [sink reuse](../target_bigquery/tests/test_target.py),
+[nested preflight and real Singer-input rejection](../target_bigquery/tests/test_nested_schema.py),
+[JSON protobuf encoding](../target_bigquery/tests/test_json_transport.py), and
+[schema updates, explicit MERGE columns and overwrite DDL](../target_bigquery/tests/test_core_pure.py).
+These tests substitute external APIs; they do not validate live schema migration.
 
 ## Views and upgrades
 
