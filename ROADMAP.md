@@ -1093,3 +1093,20 @@ Merged via [#213](https://github.com/z3z1ma/target-bigquery/pull/213) as
 review passed at `389efd4d5d8ebf85ab4a599c2229d3898b148d12`; remote README and
 capabilities content were verified on main. Markdown-only changes do not trigger
 the Python matrix; the unchanged runtime remains verified by main CI 45852503913.
+
+### In review — direct CLI stream-selection environment config
+
+The 2026-11-28 onboarding audit verified typed JSON and ordinary direct ENV
+profiles through the actual CLI with empty input. A second profile reproduced
+CSV patterns silently becoming False for upsert, overwrite and dedupe_before_upsert
+because the SDK casts their union schema as boolean. A narrow target override
+restores only pattern text after SDK parsing; existing boolean decisions, typed
+files, defaults, nested objects and ENV precedence are retained.
+
+CLI regressions and independent review cover the configuration boundary without
+cloud authentication or ingestion. Full offline and exact-head/main CI remain
+verification gates. README now separates Meltano-generated JSON from direct SDK
+ENV, shows nested object variables and an authentication-free startup check,
+and explains whole-object overrides. Evidence and primary citations:
+`.10x/evidence/2026-11-28-cli-configuration.md`.
+No blocked investigation or release action is included.

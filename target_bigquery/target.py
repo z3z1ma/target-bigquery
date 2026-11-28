@@ -15,6 +15,7 @@ from __future__ import annotations
 import copy
 import multiprocessing as mp
 import multiprocessing.dummy as mp_dummy
+import os
 import time
 import uuid
 from collections import deque
@@ -37,6 +38,8 @@ from target_bigquery.batch_job import (
     BigQueryBatchJobSink,
 )
 from target_bigquery.core import (
+    FALSE_STRINGS,
+    TRUE_STRINGS,
     BaseBigQuerySink,
     BaseWorker,
     BigQueryCredentials,
@@ -490,6 +493,20 @@ class TargetBigQuery(Target):
         self.worker_pings: dict[str, float] = {}
         self._jobs_enqueued = 0
         self._last_worker_creation = 0.0
+
+    @classproperty
+    def _env_var_config(cls) -> dict[str, Any]:  # noqa: N805
+        config = super()._env_var_config
+        # The SDK casts these boolean/string/array unions to bool, losing patterns.
+        # Keep their text for the existing stream-selection parser instead.
+        for setting in ("upsert", "overwrite", "dedupe_before_upsert"):
+            name = f"{cls._env_var_prefix}{setting.upper()}"
+            if name in os.environ:
+                raw = os.environ[name]
+                # Preserve the SDK's existing boolean decisions, including aliases.
+                if raw.strip().lower() not in TRUE_STRINGS | FALSE_STRINGS:
+                    config[setting] = raw
+        return config
 
     @classproperty
     def plugin_version(self) -> str:
