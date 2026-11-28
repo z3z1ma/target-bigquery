@@ -41,3 +41,20 @@ malformed nested JSON failing before initialization.
 No Meltano installation or Hub metadata was changed. The typed JSON fixture models
 Meltano's documented output; a full Meltano-managed invocation was not run.
 Cloud ingestion, credentials and permissions were neither used nor tested.
+
+## Review and verification
+
+All 34 focused CLI cases passed locally and in an independent rerun. Ruff and
+mypy passed. Exact-head Tests run 46156522761 passed the full offline matrix on
+Python 3.10–3.12 at `43d0bb2780cf63062f5a9273ebf4b6faa14303e2`; automated
+review completed without findings at that head. PR #214 merged as
+`6c92bead5a8ad38bde221e59fde558c7326fe7b5`.
+
+The local macOS full run was interrupted after existing process-harness failures.
+The first failure, `test_creation_retry_recovers_and_default_stream_bypasses_creation[True-False]`,
+raised ValueError from Process.close because the child was still running. The
+same unchanged test failed on baseline main `a82b9ba` before the configuration
+fix. No local full-suite pass is claimed; no transport/harness remedy was included.
+Exact post-merge [main CI 46157220425](https://github.com/z3z1ma/target-bigquery/actions/runs/46157220425)
+passed the full offline matrix on Python 3.10–3.12 for merge
+`6c92bead5a8ad38bde221e59fde558c7326fe7b5`.
