@@ -195,9 +195,50 @@ A full list of supported settings and capabilities is available by running: `tar
 
 ### Configure using environment variables ✏️
 
-This Singer target will automatically import any environment variables within the working directory's
-`.env` if the `--config=ENV` is provided, such that config values will be considered if a matching
-environment variable is set either in the terminal context or in the `.env` file.
+When Meltano invokes the target, it generates a JSON config file and casts settings
+according to its plugin metadata. Use `meltano config list target-bigquery` to find
+the setting/environment names for your installed plugin definition, and
+`meltano config print target-bigquery` to inspect the resulting JSON locally.
+The printed config can contain secrets; do not paste it into logs or issues.
+See [Meltano configuration](https://docs.meltano.com/guide/configuration/).
+
+When invoking `target-bigquery` directly, add `--config ENV` to enable the SDK's
+`TARGET_BIGQUERY_` variables and dotenv loading. Nested settings are JSON objects
+in a single variable, not separate flattened environment names:
+
+```sh
+export TARGET_BIGQUERY_PROJECT=my-bq-project
+export TARGET_BIGQUERY_DATASET=my_dataset
+export TARGET_BIGQUERY_DENORMALIZED=false
+export TARGET_BIGQUERY_BATCH_SIZE=500
+export TARGET_BIGQUERY_OPTIONS='{"process_pool":false,"max_workers":2}'
+export TARGET_BIGQUERY_COLUMN_NAME_TRANSFORMS='{"snake_case":true}'
+target-bigquery --config ENV < /dev/null
+```
+
+This empty-input command checks startup/config parsing and EOF handling without
+creating sinks or validating cloud access. It is not an ingestion or authentication
+test. Normal ingestion still needs the authentication described below.
+
+The direct SDK parser casts scalar booleans/integers and parses object settings
+as JSON. Keep JSON booleans unquoted inside objects (`false`, not `"false"`).
+For example, `TARGET_BIGQUERY_OPTIONS_PROCESS_POOL=false` is not a direct SDK
+setting; use `TARGET_BIGQUERY_OPTIONS` as shown. Meltano's nested-setting variable
+names depend on its metadata, so do not interchange the two configuration paths.
+
+The stream selectors `upsert`, `overwrite`, and `dedupe_before_upsert` also accept
+boolean strings, comma-separated patterns, or JSON pattern arrays. For example,
+`TARGET_BIGQUERY_UPSERT='orders*,!orders_history'` includes `orders_current` but
+excludes `orders_history`; later matching patterns take precedence. Upsert still
+requires denormalized mode and tap key properties.
+
+Multiple `--config` files are applied in order. With `--config ENV`, environment
+values override file values regardless of argument order. An object override
+replaces the whole top-level object: overriding `options` with
+`{"process_pool":false}` does not retain `max_workers` from a file. Include every
+nested option you intend to override. Schema defaults are then applied to omitted
+settings. See the
+[SDK CLI configuration rules](https://sdk.meltano.com/en/latest/implementation/cli.html#config).
 
 ### Source Authentication and Authorization 👮🏽‍♂️
 
